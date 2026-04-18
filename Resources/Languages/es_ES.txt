@@ -1,0 +1,134 @@
+# Encore Karaoke - Español (España)
+# Formato: clave=valor
+# Usar {0}, {1}, etc. para sustitución de parámetros
+# Usar .zero, .one, .other para pluralización
+
+# Aplicación
+app.name=Encore Karaoke
+app.version=Versión 2.0
+app.subtitle=Sistema Profesional de Karaoke
+
+# Navegación
+nav.home=Inicio
+nav.queue=Cola
+nav.songs=Canciones
+nav.library=Biblioteca
+nav.settings=Configuración
+nav.help=Ayuda
+nav.about=Acerca de
+
+# Gestión de Cola
+queue.title=Cola de Cantantes
+queue.add_singer=Añadir Cantante
+queue.remove_singer=Eliminar Cantante
+queue.next_singer=Siguiente Cantante
+queue.clear_queue=Limpiar Cola
+queue.empty=La cola está vacía
+queue.singer_count.zero=Sin cantantes
+queue.singer_count.one=1 cantante
+queue.singer_count.other={0} cantantes
+queue.song_count.zero=Sin canciones
+queue.song_count.one=1 canción
+queue.song_count.other={0} canciones
+queue.estimated_time=Tiempo estimado de espera: {0} minutos
+queue.now_playing=Reproduciendo Ahora
+queue.up_next=El Siguiente
+queue.rotation_order=Orden de Rotación: {0}
+
+# Controles de Audio
+audio.play=Reproducir
+audio.pause=Pausar
+audio.stop=Detener
+audio.volume=Volumen
+audio.pitch=Tono
+audio.key=Cambio de Clave
+audio.tempo=Tempo
+audio.loading=Cargando...
+audio.ready=Listo
+audio.playing=Reproduciendo
+audio.paused=Pausado
+audio.stopped=Detenido
+audio.error=Error de Audio
+
+# Información de Canción
+song.title=Título
+song.artist=Artista
+song.duration=Duración
+song.version=Versión
+song.key=Clave
+song.tempo=BPM
+song.genre=Género
+song.year=Año
+song.language=Idioma
+
+# Gestión de Cantantes
+singer.name=Nombre del Cantante
+singer.add=Añadir Cantante
+singer.edit=Editar Cantante
+singer.remove=Eliminar Cantante
+singer.strikes=Faltas: {0}/{1}
+singer.songs_performed=Canciones interpretadas: {0}
+singer.queue_summary={0} canciones, {1} minutos
+singer.currently_up=Turno Actual
+singer.next_up=Próximo Turno
+
+# Mensajes y Notificaciones
+msg.singer_added=Cantante "{0}" añadido a la cola
+msg.singer_removed=Cantante "{0}" eliminado de la cola
+msg.song_added=Canción "{0}" añadida para {1}
+msg.song_removed=Canción eliminada de la cola
+msg.song_loading=Cargando canción: {0}
+msg.connection_lost=Conexión con el local perdida. Reconectando...
+msg.connection_restored=Conexión restaurada
+msg.save_successful=Guardado exitosamente
+msg.save_failed=Error al guardar
+msg.loading=Cargando...
+msg.please_wait=Por favor espere...
+
+# Errores
+error.general=Ha ocurrido un error
+error.network=Error de red
+error.file_not_found=Archivo no encontrado
+error.invalid_format=Formato de archivo inválido
+error.audio_device=Error del dispositivo de audio
+error.firebase_connection=Error de conexión Firebase
+error.permission_denied=Permiso denegado
+
+# Botones y Acciones
+btn.ok=Aceptar
+btn.cancel=Cancelar
+btn.save=Guardar
+btn.delete=Eliminar
+btn.edit=Editar
+btn.add=Añadir
+btn.remove=Quitar
+btn.close=Cerrar
+btn.apply=Aplicar
+btn.reset=Restablecer
+btn.refresh=Actualizar
+
+# Configuración
+settings.general=General
+settings.audio=Audio
+settings.display=Pantalla
+settings.language=Idioma
+settings.venue=Local
+settings.advanced=Avanzado
+settings.about=Acerca de
+
+# Tiempo y Fecha
+time.hours=horas
+time.minutes=minutos
+time.seconds=segundos
+time.am=AM
+time.pm=PM
+date.today=Hoy
+date.yesterday=Ayer
+date.tomorrow=Mañana
+
+# Mensajes de Estado
+status.ready=Listo
+status.connecting=Conectando...
+status.connected=Conectado
+status.offline=Desconectado
+status.error=Error

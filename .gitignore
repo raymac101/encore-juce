@@ -1,0 +1,39 @@
+# Build artifacts
+build/
+Builds/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.pbxproj
+*.xcworkspace/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# JUCE
+JuceLibraryCode/
+.jucer
+
+# Generated
+*.o
+*.so
+*.a
+*.dylib
+*.exe
+*.dll
+*.lib
+*.pdb
+
+# Assets (only track source, not build outputs)
+src/assets/images/
+src/assets/icon/

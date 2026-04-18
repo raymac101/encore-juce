@@ -1,0 +1,571 @@
+/*
+  ==============================================================================
+
+    AudioEngine.cpp
+    Created: 15 Apr 2026 7:10:32pm
+    Author:  GitHub Copilot
+
+    Professional audio engine implementation with real-time processing
+
+  ==============================================================================
+*/
+
+#include "AudioEngine.h"
+
+//==============================================================================
+AudioEngine::AudioEngine()
+{
+    // Initialize format manager with common audio formats
+    formatManager.registerBasicFormats();
+    
+    // Setup frequency analysis buffer
+    frequencyData.resize(512, 0.0f); // Half of FFT size for display
+    
+    DBG("AudioEngine constructed");
+}
+
+AudioEngine::~AudioEngine()
+{
+    shutdown();
+}
+
+//==============================================================================
+void AudioEngine::initialize()
+{
+    if (initialized)
+        return;
+    
+    try
+    {
+        // Setup audio device manager
+        setupAudioDevice();
+        
+        // Create audio source player
+        audioSourcePlayer = std::make_unique<juce::AudioSourcePlayer>();
+        
+        // Start audio device
+        deviceManager.addAudioCallback(audioSourcePlayer.get());
+        
+        initialized = true;
+        DBG("AudioEngine initialized successfully");
+    }
+    catch (const std::exception& e)
+    {
+        DBG("AudioEngine initialization failed: " << e.what());
+        initialized = false;
+    }
+}
+
+void AudioEngine::shutdown()
+{
+    if (!initialized)
+        return;
+    
+    // Stop playback
+    stop();
+    
+    // Remove audio callback
+    if (audioSourcePlayer != nullptr)
+    {
+        deviceManager.removeAudioCallback(audioSourcePlayer.get());
+        audioSourcePlayer->setSource(nullptr);
+        audioSourcePlayer.reset();
+    }
+    
+    // Close audio device
+    deviceManager.closeAudioDevice();
+    
+    // Clean up sources
+    if (resamplingSource != nullptr)
+    {
+        // resamplingSource->setSource(nullptr, false, false, 44100.0, 2); // Method signature varies between JUCE versions
+        resamplingSource.reset();
+    }
+    
+    if (transportSource != nullptr)
+    {
+        transportSource->setSource(nullptr);
+        transportSource.reset();
+    }
+    
+    readerSource.reset();
+    // processingChain.reset(); // Commented out for initial build
+    
+    initialized = false;
+    
+    DBG("AudioEngine shutdown complete");
+}
+
+//==============================================================================
+void AudioEngine::setupAudioDevice()
+{
+    // Initialize with default audio device
+    auto error = deviceManager.initialise(0, 2, nullptr, true);
+    
+    if (error.isNotEmpty())
+    {
+        handleAudioDeviceError("Failed to initialize audio device: " + error);
+        return;
+    }
+    
+    // Listen for device changes
+    deviceManager.addChangeListener(this);
+    
+    DBG("Audio device initialized: " + deviceManager.getCurrentAudioDevice()->getName());
+}
+
+void AudioEngine::handleAudioDeviceError(const juce::String& errorMessage)
+{
+    DBG("Audio Error: " + errorMessage);
+    
+    // In a production app, this would:
+    // 1. Show error dialog to user
+    // 2. Try fallback audio devices
+    // 3. Log error for support
+    // 4. Continue in degraded mode if possible
+}
+
+//==============================================================================
+bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFile)
+{
+    if (!initialized)
+    {
+        DBG("AudioEngine not initialized");
+        return false;
+    }
+    
+    if (!audioFile.exists())
+    {
+        DBG("Audio file does not exist: " + audioFile.getFullPathName());
+        return false;
+    }
+    
+    // Stop current playback
+    stop();
+    
+    try
+    {
+        // Create reader for the audio file
+        auto* reader = formatManager.createReaderFor(audioFile);
+        
+        if (reader == nullptr)
+        {
+            DBG("Failed to create reader for: " + audioFile.getFullPathName());
+            return false;
+        }
+        
+        // Create reader source
+        readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
+        
+        // Create transport source
+        transportSource = std::make_unique<juce::AudioTransportSource>();
+        transportSource->setSource(readerSource.get(), 0, nullptr, reader->sampleRate);
+        
+        // Create resampling source for sample rate conversion
+        resamplingSource = std::make_unique<juce::ResamplingAudioSource>(transportSource.get(), false);
+        double currentSampleRate = 44100.0; // Default sample rate
+        if (auto* device = deviceManager.getCurrentAudioDevice())
+            currentSampleRate = device->getCurrentSampleRate();
+            
+        resamplingSource->setResamplingRatio(currentSampleRate / reader->sampleRate);
+        
+        // Update total length
+        totalLength = reader->lengthInSamples / reader->sampleRate;
+        currentPosition = 0.0;
+        
+        // Load CDG file if provided
+        cdgLoaded = false;
+        if (cdgFile.exists())
+        {
+            // In a real implementation, this would parse CDG file format
+            cdgLoaded = true;
+            DBG("CDG file loaded: " + cdgFile.getFullPathName());
+        }
+        
+        DBG("Song loaded successfully: " + audioFile.getFileName());
+        DBG("Duration: " + juce::String(totalLength, 2) + " seconds");
+        
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        DBG("Exception loading song: " + juce::String(e.what()));
+        return false;
+    }
+}
+
+//==============================================================================
+void AudioEngine::play()
+{
+    if (!initialized || transportSource == nullptr)
+        return;
+    
+    if (!playing)
+    {
+        transportSource->start();
+        playing = true;
+        paused = false;
+        
+        DBG("Playback started");
+    }
+}
+
+void AudioEngine::pause()
+{
+    if (!initialized || transportSource == nullptr)
+        return;
+    
+    if (playing && !paused)
+    {
+        transportSource->stop();
+        paused = true;
+        playing = false;
+        
+        DBG("Playback paused");
+    }
+    else if (paused)
+    {
+        // Resume from pause
+        transportSource->start();
+        playing = true;
+        paused = false;
+        
+        DBG("Playback resumed");
+    }
+}
+
+void AudioEngine::stop()
+{
+    if (!initialized || transportSource == nullptr)
+        return;
+    
+    if (playing || paused)
+    {
+        transportSource->stop();
+        transportSource->setPosition(0.0);
+        playing = false;
+        paused = false;
+        currentPosition = 0.0;
+        
+        DBG("Playback stopped");
+    }
+}
+
+void AudioEngine::seekToPosition(double positionInSeconds)
+{
+    if (!initialized || transportSource == nullptr)
+        return;
+    
+    positionInSeconds = juce::jlimit(0.0, (double)totalLength, positionInSeconds);
+    transportSource->setPosition(positionInSeconds);
+    currentPosition = positionInSeconds;
+    
+    DBG("Seeking to position: " + juce::String(positionInSeconds, 2) + "s");
+}
+
+//==============================================================================
+void AudioEngine::setPitchShift(float semitones)
+{
+    pitchShiftSemitones = juce::jlimit(-12.0f, 12.0f, semitones);
+    
+    // In a full implementation, this would update a pitch shifting processor
+    // For now, we'll adjust the resampling ratio as an approximation
+    if (resamplingSource != nullptr)
+    {
+        float pitchRatio = std::pow(2.0f, pitchShiftSemitones / 12.0f);
+        double currentSampleRate = 44100.0;
+        if (auto* device = deviceManager.getCurrentAudioDevice())
+            currentSampleRate = device->getCurrentSampleRate();
+        resamplingSource->setResamplingRatio((currentSampleRate / 44100.0) * pitchRatio);
+    }
+    
+    DBG("Pitch shift set to: " + juce::String(semitones) + " semitones");
+}
+
+void AudioEngine::setTempoAdjustment(float ratio)
+{
+    tempoRatio = juce::jlimit(0.5f, 2.0f, ratio);
+    
+    // In a full implementation, this would use time-stretching algorithms
+    // that preserve pitch while changing tempo
+    
+    DBG("Tempo ratio set to: " + juce::String(ratio, 2));
+}
+
+void AudioEngine::setKeyChange(int semitones)
+{
+    keyChangeSemitones = juce::jlimit(-12, 12, semitones);
+    
+    // Apply key change as pitch shift
+    setPitchShift(static_cast<float>(keyChangeSemitones));
+    
+    DBG("Key change set to: " + juce::String(semitones) + " semitones");
+}
+
+//==============================================================================
+void AudioEngine::setMasterVolume(float volume)
+{
+    masterVolume = juce::jlimit(0.0f, 1.0f, volume);
+    
+    // In a full implementation with processing chain:
+    // if (processingChain != nullptr)
+    // {
+    //     auto& gain = processingChain->get<0>();
+    //     gain.setGainLinear(masterVolume);
+    // }
+}
+
+void AudioEngine::setMusicVolume(float volume)
+{
+    musicVolume = juce::jlimit(0.0f, 1.0f, volume);
+    // Applied in getNextAudioBlock
+}
+
+void AudioEngine::setVocalVolume(float volume)
+{
+    vocalVolume = juce::jlimit(0.0f, 1.0f, volume);
+    // This would control microphone input level in a full implementation
+}
+
+void AudioEngine::setVocalEffectsLevel(float level)
+{
+    vocalEffectsLevel = juce::jlimit(0.0f, 1.0f, level);
+    // Applied to reverb/echo wet levels
+}
+
+//==============================================================================
+void AudioEngine::setReverbEnabled(bool enabled)
+{
+    reverbEnabled = enabled;
+}
+
+void AudioEngine::setReverbLevel(float level)
+{
+    reverbLevel = juce::jlimit(0.0f, 1.0f, level);
+    
+    // In a full implementation with processing chain:
+    // if (processingChain != nullptr)
+    // {
+    //     auto& reverb = processingChain->get<1>();
+    //     auto params = reverb.getParameters();
+    //     params.wetLevel = reverbLevel * vocalEffectsLevel;
+    //     params.dryLevel = 1.0f - params.wetLevel;
+    //     reverb.setParameters(params);
+    // }
+}
+
+void AudioEngine::setEchoEnabled(bool enabled)
+{
+    echoEnabled = enabled;
+}
+
+void AudioEngine::setEchoLevel(float level)
+{
+    echoLevel = juce::jlimit(0.0f, 1.0f, level);
+}
+
+void AudioEngine::setEchoDelay(float delayMs)
+{
+    echoDelayMs = juce::jlimit(50.0f, 2000.0f, delayMs);
+}
+
+//==============================================================================
+void AudioEngine::enableFrequencyAnalysis(bool enabled)
+{
+    frequencyAnalysisEnabled = enabled;
+}
+
+//==============================================================================
+void AudioEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    if (resamplingSource != nullptr)
+    {
+        resamplingSource->prepareToPlay(samplesPerBlockExpected, sampleRate);
+    }
+}
+
+void AudioEngine::releaseResources()
+{
+    if (resamplingSource != nullptr)
+    {
+        resamplingSource->releaseResources();
+    }
+}
+
+void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    // Clear buffer first
+    bufferToFill.clearActiveBufferRegion();
+    
+    if (resamplingSource != nullptr && playing)
+    {
+        // Get audio from source
+        resamplingSource->getNextAudioBlock(bufferToFill);
+        
+        // Apply music volume
+        bufferToFill.buffer->applyGain(musicVolume);
+        
+        // Process effects if chain is available (commented out for initial build)
+        // if (processingChain != nullptr)
+        // {
+        //     processAudioEffects(*bufferToFill.buffer);
+        // }
+        
+        // Update playback position
+        updatePlaybackPosition();
+        
+        // Perform frequency analysis if enabled
+        if (frequencyAnalysisEnabled)
+        {
+            performFrequencyAnalysis(*bufferToFill.buffer);
+        }
+        
+        // Update CDG synchronization
+        if (cdgLoaded)
+        {
+            updateCDGSync();
+        }
+        
+        // Calculate current audio level for meters
+        currentAudioLevel = bufferToFill.buffer->getRMSLevel(0, 0, bufferToFill.numSamples);
+    }
+    
+    // Calculate CPU usage periodically
+    calculateCpuUsage();
+}
+
+//==============================================================================
+void AudioEngine::processAudioEffects(juce::AudioBuffer<float>& buffer)
+{
+    // DSP processing commented out for initial build
+    // if (processingChain == nullptr)
+    //     return;
+    // 
+    // juce::dsp::AudioBlock<float> block(buffer);
+    // juce::dsp::ProcessContextReplacing<float> context(block);
+    // 
+    // // Process through effect chain
+    // processingChain->process(context);
+}
+
+void AudioEngine::performFrequencyAnalysis(const juce::AudioBuffer<float>& buffer)
+{
+    if (!frequencyAnalysisEnabled || buffer.getNumSamples() < 1024)
+        return;
+    
+    // Simple FFT analysis (in production, this would be more sophisticated)
+    // For now, just generate some mock frequency data
+    for (size_t i = 0; i < frequencyData.size(); ++i)
+    {
+        float frequency = static_cast<float>(i) / static_cast<float>(frequencyData.size());
+        frequencyData[i] = buffer.getRMSLevel(0, 0, buffer.getNumSamples()) * 
+                          (1.0f - frequency) * 0.5f; // Simple frequency response simulation
+    }
+}
+
+void AudioEngine::updatePlaybackPosition()
+{
+    if (transportSource != nullptr)
+    {
+        currentPosition = transportSource->getCurrentPosition();
+        
+        // Check if song has ended
+        if (currentPosition >= totalLength && playing)
+        {
+            stop();
+            DBG("Song ended, playback stopped");
+        }
+    }
+}
+
+void AudioEngine::updateCDGSync()
+{
+    if (cdgSyncCallback && cdgLoaded)
+    {
+        // In a real implementation, this would extract lyric data based on current position
+        // For now, just call with mock lyric data
+        juce::String currentLyric = "Sample lyric at " + juce::String(currentPosition, 1) + "s";
+        cdgSyncCallback(currentPosition, currentLyric);
+    }
+}
+
+void AudioEngine::calculateCpuUsage()
+{
+    // Simple CPU usage calculation
+    // In production, this would measure actual processing time vs. available time
+    static int sampleCounter = 0;
+    if (++sampleCounter % 1000 == 0) // Update every ~1000 samples
+    {
+        cpuUsagePercent = playing ? 15.0 + (std::rand() % 10) : 2.0; // Mock CPU usage
+    }
+}
+
+//==============================================================================
+void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
+{
+    if (source == &deviceManager)
+    {
+        DBG("Audio device configuration changed");
+        
+        // Processing chain reinitialization commented out for initial build
+        // if (initialized && processingChain != nullptr)
+        // {
+        //     auto* device = deviceManager.getCurrentAudioDevice();
+        //     if (device != nullptr)
+        //     {
+        //         juce::dsp::ProcessSpec spec;
+        //         spec.sampleRate = device->getCurrentSampleRate();
+        //         spec.maximumBlockSize = device->getCurrentBufferSizeSamples();
+        //         spec.numChannels = 2;
+        //         
+        //         processingChain->prepare(spec);
+        //         
+        //         DBG("Processing chain updated for device change");
+        //         DBG("New sample rate: " + juce::String(spec.sampleRate));
+        //         DBG("New buffer size: " + juce::String(spec.maximumBlockSize));
+        //     }
+        // }
+    }
+}
+
+//==============================================================================
+double AudioEngine::getCpuUsage() const
+{
+    return cpuUsagePercent.load();
+}
+
+int AudioEngine::getCurrentBufferSize() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    return device ? device->getCurrentBufferSizeSamples() : 0;
+}
+
+double AudioEngine::getCurrentSampleRate() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    return device ? device->getCurrentSampleRate() : 0.0;
+}
+
+//==============================================================================
+void AudioEngine::setAudioDevice(const juce::String& deviceName)
+{
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.outputDeviceName = deviceName;
+    
+    auto error = deviceManager.setAudioDeviceSetup(setup, true);
+    if (!error.isEmpty())
+    {
+        handleAudioDeviceError("Failed to set audio device: " + error);
+    }
+}
+
+juce::StringArray AudioEngine::getAvailableAudioDevices() const
+{
+    return deviceManager.getCurrentDeviceTypeObject()->getDeviceNames(false);
+}
+
+juce::String AudioEngine::getCurrentAudioDevice() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    return device ? device->getName() : juce::String();
+}

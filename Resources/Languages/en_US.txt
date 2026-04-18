@@ -1,0 +1,134 @@
+# Encore Karaoke - English (US) Translations
+# Format: key=value
+# Use {0}, {1}, etc. for parameter substitution
+# Use .zero, .one, .other for pluralization
+
+# Application
+app.name=Encore Karaoke
+app.version=Version 2.0
+app.subtitle=Professional Karaoke System
+
+# Navigation
+nav.home=Home
+nav.queue=Queue
+nav.songs=Songs
+nav.library=Library
+nav.settings=Settings
+nav.help=Help
+nav.about=About
+
+# Queue Management
+queue.title=Singer Queue
+queue.add_singer=Add Singer
+queue.remove_singer=Remove Singer
+queue.next_singer=Next Singer
+queue.clear_queue=Clear Queue
+queue.empty=Queue is empty
+queue.singer_count.zero=No singers
+queue.singer_count.one=1 singer
+queue.singer_count.other={0} singers
+queue.song_count.zero=No songs
+queue.song_count.one=1 song
+queue.song_count.other={0} songs
+queue.estimated_time=Estimated wait: {0} minutes
+queue.now_playing=Now Playing
+queue.up_next=Up Next
+queue.rotation_order=Rotation Order: {0}
+
+# Audio Controls
+audio.play=Play
+audio.pause=Pause  
+audio.stop=Stop
+audio.volume=Volume
+audio.pitch=Pitch
+audio.key=Key Change
+audio.tempo=Tempo
+audio.loading=Loading...
+audio.ready=Ready
+audio.playing=Playing
+audio.paused=Paused
+audio.stopped=Stopped
+audio.error=Audio Error
+
+# Song Information
+song.title=Title
+song.artist=Artist
+song.duration=Duration
+song.version=Version
+song.key=Key
+song.tempo=BPM
+song.genre=Genre
+song.year=Year
+song.language=Language
+
+# Singer Management
+singer.name=Singer Name
+singer.add=Add Singer
+singer.edit=Edit Singer
+singer.remove=Remove Singer
+singer.strikes=Strikes: {0}/{1}
+singer.songs_performed=Songs performed: {0}
+singer.queue_summary={0} songs, {1} minutes
+singer.currently_up=Currently Up
+singer.next_up=Next Up
+
+# Messages and Notifications
+msg.singer_added=Singer "{0}" added to queue
+msg.singer_removed=Singer "{0}" removed from queue
+msg.song_added=Song "{0}" added for {1}
+msg.song_removed=Song removed from queue
+msg.song_loading=Loading song: {0}
+msg.connection_lost=Connection to venue lost. Reconnecting...
+msg.connection_restored=Connection restored
+msg.save_successful=Saved successfully
+msg.save_failed=Save failed
+msg.loading=Loading...
+msg.please_wait=Please wait...
+
+# Errors
+error.general=An error occurred
+error.network=Network error
+error.file_not_found=File not found
+error.invalid_format=Invalid file format
+error.audio_device=Audio device error
+error.firebase_connection=Firebase connection error
+error.permission_denied=Permission denied
+
+# Buttons and Actions
+btn.ok=OK
+btn.cancel=Cancel
+btn.save=Save
+btn.delete=Delete
+btn.edit=Edit
+btn.add=Add
+btn.remove=Remove
+btn.close=Close
+btn.apply=Apply
+btn.reset=Reset
+btn.refresh=Refresh
+
+# Settings
+settings.general=General
+settings.audio=Audio
+settings.display=Display
+settings.language=Language
+settings.venue=Venue
+settings.advanced=Advanced
+settings.about=About
+
+# Time and Date
+time.hours=hours
+time.minutes=minutes
+time.seconds=seconds
+time.am=AM
+time.pm=PM
+date.today=Today
+date.yesterday=Yesterday
+date.tomorrow=Tomorrow
+
+# Status Messages  
+status.ready=Ready
+status.connecting=Connecting...
+status.connected=Connected
+status.offline=Offline
+status.error=Error

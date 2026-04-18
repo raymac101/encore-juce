@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="EncoreJUCE" name="Encore Karaoke" projectType="guiapp" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" displaySplashScreen="1" jucerFormatVersion="1"
+              version="1.0.0" bundleIdentifier="com.viracicom.encore" includeBinaryInAppConfig="1"
+              cppLanguageStandard="17" companyName="Viracicom" companyWebsite="https://viracicom.com"
+              companyEmail="raymac@viracicom.com">
+  <MAINGROUP id="EncoreJUCE" name="Encore Karaoke">
+    <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E5E}" name="Source">
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E5F}" name="Audio">
+        <FILE id="AudioEngine.cpp" name="AudioEngine.cpp" compile="1" resource="0" file="Source/Audio/AudioEngine.cpp"/>
+        <FILE id="AudioEngine.h" name="AudioEngine.h" compile="0" resource="0" file="Source/Audio/AudioEngine.h"/>
+        <FILE id="PitchShifter.cpp" name="PitchShifter.cpp" compile="1" resource="0" file="Source/Audio/PitchShifter.cpp"/>
+        <FILE id="PitchShifter.h" name="PitchShifter.h" compile="0" resource="0" file="Source/Audio/PitchShifter.h"/>
+      </GROUP>
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E60}" name="Queue">
+        <FILE id="QueueManager.cpp" name="QueueManager.cpp" compile="1" resource="0" file="Source/Queue/QueueManager.cpp"/>
+        <FILE id="QueueManager.h" name="QueueManager.h" compile="0" resource="0" file="Source/Queue/QueueManager.h"/>
+      </GROUP>
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E61}" name="Firebase">
+        <FILE id="FirebaseManager.cpp" name="FirebaseManager.cpp" compile="1" resource="0" file="Source/Firebase/FirebaseManager.cpp"/>
+        <FILE id="FirebaseManager.h" name="FirebaseManager.h" compile="0" resource="0" file="Source/Firebase/FirebaseManager.h"/>
+      </GROUP>
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E62}" name="UI">
+        <FILE id="MainComponent.cpp" name="MainComponent.cpp" compile="1" resource="0" file="Source/UI/MainComponent.cpp"/>
+        <FILE id="MainComponent.h" name="MainComponent.h" compile="0" resource="0" file="Source/UI/MainComponent.h"/>
+        <FILE id="ResponsiveLayout.cpp" name="ResponsiveLayout.cpp" compile="1" resource="0" file="Source/UI/ResponsiveLayout.cpp"/>
+        <FILE id="ResponsiveLayout.h" name="ResponsiveLayout.h" compile="0" resource="0" file="Source/UI/ResponsiveLayout.h"/>
+      </GROUP>
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E63}" name="Localization">
+        <FILE id="LocalizationManager.cpp" name="LocalizationManager.cpp" compile="1" resource="0" file="Source/Localization/LocalizationManager.cpp"/>
+        <FILE id="LocalizationManager.h" name="LocalizationManager.h" compile="0" resource="0" file="Source/Localization/LocalizationManager.h"/>
+      </GROUP>
+      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E64}" name="Models">
+        <FILE id="VenueItem.cpp" name="VenueItem.cpp" compile="1" resource="0" file="Source/Models/VenueItem.cpp"/>
+        <FILE id="VenueItem.h" name="VenueItem.h" compile="0" resource="0" file="Source/Models/VenueItem.h"/>
+        <FILE id="QueueItem.cpp" name="QueueItem.cpp" compile="1" resource="0" file="Source/Models/QueueItem.cpp"/>
+        <FILE id="QueueItem.h" name="QueueItem.h" compile="0" resource="0" file="Source/Models/QueueItem.h"/>
+        <FILE id="Singers.cpp" name="Singers.cpp" compile="1" resource="0" file="Source/Models/Singers.cpp"/>
+        <FILE id="Singers.h" name="Singers.h" compile="0" resource="0" file="Source/Models/Singers.h"/>
+      </GROUP>
+      <FILE id="Main.cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_opengl" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+  <EXPORTFORMATS>
+    <VS2022 targetFolder="Builds/VisualStudio2022">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="EncoreJUCE"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="EncoreJUCE"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_devices" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_formats" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_processors" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_utils" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_core" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_data_structures" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_events" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_graphics" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_basics" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_extra" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_opengl" path="${JUCE_MODULES}"/>
+      </MODULEPATHS>
+    </VS2022>
+  </EXPORTFORMATS>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_USE_CURL="1"/>
+</JUCERPROJECT>
