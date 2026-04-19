@@ -18,12 +18,36 @@ class BottomBar : public juce::Component,
                   private juce::Timer
 {
 public:
+    //==============================================================================
+    // Public constants
+    static constexpr int MIN_BAR_HEIGHT = 80;
+    static constexpr int MAX_BAR_HEIGHT = 300;
+    static constexpr int DEFAULT_BAR_HEIGHT = 120;
+
+    // Current height (adjustable)
+    int currentBarHeight = DEFAULT_BAR_HEIGHT;
+
+    // Callback for height changes
+    std::function<void(int newHeight)> onHeightChanged;
+
+    //==============================================================================
     BottomBar();
     ~BottomBar() override = default;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+
+    // Mouse handling for resizing and waveform seeking
     void mouseDown(const juce::MouseEvent& event) override;
+    void mouseDrag(const juce::MouseEvent& event) override;
+    void mouseMove(const juce::MouseEvent& event) override;
+    void mouseUp(const juce::MouseEvent& event) override;
+    void mouseExit(const juce::MouseEvent& event) override;
+    void mouseDoubleClick(const juce::MouseEvent& event) override;
+
+    // Height management
+    void setBarHeight(int newHeight);
+    int getBarHeight() const { return currentBarHeight; }
 
     void setPlaying(bool playing);
     void setProgress(float progress01);
@@ -74,7 +98,15 @@ private:
     double durationSeconds = 0.0;
     std::vector<float> waveform;
 
-    static constexpr int kBarHeight = 120;
+    //==============================================================================
+    // Resize handle - Visual Studio style (at the TOP edge for bottom bar)
+    static constexpr int RESIZE_HANDLE_INACTIVE_HEIGHT = 1;
+    static constexpr int RESIZE_HANDLE_ACTIVE_HEIGHT = 6;
+    bool isResizing = false;
+    bool isOverResizeHandle = false;
+    int resizeStartHeight = 0;
+    juce::Point<int> resizeStartPosition;
+    int getCurrentResizeHandleHeight() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BottomBar)
 };

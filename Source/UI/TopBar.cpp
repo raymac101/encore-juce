@@ -140,9 +140,11 @@ void TopBar::setupUI()
 //==============================================================================
 void TopBar::loadAssets()
 {
+    // Use executable directory to find assets (getCurrentWorkingDirectory is unreliable on macOS)
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+
     // Try to load logo image
-    juce::File logoFile = juce::File::getCurrentWorkingDirectory()
-                         .getChildFile("assets/images/encore-logo-white.png");
+    juce::File logoFile = appDir.getChildFile("assets/images/encore-logo-white.png");
     
     if (logoFile.existsAsFile())
     {
@@ -156,8 +158,7 @@ void TopBar::loadAssets()
     }
     
     // Load user avatar image
-    juce::File avatarFile = juce::File::getCurrentWorkingDirectory()
-                           .getChildFile("assets/icon/2345434.png");
+    juce::File avatarFile = appDir.getChildFile("assets/icon/2345434.png");
     
     DBG("Looking for custom avatar at: " + avatarFile.getFullPathName());
     
@@ -183,8 +184,7 @@ void TopBar::loadAssets()
     }
     
     // Load default avatar image (AvatarWhite.png)
-    juce::File defaultAvatarFile = juce::File::getCurrentWorkingDirectory()
-                                  .getChildFile("assets/images/AvatarWhite.png");
+    juce::File defaultAvatarFile = appDir.getChildFile("assets/images/AvatarWhite.png");
     
     DBG("Looking for default avatar at: " + defaultAvatarFile.getFullPathName());
     
@@ -211,8 +211,7 @@ void TopBar::loadAssets()
     }
     
     // Load default album art image (AlbumIconWhite.png)
-    juce::File defaultAlbumFile = juce::File::getCurrentWorkingDirectory()
-                                 .getChildFile("assets/images/AlbumIconWhite.png");
+    juce::File defaultAlbumFile = appDir.getChildFile("assets/images/AlbumIconWhite.png");
     
     if (defaultAlbumFile.existsAsFile())
     {
@@ -224,8 +223,7 @@ void TopBar::loadAssets()
     }
     
     // Load VU meter images
-    juce::File vuMeterOffFile = juce::File::getCurrentWorkingDirectory()
-                               .getChildFile("assets/images/Meter-Side-blue-off.png");
+    juce::File vuMeterOffFile = appDir.getChildFile("assets/images/Meter-Side-blue-off.png");
     
     if (vuMeterOffFile.existsAsFile())
     {
@@ -233,8 +231,7 @@ void TopBar::loadAssets()
         DBG("VU meter OFF image loaded: " + juce::String(vuMeterOffImage.isValid() ? "valid" : "invalid"));
     }
     
-    juce::File vuMeterOnFile = juce::File::getCurrentWorkingDirectory()
-                              .getChildFile("assets/images/Meter-Side-blue-on.png");
+    juce::File vuMeterOnFile = appDir.getChildFile("assets/images/Meter-Side-blue-on.png");
     
     if (vuMeterOnFile.existsAsFile())
     {

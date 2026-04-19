@@ -5,7 +5,8 @@ cmake_minimum_required(VERSION 3.22)
 project(EncoreJUCE VERSION 1.0.0)
 
 # Add JUCE subdirectory (using complete JUCE framework)
-add_subdirectory(C:/JUCE-Full JUCE)
+# add_subdirectory(C:/JUCE-Full JUCE)
+add_subdirectory(/Users/raymac/JUCE JUCE)
 
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
@@ -60,7 +61,7 @@ target_link_libraries(EncoreJUCE
 # Copy assets to output directory
 add_custom_command(TARGET EncoreJUCE POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/src/assets
+        ${CMAKE_SOURCE_DIR}/assets
         $<TARGET_FILE_DIR:EncoreJUCE>/assets
     COMMENT "Copying assets to output directory")
 

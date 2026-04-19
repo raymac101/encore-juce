@@ -82,6 +82,11 @@ void MainComponent::setupUI()
         DBG("TopBar height changed to: " + juce::String(newHeight));
         resized(); // Re-layout when TopBar height changes
     };
+
+    bottomBar->onHeightChanged = [this](int newHeight) {
+        DBG("BottomBar height changed to: " + juce::String(newHeight));
+        resized(); // Re-layout when BottomBar height changes
+    };
     
     // Set sample data for TopBar
     topBar->setTrackInfo("My Way", "Frank Sinatra", "Karaoke Version");
@@ -201,8 +206,7 @@ void MainComponent::resized()
     // Reserve bottom area for BottomBar
     if (bottomBar)
     {
-        constexpr int bottomBarHeight = 120;
-        auto bottomBarBounds = bounds.removeFromBottom(bottomBarHeight);
+        auto bottomBarBounds = bounds.removeFromBottom(bottomBar->getBarHeight());
         bottomBar->setBounds(bottomBarBounds);
     }
     

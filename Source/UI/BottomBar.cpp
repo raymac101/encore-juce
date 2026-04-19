@@ -152,6 +152,17 @@ void BottomBar::paint(juce::Graphics& g)
     g.setColour(kBackground);
     g.fillRect(bounds);
 
+    // Draw resize handle at top with Visual Studio style behavior
+    auto resizeHandleHeight = getCurrentResizeHandleHeight();
+    auto resizeArea = getLocalBounds().removeFromTop(resizeHandleHeight);
+    juce::Colour handleColor;
+    if (isResizing || isOverResizeHandle)
+        handleColor = juce::Colour(0x00, 0x7a, 0xcc);  // Blue when active
+    else
+        handleColor = juce::Colour(0x3c, 0x3c, 0x3c);  // Dark grey when inactive
+    g.setColour(handleColor);
+    g.fillRect(resizeArea);
+
     auto transportArea = getTransportArea();
     auto waveformArea = getWaveformArea();
     auto slidersArea = getSlidersArea();
@@ -227,6 +238,17 @@ void BottomBar::resized()
 
 void BottomBar::mouseDown(const juce::MouseEvent& event)
 {
+    // Check resize handle first (at the top edge)
+    auto resizeArea = getLocalBounds().removeFromTop(getCurrentResizeHandleHeight());
+    if (resizeArea.contains(event.getPosition()))
+    {
+        isResizing = true;
+        resizeStartHeight = currentBarHeight;
+        resizeStartPosition = event.getPosition();
+        repaint();
+        return;
+    }
+
     auto waveformArea = getWaveformDrawArea();
     if (waveformArea.contains(event.getPosition()))
     {
@@ -236,6 +258,77 @@ void BottomBar::mouseDown(const juce::MouseEvent& event)
         if (onSeek)
             onSeek(progress);
     }
+}
+
+void BottomBar::mouseDrag(const juce::MouseEvent& event)
+{
+    if (isResizing)
+    {
+        // Dragging UP increases height, dragging DOWN decreases
+        int deltaY = resizeStartPosition.getY() - event.getPosition().getY();
+        int newHeight = juce::jlimit(MIN_BAR_HEIGHT, MAX_BAR_HEIGHT, resizeStartHeight + deltaY);
+        setBarHeight(newHeight);
+    }
+}
+
+void BottomBar::mouseMove(const juce::MouseEvent& event)
+{
+    auto resizeArea = getLocalBounds().removeFromTop(getCurrentResizeHandleHeight());
+    bool wasOverHandle = isOverResizeHandle;
+    isOverResizeHandle = resizeArea.contains(event.getPosition());
+
+    if (wasOverHandle != isOverResizeHandle)
+        repaint();
+
+    setMouseCursor(isOverResizeHandle ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
+void BottomBar::mouseUp(const juce::MouseEvent& event)
+{
+    juce::ignoreUnused(event);
+    if (isResizing)
+    {
+        isResizing = false;
+        repaint();
+    }
+}
+
+void BottomBar::mouseExit(const juce::MouseEvent& event)
+{
+    juce::ignoreUnused(event);
+    if (isOverResizeHandle && !isResizing)
+    {
+        isOverResizeHandle = false;
+        repaint();
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+}
+
+void BottomBar::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    auto resizeArea = getLocalBounds().removeFromTop(getCurrentResizeHandleHeight());
+    if (resizeArea.contains(event.getPosition()))
+        setBarHeight(DEFAULT_BAR_HEIGHT);
+}
+
+void BottomBar::setBarHeight(int newHeight)
+{
+    newHeight = juce::jlimit(MIN_BAR_HEIGHT, MAX_BAR_HEIGHT, newHeight);
+
+    if (currentBarHeight != newHeight)
+    {
+        currentBarHeight = newHeight;
+        resized();
+        repaint();
+
+        if (onHeightChanged)
+            onHeightChanged(currentBarHeight);
+    }
+}
+
+int BottomBar::getCurrentResizeHandleHeight() const
+{
+    return (isOverResizeHandle || isResizing) ? RESIZE_HANDLE_ACTIVE_HEIGHT : RESIZE_HANDLE_INACTIVE_HEIGHT;
 }
 
 void BottomBar::setPlaying(bool playing)
@@ -409,7 +502,7 @@ std::unique_ptr<juce::Drawable> BottomBar::createSpriteIcon(const juce::String& 
         return {};
     };
 
-    const auto spriteFile = juce::File::getCurrentWorkingDirectory().getChildFile("assets/images/sprite.svg");
+    const auto spriteFile = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory().getChildFile("assets/images/sprite.svg");
     if (!spriteFile.existsAsFile())
         return createInlineIcon();
 
