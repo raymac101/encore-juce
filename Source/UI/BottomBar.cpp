@@ -15,9 +15,9 @@
 
 namespace
 {
-    const juce::Colour kBackground = juce::Colour(0x0f, 0x0f, 0x0f);
-    const juce::Colour kSectionBackground = juce::Colour(0x18, 0x18, 0x18);
-    const juce::Colour kAccent = juce::Colour(0x76, 0xc7, 0xc0);
+    const juce::Colour kBackground = juce::Colour(0x26, 0x26, 0x26);          // #262626
+    const juce::Colour kSectionBackground = juce::Colour(0x1e, 0x1e, 0x1e);   // slightly darker section
+    const juce::Colour kAccent = juce::Colour(0x30, 0xda, 0xff);  // #30DAFF
     const juce::Colour kText = juce::Colours::white;
     const juce::Colour kMutedText = juce::Colours::white.withAlpha(0.65f);
 
@@ -39,10 +39,11 @@ void BottomBar::setupUI()
     configureTransportButton(playPauseButton, true);
     configureTransportButton(jumpToEndButton, false);
 
-    returnToZeroButton.setTooltip("Return to 0");
-    stopButton.setTooltip("Stop and return to zero");
-    playPauseButton.setTooltip("Play/Pause");
-    jumpToEndButton.setTooltip("Jump to end");
+    auto& lm = LocalizationManager::getInstance();
+    returnToZeroButton.setTooltip(lm.getText("bottombar.return_to_zero"));
+    stopButton.setTooltip(lm.getText("bottombar.stop"));
+    playPauseButton.setTooltip(lm.getText("bottombar.play_pause"));
+    jumpToEndButton.setTooltip(lm.getText("bottombar.jump_to_end"));
 
     addAndMakeVisible(returnToZeroButton);
     addAndMakeVisible(stopButton);
@@ -90,7 +91,7 @@ void BottomBar::setupUI()
     pitchSlider.onValueChange = [this]()
     {
         auto semitones = static_cast<int>(pitchSlider.getValue());
-        pitchLabel.setText("PITCH " + juce::String(semitones) + " st", juce::dontSendNotification);
+        pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
         if (onPitchChanged)
             onPitchChanged(semitones);
     };
@@ -102,7 +103,7 @@ void BottomBar::setupUI()
     volumeSlider.onValueChange = [this]()
     {
         auto volume = static_cast<int>(volumeSlider.getValue());
-        volumeLabel.setText("VOL " + juce::String(volume), juce::dontSendNotification);
+        volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " " + juce::String(volume), juce::dontSendNotification);
         if (onVolumeChanged)
             onVolumeChanged(volume);
     };
@@ -115,12 +116,12 @@ void BottomBar::setupUI()
     volumeSlider.setColour(juce::Slider::thumbColourId, kAccent);
     volumeSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(0x2a, 0x2a, 0x2a));
 
-    pitchLabel.setText("PITCH 0 st", juce::dontSendNotification);
+    pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " 0 st", juce::dontSendNotification);
     pitchLabel.setJustificationType(juce::Justification::centredLeft);
     pitchLabel.setColour(juce::Label::textColourId, kMutedText);
     pitchLabel.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
 
-    volumeLabel.setText("VOL 5", juce::dontSendNotification);
+    volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " 5", juce::dontSendNotification);
     volumeLabel.setJustificationType(juce::Justification::centredLeft);
     volumeLabel.setColour(juce::Label::textColourId, kMutedText);
     volumeLabel.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
@@ -157,7 +158,7 @@ void BottomBar::paint(juce::Graphics& g)
     auto resizeArea = getLocalBounds().removeFromTop(resizeHandleHeight);
     juce::Colour handleColor;
     if (isResizing || isOverResizeHandle)
-        handleColor = juce::Colour(0x00, 0x7a, 0xcc);  // Blue when active
+        handleColor = juce::Colour(0x30, 0xda, 0xff);  // #30DAFF
     else
         handleColor = juce::Colour(0x3c, 0x3c, 0x3c);  // Dark grey when inactive
     g.setColour(handleColor);
@@ -353,13 +354,13 @@ void BottomBar::setDurationSeconds(double seconds)
 void BottomBar::setPitch(int semitones)
 {
     pitchSlider.setValue(semitones, juce::dontSendNotification);
-    pitchLabel.setText("PITCH " + juce::String(semitones) + " st", juce::dontSendNotification);
+    pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
 }
 
 void BottomBar::setVolume(int volumeStep)
 {
     volumeSlider.setValue(volumeStep, juce::dontSendNotification);
-    volumeLabel.setText("VOL " + juce::String(volumeStep), juce::dontSendNotification);
+    volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " " + juce::String(volumeStep), juce::dontSendNotification);
 }
 
 void BottomBar::timerCallback()
@@ -576,6 +577,22 @@ std::unique_ptr<juce::Drawable> BottomBar::createSpriteIcon(const juce::String& 
         return drawable;
 
     return createInlineIcon();
+}
+
+void BottomBar::updateAllText()
+{
+    auto& lm = LocalizationManager::getInstance();
+
+    returnToZeroButton.setTooltip(lm.getText("bottombar.return_to_zero"));
+    stopButton.setTooltip(lm.getText("bottombar.stop"));
+    playPauseButton.setTooltip(lm.getText("bottombar.play_pause"));
+    jumpToEndButton.setTooltip(lm.getText("bottombar.jump_to_end"));
+
+    auto semitones = static_cast<int>(pitchSlider.getValue());
+    pitchLabel.setText(lm.getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
+
+    auto vol = static_cast<int>(volumeSlider.getValue());
+    volumeLabel.setText(lm.getText("bottombar.volume") + " " + juce::String(vol), juce::dontSendNotification);
 }
 
 void BottomBar::generateWaveform()

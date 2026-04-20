@@ -465,24 +465,94 @@ void LocalizationManager::loadFallbackTranslations()
 {
     // Load essential translations to ensure app functionality
     translations["app.name"] = "Encore Karaoke";
+
+    // ── NavBar menu items ──
     translations["nav.home"] = "Home";
+    translations["nav.search"] = "Search";
+    translations["nav.library"] = "Library";
+    translations["nav.charts"] = "Charts";
+    translations["nav.mixer"] = "Mixer";
+    translations["nav.settings"] = "Settings";
+    translations["nav.testing"] = "Testing";
+    translations["nav.ads"] = "Ads";
+    translations["nav.playlist"] = "Playlist";
+    translations["nav.venue_management"] = "Venue Mgmt";
     translations["nav.queue"] = "Queue";
     translations["nav.songs"] = "Songs";
-    translations["nav.settings"] = "Settings";
+    translations["nav.genres"] = "GENRES:";
+
+    // ── TopBar ──
+    translations["topbar.key"] = "KEY";
+    translations["topbar.bpm"] = "BPM";
+    translations["topbar.offline_warning"] = "YOUR COMPUTER IS OFFLINE - PLEASE CONNECT TO THE INTERNET";
+    translations["topbar.no_cover"] = "No Cover";
+    translations["topbar.anonymous"] = "Anonymous";
+    translations["topbar.vu"] = "VU";
+
+    // ── BottomBar ──
+    translations["bottombar.pitch"] = "PITCH";
+    translations["bottombar.volume"] = "VOL";
+    translations["bottombar.return_to_zero"] = "Return to 0";
+    translations["bottombar.stop"] = "Stop and return to zero";
+    translations["bottombar.play_pause"] = "Play/Pause";
+    translations["bottombar.jump_to_end"] = "Jump to end";
+
+    // ── MainArea placeholder pages ──
+    translations["page.home"] = "Home";
+    translations["page.search"] = "Search";
+    translations["page.library"] = "Library";
+    translations["page.charts"] = "Charts";
+    translations["page.mixer"] = "Mixer";
+    translations["page.settings"] = "Settings";
+    translations["page.testing"] = "Testing";
+    translations["page.ads"] = "Ads";
+    translations["page.playlist"] = "Playlist";
+    translations["page.venue_management"] = "Venue Management";
+
+    // ── General audio / transport ──
     translations["audio.play"] = "Play";
     translations["audio.pause"] = "Pause";
     translations["audio.stop"] = "Stop";
+
+    // ── Status ──
     translations["status.ready"] = "Ready";
     translations["status.loading"] = "Loading...";
     translations["status.connected"] = "Connected";
     translations["status.disconnected"] = "Disconnected";
+
+    // ── Buttons ──
     translations["button.ok"] = "OK";
     translations["button.cancel"] = "Cancel";
     translations["button.close"] = "Close";
+
+    // ── Languages ──
     translations["language.english"] = "English";
     translations["language.spanish"] = "Español";
     translations["language.french"] = "Français";
     translations["language.german"] = "Deutsch";
+
+    // ── QueueBar ──
+    translations["queue.now_singing"] = "Now Singing:";
+    translations["queue.clear_queue"] = "Clear Queue";
+    translations["queue.queue_label"] = "Queue";
+    translations["queue.auto_play"] = "Auto Play";
+    translations["queue.delay_label"] = "Delay (sec):";
+
+    // ── HomePage ──
+    translations["home.recently_played"] = "Recently Played";
+    translations["home.new_songs"] = "New Songs";
+    translations["home.popular_songs"] = "Popular Songs";
+    translations["home.recommended_songs"] = "Recommended Songs";
+
+    // Search page
+    translations["search.placeholder"] = "Search songs...";
+    translations["search.clear"] = "Clear";
+    translations["search.filter_all"] = "All";
+    translations["search.filter_song"] = "Song";
+    translations["search.filter_artist"] = "Artist";
+    translations["search.filter_year"] = "Year";
+    translations["search.filter_genre"] = "Genre";
+    translations["search.count_suffix"] = "songs in this list";
 }
 
 juce::File LocalizationManager::findLanguageFile(const juce::String& languageCode)

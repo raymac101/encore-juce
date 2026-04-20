@@ -80,6 +80,11 @@ public:
     // Callbacks
     std::function<void()> onUserButtonClicked;
     std::function<void()> onLogoClicked;
+    
+    //==============================================================================
+    // Localization
+    /** Re-read all translatable strings from LocalizationManager. */
+    void updateAllText();
 
 private:
     //==============================================================================

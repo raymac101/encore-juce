@@ -17,6 +17,9 @@
 #include "../Localization/LocalizationManager.h"
 #include "TopBar.h"
 #include "BottomBar.h"
+#include "NavBar.h"
+#include "MainArea.h"
+#include "QueueBar.h"
 
 //==============================================================================
 /**
@@ -65,6 +68,9 @@ private:
     // UI Components
     std::unique_ptr<TopBar> topBar;
     std::unique_ptr<BottomBar> bottomBar;
+    std::unique_ptr<NavBar> navBar;
+    std::unique_ptr<MainArea> mainArea;
+    std::unique_ptr<QueueBar> queueBar;
     std::unique_ptr<juce::Label> titleLabel;
     std::unique_ptr<juce::TextButton> languageButton;
     std::unique_ptr<juce::Label> statusLabel;

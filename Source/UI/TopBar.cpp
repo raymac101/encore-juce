@@ -14,14 +14,14 @@
 
 //==============================================================================
 // Color constants from original app
-const juce::Colour TopBar::BACKGROUND_COLOR = juce::Colour(0x0f, 0x0f, 0x0f);  // #0F0F0F
+const juce::Colour TopBar::BACKGROUND_COLOR = juce::Colour(0x26, 0x26, 0x26);  // #262626
 const juce::Colour TopBar::OFFLINE_COLOR = juce::Colour(0x8b, 0x00, 0x00);     // darkred
 const juce::Colour TopBar::TEXT_COLOR = juce::Colours::white;
-const juce::Colour TopBar::ACCENT_COLOR = juce::Colour(0x76, 0xc7, 0xc0);      // #76c7c0
+const juce::Colour TopBar::ACCENT_COLOR = juce::Colour(0x30, 0xda, 0xff);      // #30DAFF
 
 // Resize handle colors - Visual Studio style
 static const juce::Colour RESIZE_HANDLE_INACTIVE_COLOR = juce::Colour(0x3c, 0x3c, 0x3c); // Dark grey
-static const juce::Colour RESIZE_HANDLE_ACTIVE_COLOR = juce::Colour(0x00, 0x7a, 0xcc);   // VS Blue
+static const juce::Colour RESIZE_HANDLE_ACTIVE_COLOR = juce::Colour(0x30, 0xda, 0xff);   // #30DAFF
 
 //==============================================================================
 TopBar::TopBar()
@@ -68,7 +68,7 @@ void TopBar::setupUI()
     addAndMakeVisible(artistNameLabel.get());
     
     // Key title label (bold)
-    keyTitleLabel = std::make_unique<juce::Label>("keyTitle", "KEY");
+    keyTitleLabel = std::make_unique<juce::Label>("keyTitle", LocalizationManager::getInstance().getText("topbar.key"));
     keyTitleLabel->setFont(juce::Font(12.0f, juce::Font::bold));
     keyTitleLabel->setColour(juce::Label::textColourId, juce::Colours::white);
     keyTitleLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -84,7 +84,7 @@ void TopBar::setupUI()
     addAndMakeVisible(keyValueLabel.get());
     
     // BPM title label (bold)
-    bpmTitleLabel = std::make_unique<juce::Label>("bpmTitle", "BPM");
+    bpmTitleLabel = std::make_unique<juce::Label>("bpmTitle", LocalizationManager::getInstance().getText("topbar.bpm"));
     bpmTitleLabel->setFont(juce::Font(12.0f, juce::Font::bold));
     bpmTitleLabel->setColour(juce::Label::textColourId, juce::Colours::white);
     bpmTitleLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -100,7 +100,7 @@ void TopBar::setupUI()
     addAndMakeVisible(bpmValueLabel.get());
     
     // Offline warning label
-    offlineWarningLabel = std::make_unique<juce::Label>("offline", "YOUR COMPUTER IS OFFLINE - PLEASE CONNECT TO THE INTERNET");
+    offlineWarningLabel = std::make_unique<juce::Label>("offline", LocalizationManager::getInstance().getText("topbar.offline_warning"));
     offlineWarningLabel->setFont(juce::Font(14.0f, juce::Font::bold));
     offlineWarningLabel->setColour(juce::Label::textColourId, juce::Colours::white);
     offlineWarningLabel->setJustificationType(juce::Justification::centred);
@@ -462,7 +462,7 @@ void TopBar::setUserInfo(const juce::String& name, const juce::Image& avatar)
     userName = name;
     
     if (userNameLabel)
-        userNameLabel->setText(name.isEmpty() ? "Anonymous" : name, juce::dontSendNotification);
+        userNameLabel->setText(name.isEmpty() ? LocalizationManager::getInstance().getText("topbar.anonymous") : name, juce::dontSendNotification);
     
     if (avatar.isValid())
         userAvatarImage = avatar;
@@ -548,8 +548,23 @@ void TopBar::drawVUMeter(juce::Graphics& g, juce::Rectangle<int> bounds)
         
         // Draw label
         g.setFont(juce::Font(10.0f));
-        g.drawText("VU", bounds.withHeight(12), juce::Justification::centred);
+        g.drawText(LocalizationManager::getInstance().getText("topbar.vu"), bounds.withHeight(12), juce::Justification::centred);
     }
+}
+
+//==============================================================================
+void TopBar::updateAllText()
+{
+    auto& lm = LocalizationManager::getInstance();
+    
+    if (keyTitleLabel)
+        keyTitleLabel->setText(lm.getText("topbar.key"), juce::dontSendNotification);
+    if (bpmTitleLabel)
+        bpmTitleLabel->setText(lm.getText("topbar.bpm"), juce::dontSendNotification);
+    if (offlineWarningLabel)
+        offlineWarningLabel->setText(lm.getText("topbar.offline_warning"), juce::dontSendNotification);
+    
+    repaint();
 }
 
 //==============================================================================

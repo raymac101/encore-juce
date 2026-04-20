@@ -25,10 +25,30 @@ target_sources(EncoreJUCE
         Source/UI/ResponsiveLayout.cpp
         Source/UI/TopBar.cpp
         Source/UI/BottomBar.cpp
+        Source/UI/NavBar.cpp
+        Source/UI/MainArea.cpp
+        Source/UI/QueueBar.cpp
+        Source/UI/HomePage.cpp
+        Source/UI/SearchPage.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
         Source/Models/QueueItem.cpp
-        Source/Models/Singers.cpp)
+        Source/Models/Singers.cpp
+        Source/Models/Track.cpp
+        Source/Models/CdgSong.cpp
+        Source/Models/CdgGroup.cpp
+        Source/Models/Host.cpp
+        Source/Models/User.cpp
+        Source/Models/Playing.cpp
+        Source/Models/Lyric.cpp
+        Source/Models/License.cpp
+        Source/Models/Playlist.cpp
+        Source/Models/Member.cpp
+        Source/Models/Audit.cpp
+        Source/Models/Ad.cpp
+        Source/Models/Preset.cpp
+        Source/Models/VenueUser.cpp
+        Source/Models/Location.cpp)
 
 # Set compile definitions
 target_compile_definitions(EncoreJUCE

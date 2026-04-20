@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../Localization/LocalizationManager.h"
 
 class BottomBar : public juce::Component,
                   private juce::Timer
@@ -62,6 +63,9 @@ public:
     std::function<void(float progress01)> onSeek;
     std::function<void(int semitones)> onPitchChanged;
     std::function<void(int volumeStep)> onVolumeChanged;
+
+    /** Re-read all translatable strings from LocalizationManager. */
+    void updateAllText();
 
 private:
     void timerCallback() override;

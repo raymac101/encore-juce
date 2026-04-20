@@ -131,6 +131,117 @@ void MainComponent::setupUI()
     
     DBG("TopBar created and configured");
     
+    // Create NavBar (left navigation)
+    navBar = std::make_unique<NavBar>();
+    addAndMakeVisible(navBar.get());
+
+    // Create MainArea (central content area)
+    mainArea = std::make_unique<MainArea>();
+    addAndMakeVisible(mainArea.get());
+
+    // Wire NavBar page selection to MainArea
+    navBar->onPageSelected = [this](NavPage page) {
+        DBG("NavBar: page selected -> " + juce::String(static_cast<int>(page)));
+        mainArea->setCurrentPage(page);
+    };
+
+    // When NavBar width changes via drag, re-layout
+    navBar->onWidthChanged = [this](int /*newWidth*/) {
+        resized();
+    };
+
+    // Sample genre list for the bottom half of NavBar
+    navBar->setGenreList({ "Pop", "Rock", "Country", "R&B", "Hip Hop",
+                           "Dance", "Latin", "Jazz", "Classical", "Oldies" });
+
+    DBG("NavBar and MainArea created and configured");
+
+    // Create QueueBar (right-side singer queue)
+    queueBar = std::make_unique<QueueBar>();
+    addAndMakeVisible(queueBar.get());
+
+    queueBar->onWidthChanged = [this](int /*newWidth*/) {
+        resized();
+    };
+
+    queueBar->onPlaySinger = [this](int singerIndex) {
+        DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
+    };
+
+    queueBar->onPlayCurrent = [this]() {
+        DBG("QueueBar: Play current singer");
+    };
+
+    queueBar->onPauseCurrent = [this]() {
+        DBG("QueueBar: Pause current singer");
+    };
+
+    queueBar->onClearQueue = [this]() {
+        DBG("QueueBar: Clear queue requested");
+    };
+
+    queueBar->onReorder = [this](int from, int to) {
+        DBG("QueueBar: Reorder singer from " + juce::String(from) + " to " + juce::String(to));
+    };
+
+    // Populate with sample data so the queue is visible on launch
+    {
+        Singers s1;
+        s1.name = "Alice";
+        s1.order = 0;
+        s1.rotationOrder = 0;
+        s1.songsPerformed = 2;
+        QueueItem q1;
+        q1.songArtist = "Adele";
+        q1.songName = "Rolling in the Deep";
+        q1.duration = 228;
+        s1.songs.push_back(q1);
+
+        Singers s2;
+        s2.name = "Bob";
+        s2.order = 1;
+        s2.rotationOrder = 1;
+        s2.songsPerformed = 1;
+        QueueItem q2;
+        q2.songArtist = "Journey";
+        q2.songName = "Don't Stop Believin'";
+        q2.duration = 251;
+        QueueItem q2b;
+        q2b.songArtist = "Queen";
+        q2b.songName = "Bohemian Rhapsody";
+        q2b.duration = 354;
+        s2.songs.push_back(q2);
+        s2.songs.push_back(q2b);
+
+        Singers s3;
+        s3.name = "Carol";
+        s3.order = 2;
+        s3.rotationOrder = 2;
+        s3.songsPerformed = 0;
+        QueueItem q3;
+        q3.songArtist = "Whitney Houston";
+        q3.songName = "I Will Always Love You";
+        q3.duration = 273;
+        s3.songs.push_back(q3);
+
+        Singers nowSinger;
+        nowSinger.name = "Dave";
+        nowSinger.order = -1;
+        nowSinger.rotationOrder = -1;
+        nowSinger.songsPerformed = 3;
+        QueueItem nq;
+        nq.songArtist = "Frank Sinatra";
+        nq.songName = "My Way";
+        nq.duration = 277;
+        nowSinger.songs.push_back(nq);
+
+        queueBar->setVenueInfo("The Blue Note", "BLUE42");
+        queueBar->setNowPlaying(nowSinger);
+        queueBar->setSingers({ s1, s2, s3 });
+    }
+
+    DBG("QueueBar created and configured with sample data");
+
     // Title label - using LocalizationManager
     titleLabel = std::make_unique<juce::Label>("title", LocalizationManager::getInstance().getText("app.name"));
     titleLabel->setFont(juce::Font(juce::FontOptions().withHeight(28.0f)).boldened());
@@ -217,33 +328,32 @@ void MainComponent::resized()
         topBar->setBounds(topBarBounds);
     }
     
-    int margin = 20;
-    bounds.reduce(margin, margin);
-    
-    // Simple fixed layout with basic responsiveness
-    if (titleLabel)
+    // NavBar on the left (resizable width)
+    if (navBar)
     {
-        auto titleBounds = bounds.removeFromTop(60);
-        titleLabel->setBounds(titleBounds);
+        auto navBounds = bounds.removeFromLeft(navBar->getBarWidth());
+        navBar->setBounds(navBounds);
     }
-    
-    if (languageButton)
+
+    // QueueBar on the right (resizable width)
+    if (queueBar)
     {
-        auto buttonBounds = bounds.removeFromTop(40);
-        languageButton->setBounds(buttonBounds.withWidth(200).withX(bounds.getX()));
+        auto queueBounds = bounds.removeFromRight(queueBar->getBarWidth());
+        queueBar->setBounds(queueBounds);
     }
-    
-    if (statusLabel)
+
+    // MainArea fills the remaining centre space
+    if (mainArea)
     {
-        auto statusBounds = bounds.removeFromTop(30);
-        statusLabel->setBounds(statusBounds);
+        mainArea->setBounds(bounds);
     }
-    
-    if (debugLabel)
-    {
-        auto debugBounds = bounds.removeFromTop(30);
-        debugLabel->setBounds(debugBounds);
-    }
+
+    // The old placeholder labels are no longer laid out in the centre;
+    // they can be hidden or removed entirely later.
+    if (titleLabel)     titleLabel->setVisible(false);
+    if (languageButton) languageButton->setVisible(false);
+    if (statusLabel)    statusLabel->setVisible(false);
+    if (debugLabel)     debugLabel->setVisible(false);
     
     // Basic responsive features (commented out until safer)
     // updateUIForScreenSize();
@@ -572,6 +682,13 @@ void MainComponent::updateAllText()
             juce::String debugText = "Debug: " + lm.getCurrentLanguage() + " Active";
             debugLabel->setText(debugText, juce::dontSendNotification);
         }
+        
+        // Propagate to child bar components
+        if (topBar)    topBar->updateAllText();
+        if (bottomBar) bottomBar->updateAllText();
+        if (navBar)    navBar->updateAllText();
+        if (mainArea)  mainArea->updateAllText();
+        if (queueBar)  queueBar->updateAllText();
         
         // Trigger repaint to update any drawn text
         repaint();
