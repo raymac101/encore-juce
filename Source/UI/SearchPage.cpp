@@ -19,6 +19,27 @@
 //==============================================================================
 SearchPage::SongResultRow::SongResultRow() {}
 
+void SearchPage::SongResultRow::setImageUrl(const juce::String& url)
+{
+    if (url.isEmpty()) return;
+
+    // Single call: returns image if cached, queues callback if not.
+    juce::Component::SafePointer<SongResultRow> safeThis(this);
+    juce::Image img = ArtworkCache::getInstance().getOrFetch(url, [safeThis, url]()
+    {
+        if (safeThis == nullptr) return;
+        juce::Image fetched = ArtworkCache::getInstance().getOrFetch(url);
+        if (fetched.isValid())
+        {
+            safeThis->cachedImage = fetched;
+            safeThis->repaint();
+        }
+    });
+
+    if (img.isValid())
+        cachedImage = img;
+}
+
 void SearchPage::SongResultRow::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
@@ -42,13 +63,22 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
     // Artwork placeholder
     {
         auto artRect = juce::Rectangle<int>(x + 4, 4, artW - 8, bounds.getHeight() - 8);
-        g.setColour(juce::Colour(0xff6c6c6c));
-        g.fillRect(artRect);
-        // Initial letter
-        g.setColour(juce::Colours::white.withAlpha(0.4f));
-        g.setFont(juce::Font(juce::FontOptions().withHeight(14.f)));
-        juce::String initial = juce::String(song.songName).substring(0, 1).toUpperCase();
-        g.drawText(initial, artRect, juce::Justification::centred);
+        if (cachedImage.isValid())
+        {
+            g.drawImage(cachedImage, artRect.toFloat(),
+                        juce::RectanglePlacement::centred |
+                        juce::RectanglePlacement::fillDestination);
+        }
+        else
+        {
+            g.setColour(juce::Colour(0xff6c6c6c));
+            g.fillRect(artRect);
+            // Initial letter placeholder
+            g.setColour(juce::Colours::white.withAlpha(0.4f));
+            g.setFont(juce::Font(juce::FontOptions().withHeight(14.f)));
+            juce::String initial = juce::String(song.songName).substring(0, 1).toUpperCase();
+            g.drawText(initial, artRect, juce::Justification::centred);
+        }
     }
     x += artW;
 
@@ -239,43 +269,8 @@ SearchPage::SearchPage()
     };
     addAndMakeVisible(listViewport);
 
-    // Populate sample data for demo
-    {
-        auto makeSong = [](const char* songN, const char* artistN,
-                           const char* ver, const char* year, const char* genre) {
-            CdgSong s;
-            s.songName = songN;
-            s.artistName = artistN;
-            s.version.push_back(ver);
-            s.releaseDate = year;
-            s.genres.push_back(genre);
-            return s;
-        };
-
-        std::vector<CdgSong> demo;
-        demo.push_back(makeSong("Don't Stop Believin'", "Journey", "Karaoke", "1981", "Rock"));
-        demo.push_back(makeSong("Bohemian Rhapsody", "Queen", "Karaoke", "1975", "Rock"));
-        demo.push_back(makeSong("Sweet Caroline", "Neil Diamond", "Karaoke", "1969", "Pop"));
-        demo.push_back(makeSong("My Way", "Frank Sinatra", "Karaoke", "1969", "Jazz"));
-        demo.push_back(makeSong("Livin' on a Prayer", "Bon Jovi", "Karaoke", "1986", "Rock"));
-        demo.push_back(makeSong("I Will Always Love You", "Whitney Houston", "Karaoke", "1992", "Pop"));
-        demo.push_back(makeSong("Rolling in the Deep", "Adele", "Karaoke", "2010", "Pop"));
-        demo.push_back(makeSong("Total Eclipse of the Heart", "Bonnie Tyler", "Karaoke", "1983", "Pop"));
-        demo.push_back(makeSong("Love Shack", "The B-52's", "Karaoke", "1989", "Rock"));
-        demo.push_back(makeSong("Mr. Brightside", "The Killers", "Karaoke", "2003", "Rock"));
-        demo.push_back(makeSong("Piano Man", "Billy Joel", "Karaoke", "1973", "Rock"));
-        demo.push_back(makeSong("Africa", "Toto", "Karaoke", "1982", "Pop"));
-        demo.push_back(makeSong("Take Me Home, Country Roads", "John Denver", "Karaoke", "1971", "Country"));
-        demo.push_back(makeSong("Summer Nights", "Grease Cast", "Singalong", "1978", "Musical"));
-        demo.push_back(makeSong("Wonderwall", "Oasis", "Karaoke", "1995", "Rock"));
-        demo.push_back(makeSong("Shallow", "Lady Gaga & Bradley Cooper", "Duet", "2018", "Pop"));
-        demo.push_back(makeSong("Flowers", "Miley Cyrus", "Karaoke", "2023", "Pop"));
-        demo.push_back(makeSong("Anti-Hero", "Taylor Swift", "Karaoke", "2022", "Pop"));
-        demo.push_back(makeSong("Creep", "Radiohead", "Karaoke", "1993", "Rock"));
-        demo.push_back(makeSong("I Will Survive", "Gloria Gaynor", "Karaoke", "1978", "Disco"));
-
-        setSongs(demo);
-    }
+    // Songs are populated via setSongs() once the songbook is loaded.
+    // No demo data — the search page starts empty until the library is ready.
 }
 
 //==============================================================================
@@ -596,6 +591,10 @@ void SearchPage::rebuildResultRows()
         };
         listContent.addAndMakeVisible(row);
         resultRows.add(row);
+
+        // Trigger async image load if the song has artwork
+        if (! displaySongs[(size_t)i].imageUrl.empty())
+            row->setImageUrl(juce::String(displaySongs[(size_t)i].imageUrl));
     }
 }
 

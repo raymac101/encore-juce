@@ -31,8 +31,27 @@ MainArea::MainArea()
         pages[static_cast<int>(NavPage::Search)] = std::move(sp);
     }
 
-    // Create placeholder pages for the other NavPages
-    addPage(NavPage::Library,         lm.getText("page.library"));
+    // Create real Library page
+    {
+        auto lp = std::make_unique<LibraryPage>();
+        libraryPage = lp.get();
+
+        // When the songbook changes, push the updated songs to Search and Home pages
+        libraryPage->onSongbookChanged = [this](const std::vector<CdgSong>& songs) {
+            if (searchPage) searchPage->setSongs(songs);
+            if (homePage)   homePage->setSongsFromLibrary(songs);
+        };
+
+        // Seed Search and Home pages with whatever is already on disk
+        if (searchPage)
+            searchPage->setSongs(libraryPage->getSongs());
+        if (homePage)
+            homePage->setSongsFromLibrary(libraryPage->getSongs());
+
+        addChildComponent(lp.get());
+        pages[static_cast<int>(NavPage::Library)] = std::move(lp);
+    }
+
     addPage(NavPage::Charts,          lm.getText("page.charts"));
     addPage(NavPage::Mixer,           lm.getText("page.mixer"));
     addPage(NavPage::Settings,        lm.getText("page.settings"));
@@ -105,6 +124,7 @@ void MainArea::updateAllText()
     }
 
     // Update concrete pages
-    if (homePage) homePage->updateAllText();
-    if (searchPage) searchPage->updateAllText();
+    if (homePage)    homePage->updateAllText();
+    if (searchPage)  searchPage->updateAllText();
+    if (libraryPage) libraryPage->updateAllText();
 }

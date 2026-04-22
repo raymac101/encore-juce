@@ -18,6 +18,7 @@
 #include "NavBar.h"           // For NavPage enum
 #include "HomePage.h"
 #include "SearchPage.h"
+#include "LibraryPage.h"
 #include "../Localization/LocalizationManager.h"
 #include <unordered_map>
 
@@ -77,8 +78,9 @@ private:
     std::unordered_map<int, std::unique_ptr<juce::Component>> pages;
 
     // Concrete page pointers (non-owning, for type-safe access)
-    HomePage* homePage = nullptr;
-    SearchPage* searchPage = nullptr;
+    HomePage*    homePage    = nullptr;
+    SearchPage*  searchPage  = nullptr;
+    LibraryPage* libraryPage = nullptr;
 
     void addPage(NavPage page, const juce::String& label);
 

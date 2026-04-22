@@ -22,6 +22,7 @@
 #include <JuceHeader.h>
 #include "../Models/CdgSong.h"
 #include "../Localization/LocalizationManager.h"
+#include "../Services/ImageCache.h"
 #include <vector>
 #include <functional>
 
@@ -75,6 +76,12 @@ private:
 
         std::function<void(int)> onClicked;
         std::function<void(int)> onEditClicked;
+
+        // Triggers an async download of the song's imageUrl and repaints when ready.
+        void setImageUrl(const juce::String& url);
+
+    private:
+        juce::Image cachedImage;
     };
 
     //==============================================================================

@@ -30,6 +30,9 @@ target_sources(EncoreJUCE
         Source/UI/QueueBar.cpp
         Source/UI/HomePage.cpp
         Source/UI/SearchPage.cpp
+        Source/UI/LibraryPage.cpp
+        Source/Services/LibraryScanner.cpp
+        Source/Services/ImageCache.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
         Source/Models/QueueItem.cpp

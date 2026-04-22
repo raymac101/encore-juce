@@ -18,7 +18,9 @@
 #include <JuceHeader.h>
 #include "../Models/Track.h"
 #include "../Models/Playlist.h"
+#include "../Models/CdgSong.h"
 #include "../Localization/LocalizationManager.h"
+#include "../Services/ImageCache.h"
 #include <vector>
 #include <functional>
 
@@ -39,6 +41,9 @@ public:
     void setTrack(const juce::String& artist, const juce::String& song,
                   const juce::String& imageUrl, bool isExplicit = false);
     void setArtwork(const juce::Image& img);
+
+    // Starts an async image download for the current imageUrl.
+    void loadArtwork();
 
     std::function<void()> onClick;
 
@@ -118,6 +123,14 @@ public:
     void setNewSongs(const std::vector<Playlist>& playlists);
     void setPopularSongs(const std::vector<Playlist>& playlists);
     void setRecommendedSongs(const std::vector<Playlist>& playlists);
+
+    /**
+        Populate all home page rows from the local song library.
+        - Popular songs: highest-rated (by average rating)
+        - New songs:     newest by release date
+        - Recommended:   random selection with metadata
+    */
+    void setSongsFromLibrary(const std::vector<CdgSong>& songs);
 
     /** Re-read translatable strings. */
     void updateAllText();

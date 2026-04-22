@@ -43,6 +43,25 @@ void SongCard::setArtwork(const juce::Image& img)
     repaint();
 }
 
+void SongCard::loadArtwork()
+{
+    if (imageUrlText.isEmpty()) return;
+
+    // Single call: returns image if cached, queues callback if not.
+    juce::Component::SafePointer<SongCard> safeThis(this);
+    juce::String urlCopy = imageUrlText;
+    juce::Image img = ArtworkCache::getInstance().getOrFetch(urlCopy, [safeThis, urlCopy]()
+    {
+        if (safeThis == nullptr) return;
+        juce::Image fetched = ArtworkCache::getInstance().getOrFetch(urlCopy);
+        if (fetched.isValid())
+            safeThis->setArtwork(fetched);
+    });
+
+    if (img.isValid())
+        setArtwork(img);
+}
+
 void SongCard::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
@@ -133,6 +152,7 @@ void SongRow::setTracks(const std::vector<Track>& tracks)
         int idx = i;
         card->onClick = [this, idx]() { if (onSongClicked) onSongClicked(idx); };
 
+        card->loadArtwork();
         cards.add(card);
     }
     rebuildStrip();
@@ -151,6 +171,7 @@ void SongRow::setPlaylists(const std::vector<Playlist>& playlists)
         int idx = i;
         card->onClick = [this, idx]() { if (onSongClicked) onSongClicked(idx); };
 
+        card->loadArtwork();
         cards.add(card);
     }
     rebuildStrip();
@@ -265,45 +286,8 @@ HomePage::HomePage()
         sampleRecent.push_back(makeTrack("Bohemian Rhapsody", "Queen"));
         sampleRecent.push_back(makeTrack("Don't Stop Believin'", "Journey"));
         sampleRecent.push_back(makeTrack("Sweet Caroline", "Neil Diamond"));
-        sampleRecent.push_back(makeTrack("Livin' on a Prayer", "Bon Jovi"));
-        sampleRecent.push_back(makeTrack("I Will Survive", "Gloria Gaynor"));
-        sampleRecent.push_back(makeTrack("Summer Nights", "Grease"));
-        sampleRecent.push_back(makeTrack("Wonderwall", "Oasis"));
-        sampleRecent.push_back(makeTrack("Take Me Home, Country Roads", "John Denver"));
-        recentRow->setTracks(sampleRecent);
-
-        std::vector<Playlist> sampleNew;
-        auto makePl = [](const char* song, const char* artist) {
-            Playlist p;
-            p.songName = song;
-            p.artistName = artist;
-            return p;
-        };
-        sampleNew.push_back(makePl("Flowers", "Miley Cyrus"));
-        sampleNew.push_back(makePl("Anti-Hero", "Taylor Swift"));
-        sampleNew.push_back(makePl("As It Was", "Harry Styles"));
-        sampleNew.push_back(makePl("About Damn Time", "Lizzo"));
-        sampleNew.push_back(makePl("Heat Waves", "Glass Animals"));
-        sampleNew.push_back(makePl("Stay", "The Kid LAROI & Justin Bieber"));
-        newSongsRow->setPlaylists(sampleNew);
-
-        std::vector<Playlist> samplePopular;
-        samplePopular.push_back(makePl("My Way", "Frank Sinatra"));
-        samplePopular.push_back(makePl("Rolling in the Deep", "Adele"));
-        samplePopular.push_back(makePl("I Will Always Love You", "Whitney Houston"));
-        samplePopular.push_back(makePl("Total Eclipse of the Heart", "Bonnie Tyler"));
-        samplePopular.push_back(makePl("Love Shack", "The B-52's"));
-        samplePopular.push_back(makePl("Mr. Brightside", "The Killers"));
-        samplePopular.push_back(makePl("Piano Man", "Billy Joel"));
-        popularRow->setPlaylists(samplePopular);
-
-        std::vector<Playlist> sampleRec;
-        sampleRec.push_back(makePl("Shallow", "Lady Gaga & Bradley Cooper"));
-        sampleRec.push_back(makePl("Somebody That I Used to Know", "Gotye"));
-        sampleRec.push_back(makePl("Creep", "Radiohead"));
-        sampleRec.push_back(makePl("Africa", "Toto"));
-        sampleRec.push_back(makePl("Wish You Were Here", "Pink Floyd"));
-        recommendedRow->setPlaylists(sampleRec);
+        // Recently played is populated at runtime when actual play history is available.
+        // New / Popular / Recommended are populated via setSongsFromLibrary().
     }
 }
 
@@ -370,4 +354,93 @@ void HomePage::updateAllText()
     newSongsRow->setTitle(lm.getText("home.new_songs"));
     popularRow->setTitle(lm.getText("home.popular_songs"));
     recommendedRow->setTitle(lm.getText("home.recommended_songs"));
+}
+
+//==============================================================================
+void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
+{
+    if (songs.empty()) return;
+
+    constexpr int maxCards = 20;
+
+    // Helper: build a Playlist from a CdgSong
+    auto toPlaylist = [](const CdgSong& s) {
+        Playlist p;
+        p.songName   = s.songName;
+        p.artistName = s.artistName;
+        p.imageUrl   = s.imageUrl;
+        return p;
+    };
+
+    // --- Popular: highest total rating across all versions ---
+    {
+        std::vector<const CdgSong*> sorted;
+        sorted.reserve(songs.size());
+        for (auto& s : songs)
+            sorted.push_back(&s);
+
+        std::stable_sort(sorted.begin(), sorted.end(), [](const CdgSong* a, const CdgSong* b) {
+            double rA = 0.0, rB = 0.0;
+            for (auto r : a->rating) rA += r;
+            for (auto r : b->rating) rB += r;
+            return rA > rB;
+        });
+
+        // Only include songs that actually have a rating
+        std::vector<Playlist> popular;
+        for (auto* sp : sorted)
+        {
+            double total = 0.0;
+            for (auto r : sp->rating) total += r;
+            if (total <= 0.0) break;
+            popular.push_back(toPlaylist(*sp));
+            if ((int)popular.size() >= maxCards) break;
+        }
+        if (! popular.empty())
+            popularRow->setPlaylists(popular);
+    }
+
+    // --- New songs: most recent release date (non-empty) ---
+    {
+        std::vector<const CdgSong*> dated;
+        for (auto& s : songs)
+            if (! s.releaseDate.empty()) dated.push_back(&s);
+
+        std::stable_sort(dated.begin(), dated.end(), [](const CdgSong* a, const CdgSong* b) {
+            return a->releaseDate > b->releaseDate; // lexicographic desc (ISO date strings)
+        });
+
+        std::vector<Playlist> newest;
+        for (auto* sp : dated)
+        {
+            newest.push_back(toPlaylist(*sp));
+            if ((int)newest.size() >= maxCards) break;
+        }
+        if (! newest.empty())
+            newSongsRow->setPlaylists(newest);
+    }
+
+    // --- Recommended: random subset of songs with artwork ---
+    {
+        std::vector<const CdgSong*> withArt;
+        for (auto& s : songs)
+            if (! s.imageUrl.empty()) withArt.push_back(&s);
+
+        // Deterministic shuffle using a fixed seed so it changes each scan but is stable within a session
+        juce::Random rng(42);
+        for (int i = (int)withArt.size() - 1; i > 0; --i)
+        {
+            int j = rng.nextInt(i + 1);
+            std::swap(withArt[(size_t)i], withArt[(size_t)j]);
+        }
+
+        std::vector<Playlist> rec;
+        for (auto* sp : withArt)
+        {
+            rec.push_back(toPlaylist(*sp));
+            if ((int)rec.size() >= maxCards) break;
+        }
+        if (! rec.empty())
+            recommendedRow->setPlaylists(rec);
+    }
 }
