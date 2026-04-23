@@ -11,6 +11,19 @@
 #include "MainArea.h"
 
 //==============================================================================
+void MainArea::loadBackgroundTile()
+{
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    juce::File tileFile = appDir.getChildFile("assets/images/backgrounds/background1.png");
+    if (tileFile.existsAsFile())
+    {
+        backgroundTile_ = juce::ImageFileFormat::loadFrom(tileFile);
+        if (backgroundTile_.isValid())
+            repaint();
+    }
+}
+
+//==============================================================================
 MainArea::MainArea()
 {
     auto& lm = LocalizationManager::getInstance();
@@ -54,7 +67,20 @@ MainArea::MainArea()
 
     addPage(NavPage::Charts,          lm.getText("page.charts"));
     addPage(NavPage::Mixer,           lm.getText("page.mixer"));
-    addPage(NavPage::Settings,        lm.getText("page.settings"));
+
+    // Create real Settings page
+    {
+        auto sp = std::make_unique<SettingsPage>();
+        settingsPage = sp.get();
+
+        settingsPage->onSettingsChanged = [this](const VenueItem& updated) {
+            if (onVenueSettingsChanged)
+                onVenueSettingsChanged(updated);
+        };
+
+        addChildComponent(sp.get());
+        pages[static_cast<int>(NavPage::Settings)] = std::move(sp);
+    }
     addPage(NavPage::Testing,         lm.getText("page.testing"));
     addPage(NavPage::Ads,             lm.getText("page.ads"));
     addPage(NavPage::Playlist,        lm.getText("page.playlist"));
@@ -62,6 +88,8 @@ MainArea::MainArea()
 
     // Show Home by default
     setCurrentPage(NavPage::Home);
+
+    loadBackgroundTile();
 }
 
 //==============================================================================
@@ -75,7 +103,21 @@ void MainArea::addPage(NavPage page, const juce::String& label)
 //==============================================================================
 void MainArea::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff16213e));
+    if (backgroundTile_.isValid())
+    {
+        float aspect = (float)backgroundTile_.getHeight() / (float)backgroundTile_.getWidth();
+        int tw = tileSize_;
+        int th = juce::roundToInt(tw * aspect);
+        if (th < 1) th = tw;
+        for (int y = 0; y < getHeight(); y += th)
+            for (int x = 0; x < getWidth(); x += tw)
+                g.drawImage(backgroundTile_, x, y, tw, th,
+                            0, 0, backgroundTile_.getWidth(), backgroundTile_.getHeight());
+    }
+    else
+    {
+        g.fillAll(juce::Colour(0xff16213e));
+    }
 }
 
 //==============================================================================
@@ -124,7 +166,8 @@ void MainArea::updateAllText()
     }
 
     // Update concrete pages
-    if (homePage)    homePage->updateAllText();
-    if (searchPage)  searchPage->updateAllText();
-    if (libraryPage) libraryPage->updateAllText();
+    if (homePage)     homePage->updateAllText();
+    if (searchPage)   searchPage->updateAllText();
+    if (libraryPage)  libraryPage->updateAllText();
+    if (settingsPage) settingsPage->updateAllText();
 }

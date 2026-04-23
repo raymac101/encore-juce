@@ -80,6 +80,12 @@ private:
     std::unique_ptr<juce::PopupMenu> languageMenu;
     
     //==============================================================================
+    // Background Tile
+    juce::Image backgroundTileImage_;
+    int backgroundTileSize_ = 340;
+    void loadBackgroundTile(const juce::String& path = "");
+
+    //==============================================================================
     // Application State
     bool highContrastMode = false;
     bool largeTextMode = false;

@@ -584,6 +584,114 @@ void LocalizationManager::loadFallbackTranslations()
     translations["library.stats_groups"]      = "Folders/Groups:     ";
     translations["library.edit_genres_title"] = "Edit Genres";
     translations["library.edit_genres_body"]  = "Genre editor coming soon.\n\nGenres are automatically extracted from your CDG collection folders and metadata.";
+
+    // ── Settings page ─────────────────────────────────────────────────────────
+    translations["settings.title"]                = "SETTINGS";
+
+    // Section headers
+    translations["settings.sec_venue_info"]       = "VENUE INFORMATION";
+    translations["settings.sec_venue_id"]         = "VENUE IDENTITY";
+    translations["settings.sec_queue"]            = "QUEUE SETTINGS";
+    translations["settings.sec_display"]          = "DISPLAY SETTINGS";
+    translations["settings.sec_session"]          = "SESSION MANAGEMENT";
+
+    // Venue info labels / placeholders
+    translations["settings.lbl_venue_name"]       = "Venue Name:";
+    translations["settings.lbl_address"]          = "Address:";
+    translations["settings.lbl_city"]             = "City:";
+    translations["settings.lbl_country"]          = "Country:";
+    translations["settings.ph_venue_name"]        = "Enter venue name";
+    translations["settings.ph_address"]           = "Enter address";
+    translations["settings.ph_city"]              = "Enter city";
+    translations["settings.ph_country"]           = "Enter country (optional)";
+    translations["settings.btn_save_venue"]       = "SAVE CHANGES";
+    translations["settings.saved"]                = "Settings saved.";
+
+    // Venue identity labels
+    translations["settings.lbl_venue_id"]         = "Venue ID:";
+    translations["settings.lbl_venue_code"]       = "Venue Code:";
+    translations["settings.lbl_emerg_code"]       = "Emergency Code:";
+
+    // Queue setting labels
+    translations["settings.lbl_num_songs"]        = "Songs allowed per Singer:";
+    translations["settings.lbl_num_singers"]      = "Singers visible in Queue:";
+    translations["settings.lbl_num_skips"]        = "Song Skips allowed per Singer:";
+    translations["settings.lbl_repeat_songs"]     = "Allow Repeat Songs:";
+    translations["settings.lbl_auto_approve"]     = "Auto Approve Singers:";
+
+    // Display setting labels
+    translations["settings.lbl_lyrics_bg"]        = "Lyrics Background:";
+    translations["settings.lbl_show_online"]      = "Show Online Songs (Tagg):";
+    translations["settings.lbl_show_online_encore"]= "Show Online Songs (Encore):";
+    translations["settings.lbl_show_memory"]      = "Show Memory Stats:";
+
+    // Session buttons
+    translations["settings.btn_clear_recent"]     = "CLEAR RECENTLY PLAYED";
+    translations["settings.btn_end_session"]      = "END SESSION & ARCHIVE";
+
+    // Shared option strings
+    translations["settings.opt_zero"]             = "Zero";
+    translations["settings.opt_one"]              = "One";
+    translations["settings.opt_two"]              = "Two";
+    translations["settings.opt_three"]            = "Three";
+    translations["settings.opt_four"]             = "Four";
+    translations["settings.opt_five"]             = "Five";
+    translations["settings.opt_six"]              = "Six";
+    translations["settings.opt_ten"]              = "Ten";
+    translations["settings.opt_any"]              = "Any";
+    translations["settings.opt_next"]             = "Next";
+    translations["settings.opt_all"]              = "All";
+    translations["settings.opt_hide"]             = "Hide Queue";
+
+    // Lyrics background options
+    translations["settings.bg_none"]              = "None";
+    translations["settings.bg_squares"]           = "Squares to Circles";
+    translations["settings.bg_lines"]             = "Lines";
+    translations["settings.bg_fading"]            = "Background Fading";
+    translations["settings.bg_circles"]           = "Circles";
+    translations["settings.bg_rotating"]          = "Rotating Squares";
+    translations["settings.bg_snow"]              = "Snow";
+
+    // Venue info edit mode
+    translations["settings.btn_edit_venue"]        = "EDIT VENUE INFO";
+    translations["settings.btn_delete_venue"]      = "DELETE VENUE";
+    translations["settings.btn_cancel"]            = "CANCEL";
+    translations["settings.lbl_license_key"]       = "Venue License Key:";
+
+    // Venue Code Management
+    translations["settings.sec_venue_code"]        = "Venue Code Management";
+    translations["settings.lbl_current_code"]      = "Current Venue Code:";
+    translations["settings.lbl_manual_code"]       = "Set Manual Code (6 letters):";
+    translations["settings.ph_manual_code"]        = "ABCDEF";
+    translations["settings.btn_set_code"]          = "SET CODE";
+    translations["settings.btn_gen_code"]          = "GENERATE RANDOM CODE";
+    translations["settings.lbl_emerg_header"]      = "Emergency Code";
+    translations["settings.lbl_current_emerg"]     = "Current Emergency Code:";
+    translations["settings.ph_emerg_code"]         = "ENTER 6-LETTER CODE";
+    translations["settings.btn_set_emerg"]         = "SET EMERGENCY CODE";
+    translations["settings.btn_gen_emerg"]         = "GENERATE RANDOM EMERGENCY CODE";
+
+    // User Management
+    translations["settings.sec_users"]             = "Venue User Management";
+    translations["settings.lbl_invite_header"]     = "Invite New User";
+    translations["settings.ph_invite_email"]       = "Enter email address";
+    translations["settings.btn_invite_user"]       = "INVITE USER";
+    translations["settings.lbl_current_users"]     = "Current Users";
+
+    // Logo Management
+    translations["settings.sec_logo"]              = "Logo";
+    translations["settings.lbl_logo"]              = "Logo:";
+    translations["settings.ph_logo_file"]          = "Select your file!";
+    translations["settings.btn_browse"]            = "BROWSE";
+    translations["settings.btn_save_logo"]         = "SAVE LOGO";
+    translations["settings.btn_default_logo"]      = "DEFAULT LOGO";
+
+    // Session stats
+    translations["settings.lbl_songs_today"]       = "Songs Played Today:";
+    translations["settings.lbl_active_members"]    = "Active Members:";
+    translations["settings.lbl_singers_queue"]     = "Singers in Queue:";
+    translations["settings.lbl_req_songs"]         = "Requested Songs:";
+    translations["settings.btn_view_archive"]      = "View Archive History";
 }
 
 juce::File LocalizationManager::findLanguageFile(const juce::String& languageCode)

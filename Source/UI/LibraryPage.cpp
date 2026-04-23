@@ -243,8 +243,6 @@ void LibraryPage::timerCallback()
 //==============================================================================
 void LibraryPage::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(kBg));
-
     // Stats panel background
     auto bounds = getLocalBounds();
     int panelY = titleLabel_->getBottom() + 8

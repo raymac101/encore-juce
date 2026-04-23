@@ -19,6 +19,8 @@
 #include "HomePage.h"
 #include "SearchPage.h"
 #include "LibraryPage.h"
+#include "SettingsPage.h"
+#include "../Models/VenueItem.h"
 #include "../Localization/LocalizationManager.h"
 #include <unordered_map>
 
@@ -78,11 +80,28 @@ private:
     std::unordered_map<int, std::unique_ptr<juce::Component>> pages;
 
     // Concrete page pointers (non-owning, for type-safe access)
-    HomePage*    homePage    = nullptr;
-    SearchPage*  searchPage  = nullptr;
-    LibraryPage* libraryPage = nullptr;
+    HomePage*     homePage     = nullptr;
+    SearchPage*   searchPage   = nullptr;
+    LibraryPage*  libraryPage  = nullptr;
+    SettingsPage* settingsPage = nullptr;
+
+public:
+    /** Push a venue snapshot into the settings page (call from FirebaseManager callback). */
+    void setVenueData(const VenueItem& venue)
+    {
+        if (settingsPage) settingsPage->setVenueData(venue);
+    }
+
+    /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
+    std::function<void(const VenueItem&)> onVenueSettingsChanged;
+
+private:
 
     void addPage(NavPage page, const juce::String& label);
+    void loadBackgroundTile();
+
+    juce::Image backgroundTile_;
+    int tileSize_ = 340;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainArea)
 };

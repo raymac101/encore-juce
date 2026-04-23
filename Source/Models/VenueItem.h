@@ -22,29 +22,56 @@
 */
 struct VenueItem
 {
-    std::string id;                     // Venue ID assigned by Firestore  
-    std::string name;                   // Venue Name
-    std::string address;                // Venue Address
-    std::string city;                   // Venue City
-    std::string country;                // Venue Country
-    std::string adminEmail;             // Admin Email for venue management
-    std::string password;               // Password for venue access
-    std::string code;                   // Venue Code that users enter into Tagg app
-    std::string codePlus;               // Backup Code if primary code fails
-    int64_t updateSongs = 0;            // Flag to tell Encore to update songbook
-    int64_t dateTime = 0;               // Last Date/Time the Venue Code was changed
-    std::string songBookUrl;            // URL to the Venue's Songbook
-    std::string logoUrl;                // URL to the Venue's Logo
-    int background = 0;                 // Selected Background Screensaver
-    bool showOnlineSongs = true;        // Flag to show/hide songs from RightTracks
-    int numSongs = 5;                   // Maximum songs per singer
-    int numStrikes = 3;                 // Number of strikes before removal
-    bool repeatSongs = false;           // Allow repeat songs policy
-    bool autoapprove = true;            // Auto-approve song requests
-    
-    // Localization fields
-    std::string language = "en_US";     // Primary language for venue
-    std::string timezone = "UTC";       // Venue timezone
+    // ── Core identity ────────────────────────────────────────────────────────
+    std::string id;                         // Firestore document ID
+    std::string name;                       // Venue Name
+    std::string address;                    // Street address
+    std::string city;                       // City
+    std::string country;                    // Country
+    std::string adminEmail;                 // Admin email
+    std::string password;                   // Password for venue access
+    std::string registrationKey;            // License / registration key
+
+    // ── Venue codes ─────────────────────────────────────────────────────────
+    std::string code;                       // Primary code for Tagg app
+    std::string codePlus;                   // Emergency / backup code
+
+    // ── Queue policy ────────────────────────────────────────────────────────
+    // NOTE: stored as strings in Firestore ("3", "5", etc.)
+    int numSongs    = 5;                    // Max songs per singer  (maps to "numSongs")
+    int numSingers  = 3;                    // Singers visible in queue (maps to "numSingers")
+    int numStrikes  = 3;                    // Skips allowed per singer (maps to "numStrikes")
+    bool repeatSongs   = false;             // Allow repeat songs
+    bool autoapprove   = true;              // Auto-approve singers
+
+    // ── Display / UI ────────────────────────────────────────────────────────
+    // NOTE: background is stored as string in Firestore ("6")
+    int  background = 0;                    // Lyrics screensaver index (0–6)
+    std::string encoreBackground;           // Background image path (encoreBackground)
+    std::string encodeBackgroundSize;       // Background tile size  (encodeBackgroundSize — note spelling)
+    bool showOnlineSongs        = true;     // Show songs from Tagg / RightTracks
+    bool showOnlineSongsEncore  = false;    // Show online songs in Encore
+    bool showMemoryStats        = false;    // Show memory debug stats
+
+    // ── Media / assets ──────────────────────────────────────────────────────
+    std::string logoUrl;                    // Venue logo image URL
+    std::string songBookUrl;                // Hosted songbook JSON URL
+    std::string staticMapImageUrl;          // Static map preview image URL
+    std::string venueImageUrl;              // Picture of outside the venue
+
+    // ── Timestamps ──────────────────────────────────────────────────────────
+    int64_t updateSongs = 0;                // Epoch ms — triggers songbook refresh
+    int64_t dateTime    = 0;               // Epoch ms — last code change
+    int64_t lat         = -1;              // Latitude  (-1 = not set)
+    int64_t lng         = -1;              // Longitude (-1 = not set)
+
+    // ── Version / metadata ──────────────────────────────────────────────────
+    std::string taggVersion;                // Tagg app version string
+    std::string version;                    // Encore app version string
+
+    // ── Localization ────────────────────────────────────────────────────────
+    std::string language = "en_US";         // Primary language
+    std::string timezone = "UTC";           // Venue timezone
     
     //==============================================================================
     /** 

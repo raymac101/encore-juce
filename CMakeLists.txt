@@ -31,6 +31,7 @@ target_sources(EncoreJUCE
         Source/UI/HomePage.cpp
         Source/UI/SearchPage.cpp
         Source/UI/LibraryPage.cpp
+        Source/UI/SettingsPage.cpp
         Source/Services/LibraryScanner.cpp
         Source/Services/ImageCache.cpp
         Source/Localization/LocalizationManager.cpp

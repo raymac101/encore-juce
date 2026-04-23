@@ -282,17 +282,46 @@ void MainComponent::setupUI()
     if (debugLabel) debugLabel->setBounds(tempBounds.removeFromTop(30));
     
     DBG("setupUI completed successfully with initial bounds set");
+    
+    // Load default background tile
+    loadBackgroundTile();
+}
+
+//==============================================================================
+void MainComponent::loadBackgroundTile(const juce::String& path)
+{
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    juce::String tilePath = path.isEmpty() ? "assets/images/backgrounds/background1.png" : path;
+    juce::File tileFile = appDir.getChildFile(tilePath);
+    if (tileFile.existsAsFile())
+    {
+        backgroundTileImage_ = juce::ImageFileFormat::loadFrom(tileFile);
+        if (backgroundTileImage_.isValid())
+            repaint();
+    }
 }
 
 //==============================================================================
 void MainComponent::paint(juce::Graphics& g)
 {
-    // Background gradient
-    juce::ColourGradient gradient(
-        juce::Colour(0xff1a1a2e), 0, 0,
-        juce::Colour(0xff16213e), getWidth(), getHeight(), false);
-    g.setGradientFill(gradient);
-    g.fillAll();
+    if (backgroundTileImage_.isValid())
+    {
+        // Scale tile to backgroundTileSize_ width, maintain aspect ratio (like CSS background-size: Npx auto)
+        float aspectRatio = (float)backgroundTileImage_.getHeight() / (float)backgroundTileImage_.getWidth();
+        int tileW = backgroundTileSize_;
+        int tileH = juce::roundToInt(tileW * aspectRatio);
+        if (tileH < 1) tileH = tileW;
+
+        for (int y = 0; y < getHeight(); y += tileH)
+            for (int x = 0; x < getWidth(); x += tileW)
+                g.drawImage(backgroundTileImage_, x, y, tileW, tileH,
+                            0, 0, backgroundTileImage_.getWidth(), backgroundTileImage_.getHeight());
+    }
+    else
+    {
+        // Fallback solid fill when no tile image is loaded
+        g.fillAll(juce::Colour(0xff16213e));
+    }
     
     // Draw responsive layout debug info in debug builds
     #if JUCE_DEBUG
