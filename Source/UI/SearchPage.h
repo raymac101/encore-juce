@@ -135,7 +135,9 @@ private:
     FilterMode   filterMode = FilterMode::All;
     SortColumn   sortColumn = SortColumn::None;
     SortDir      sortDir    = SortDir::Asc;
-    int          itemsPerPage = 200;
+    int          loadedCount = 0;
+    static constexpr int kInitialBatch = 100;
+    static constexpr int kScrollBatch  = 50;
 
     //==============================================================================
     // Colours
@@ -167,6 +169,7 @@ private:
     void sortByColumn(SortColumn col);
     void rebuildDisplayList();
     void rebuildResultRows();
+    void loadMoreRows();
     void updateCountLabel();
 
     // Partial multi-word search ("don st bel" matches "Don't Stop Believin'")

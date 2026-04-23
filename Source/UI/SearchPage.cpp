@@ -131,7 +131,8 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
     auto editRect = juce::Rectangle<int>(x, 0, bounds.getWidth() - x, bounds.getHeight());
     g.setColour(juce::Colour(0xffe4e4e4));
     g.setFont(juce::Font(juce::FontOptions().withHeight(16.f)));
-    g.drawText("Edit", editRect, juce::Justification::centred);
+    g.drawText(LocalizationManager::getInstance().getText("search.row_edit"),
+               editRect, juce::Justification::centred);
 
     // Bottom separator
     g.setColour(juce::Colour(0xff585757).withAlpha(0.3f));
@@ -239,11 +240,11 @@ SearchPage::SearchPage()
         return btn;
     };
 
-    colSongBtn    = makeColBtn("SONG");
-    colArtistBtn  = makeColBtn("ARTIST");
-    colVersionBtn = makeColBtn("VERSION");
-    colYearBtn    = makeColBtn("YEAR");
-    colGenreBtn   = makeColBtn("GENRE");
+    colSongBtn    = makeColBtn(lm.getText("search.col_song"));
+    colArtistBtn  = makeColBtn(lm.getText("search.col_artist"));
+    colVersionBtn = makeColBtn(lm.getText("search.col_version"));
+    colYearBtn    = makeColBtn(lm.getText("search.col_year"));
+    colGenreBtn   = makeColBtn(lm.getText("search.col_genre"));
 
     colSongBtn->onClick    = [this]() { sortByColumn(SortColumn::Song);    };
     colArtistBtn->onClick  = [this]() { sortByColumn(SortColumn::Artist);  };
@@ -252,7 +253,7 @@ SearchPage::SearchPage()
     colGenreBtn->onClick   = [this]() { sortByColumn(SortColumn::Genre);   };
 
     // Scroll-to-top button
-    scrollTopButton = std::make_unique<juce::TextButton>("Top");
+    scrollTopButton = std::make_unique<juce::TextButton>(lm.getText("search.scroll_top"));
     scrollTopButton->setColour(juce::TextButton::buttonColourId, juce::Colours::black.withAlpha(0.7f));
     scrollTopButton->setColour(juce::TextButton::textColourOnId, accentColour);
     scrollTopButton->setColour(juce::TextButton::textColourOffId, accentColour);
@@ -266,6 +267,12 @@ SearchPage::SearchPage()
     listViewport.onScrolled = [this]() {
         bool scrolled = listViewport.getViewPositionY() > 100;
         scrollTopButton->setVisible(scrolled);
+
+        // Append next batch when within 300px of the loaded content bottom
+        int viewBottom = listViewport.getViewPositionY() + listViewport.getMaximumVisibleHeight();
+        int contentH   = loadedCount * resultRowHeight;
+        if (viewBottom > contentH - 300)
+            loadMoreRows();
     };
     addAndMakeVisible(listViewport);
 
@@ -561,9 +568,9 @@ void SearchPage::sortByColumn(SortColumn col)
 //==============================================================================
 void SearchPage::rebuildDisplayList()
 {
-    // Paginate
-    int count = juce::jmin((int)filteredSongs.size(), itemsPerPage);
+    int count = juce::jmin((int)filteredSongs.size(), kInitialBatch);
     displaySongs.assign(filteredSongs.begin(), filteredSongs.begin() + count);
+    loadedCount = count;
 
     rebuildResultRows();
     updateCountLabel();
@@ -598,9 +605,41 @@ void SearchPage::rebuildResultRows()
     }
 }
 
+void SearchPage::loadMoreRows()
+{
+    if (loadedCount >= (int)filteredSongs.size()) return;
+
+    int next = juce::jmin(loadedCount + kScrollBatch, (int)filteredSongs.size());
+
+    for (int i = loadedCount; i < next; ++i)
+    {
+        displaySongs.push_back(filteredSongs[(size_t)i]);
+
+        auto* row = new SongResultRow();
+        row->song  = filteredSongs[(size_t)i];
+        row->index = i;
+        row->onClicked = [this](int idx) {
+            if (idx >= 0 && idx < (int)displaySongs.size())
+                if (onSongClicked) onSongClicked(displaySongs[(size_t)idx]);
+        };
+        row->onEditClicked = [this](int idx) {
+            if (idx >= 0 && idx < (int)displaySongs.size())
+                if (onSongEditClicked) onSongEditClicked(displaySongs[(size_t)idx]);
+        };
+        listContent.addAndMakeVisible(row);
+        resultRows.add(row);
+
+        if (! filteredSongs[(size_t)i].imageUrl.empty())
+            row->setImageUrl(juce::String(filteredSongs[(size_t)i].imageUrl));
+    }
+
+    loadedCount = next;
+    resized();
+}
+
 void SearchPage::updateCountLabel()
 {
-    juce::String text = juce::String((int)filteredSongs.size()) + " songs in this list";
+    juce::String text = juce::String((int)filteredSongs.size()) + " " + LocalizationManager::getInstance().getText("search.count_suffix");
     countLabel->setText(text, juce::dontSendNotification);
 }
 
@@ -622,15 +661,16 @@ void SearchPage::updateFilterButtonColours()
 
 void SearchPage::updateColumnHeaderText()
 {
+    auto& lm = LocalizationManager::getInstance();
     auto arrow = [&](SortColumn col) -> juce::String {
         if (sortColumn != col) return "";
         return (sortDir == SortDir::Asc) ? " ^" : " v";
     };
-    colSongBtn->setButtonText("SONG" + arrow(SortColumn::Song));
-    colArtistBtn->setButtonText("ARTIST" + arrow(SortColumn::Artist));
-    colVersionBtn->setButtonText("VERSION" + arrow(SortColumn::Version));
-    colYearBtn->setButtonText("YEAR" + arrow(SortColumn::Year));
-    colGenreBtn->setButtonText("GENRE" + arrow(SortColumn::Genre));
+    colSongBtn->setButtonText(lm.getText("search.col_song")    + arrow(SortColumn::Song));
+    colArtistBtn->setButtonText(lm.getText("search.col_artist")  + arrow(SortColumn::Artist));
+    colVersionBtn->setButtonText(lm.getText("search.col_version") + arrow(SortColumn::Version));
+    colYearBtn->setButtonText(lm.getText("search.col_year")    + arrow(SortColumn::Year));
+    colGenreBtn->setButtonText(lm.getText("search.col_genre")   + arrow(SortColumn::Genre));
 }
 
 //==============================================================================

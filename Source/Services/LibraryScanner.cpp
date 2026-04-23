@@ -102,73 +102,113 @@ juce::String LibraryScanner::normaliseSongKey(const juce::String& artist,
             else if (c == ' ' && !r.isEmpty() && r[r.length() - 1] != ' ')
                 r += ' ';
         }
-        return r.trim();
+        r = r.trim();
+
+        // Normalise contracted "-in'" forms to "-ing" so that
+        // "Believin'", "Believing", "Believin" all produce the same key.
+        // We scan word-by-word and expand any word ending in "in" to "ing".
+        {
+            juce::StringArray words;
+            words.addTokens(r, " ", "");
+            for (auto& w : words)
+                if (w.endsWith("in") && w.length() > 2)
+                    w += "g";
+            r = words.joinIntoString(" ");
+        }
+
+        return r;
     };
-    return normalise(artist) + "|" + normalise(song);
+
+    // Artist alias map — maps any alias to the canonical normalised form.
+    // Keys and values must already be in the normalised form (lowercase,
+    // alphanumeric + spaces only, "the" stripped, "-in" → "-ing" applied).
+    static const struct { const char* alias; const char* canonical; } kArtistAliases[] = {
+        { "jon bon jovi",          "bon jovi"          },
+        { "john bon jovi",         "bon jovi"          },
+        { "ac dc",                 "acdc"               },
+        { "the rolling stones",    "rolling stones"     },
+        { nullptr, nullptr }
+    };
+
+    juce::String normArtist = normalise(artist);
+    for (int i = 0; kArtistAliases[i].alias != nullptr; ++i)
+        if (normArtist == kArtistAliases[i].alias)
+        { normArtist = kArtistAliases[i].canonical; break; }
+
+    return normArtist + "|" + normalise(song);
 }
 
-/** Map a catalog disc-code (e.g. "SC1234") to a human-readable vendor name.
-    Ported from findVersion() in karaoke-parser.js. */
+/** Map a catalog disc-code (e.g. "SC1234" or "Leg12345") to a human-readable
+    vendor name.  Synced with findVersion() in karaoke-parser.js. */
 juce::String LibraryScanner::vendorVersionFromCode(const juce::String& code)
 {
     if (code.isEmpty()) return {};
 
-    // Extract the letter prefix (e.g. "SC" from "SC1234")
+    // Extract the full alphabetic prefix regardless of case
+    // e.g. "SC1234"->"sc", "Leg12345"->"leg", "SFMW001"->"sfmw"
     juce::String prefix;
-    for (int i = 0; i < code.length() && code[i] >= 'A' && code[i] <= 'Z'; ++i)
-        prefix += code[i];
+    for (int i = 0; i < code.length(); ++i)
+    {
+        juce::juce_wchar c = code[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+            prefix += c;
+        else
+            break;
+    }
     prefix = prefix.toLowerCase();
 
+    // Ordered longest-first so e.g. "sfpldu" matches before "sf"
     static const struct { const char* key; const char* name; } kMap[] = {
-        {"ac",    "All Country"},
-        {"ask",   "All Star Karaoke"},
-        {"bc",    "No Name"},
-        {"bs",    "Back Stage"},
-        {"cb",    "Chartbuster"},
-        {"dg",    "Dangerous"},
-        {"dis",   "Disney"},
-        {"dk",    "DAIICHIKOSHO"},
-        {"dkm",   "DAIICHIKOSHO"},
-        {"dm",    "Doctor Music"},
-        {"ezh",   "Easy Karaoke"},
-        {"gm",    "Gamesman"},
-        {"hspk",  "Hot Stuff Pack"},
-        {"kar",   "Karaoke"},
-        {"kjt",   "KJ Tools"},
-        {"kk",    "Karaoke Kurrents"},
-        {"kv",    "Karaoke Version"},
-        {"lbl",   "Legend Baseline"},
-        {"leg",   "Legends"},
-        {"llc",   "Legends Lost Classics"},
-        {"mh",    "Monster Hit"},
-        {"mhr",   "Mr. Entertainer Hits"},
-        {"mm",    "Music Maestro"},
-        {"par",   "Parody"},
-        {"pr",    "Pridis Music"},
-        {"phm",   "Pop Hits Monthly"},
-        {"pi",    "Pioneer"},
-        {"qh",    "Quick Hits"},
-        {"rsv",   "Radio Stars"},
-        {"rsz",   "Radio Stars"},
-        {"sav",   "BMB"},
-        {"sbi",   "SBI Karaoke"},
-        {"sc",    "Sound Choice"},
-        {"scs",   "Sound Choice"},
-        {"sdc",   "Star Disc"},
-        {"sdp",   "Star Disc Pop"},
-        {"sfpldu","SunFly"},
-        {"sfmz",  "SunFly"},
-        {"sfmw",  "SunFly"},
-        {"sfg",   "SunFly"},
-        {"sf",    "SunFly"},
-        {"sgb",   "Sweet Georgia Brown"},
-        {"sk",    "Sing King"},
-        {"ss",    "Singer Solution"},
-        {"thm",   "Top Hits Monthly"},
-        {"tt",    "Top Tunes"},
-        {"zpcp",  "Zoom Platinum Country & Pop"},
-        {"zp",    "Zoom Platinum"},
-        {nullptr, nullptr}
+        {"sfpldu", "SunFly"},
+        {"zpcp",   "Zoom Platinum Country & Pop"},
+        {"hspk",   "Hot Stuff Pack"},
+        {"sfmw",   "SunFly"},
+        {"sfmz",   "SunFly"},
+        {"dkm",    "DAIICHIKOSHO"},
+        {"llc",    "Legends Lost Classics"},
+        {"mhr",    "Mr. Entertainer Hits"},
+        {"ask",    "All Star Karaoke"},
+        {"lbl",    "Legend Baseline"},
+        {"phm",    "Pop Hits Monthly"},
+        {"rsv",    "Radio Stars"},
+        {"rsz",    "Radio Stars"},
+        {"sav",    "BMB"},
+        {"sbi",    "SBI Karaoke"},
+        {"scs",    "Sound Choice"},
+        {"sdc",    "Star Disc"},
+        {"sdp",    "Star Disc Pop"},
+        {"sgb",    "Sweet Georgia Brown"},
+        {"thm",    "Top Hits Monthly"},
+        {"kjt",    "KJ Tools"},
+        {"ezh",    "Easy Karaoke"},
+        {"sfg",    "SunFly"},
+        {"ac",     "All Country"},
+        {"bc",     "No Name"},
+        {"bs",     "Back Stage"},
+        {"cb",     "Chartbuster"},
+        {"dg",     "Dangerous"},
+        {"dis",    "Disney"},
+        {"dk",     "DAIICHIKOSHO"},
+        {"dm",     "Doctor Music"},
+        {"gm",     "Gamesman Can/Con"},
+        {"kar",    "Karaoke Can/Con"},
+        {"kk",     "Karaoke Kurrents"},
+        {"kv",     "Karaoke Version"},
+        {"leg",    "Legends"},
+        {"mh",     "Monster Hit"},
+        {"mm",     "Music Maestro"},
+        {"par",    "Parody"},
+        {"phm",    "Pop Hits Monthly"},
+        {"pi",     "Pioneer"},
+        {"pr",     "Pridis Music"},
+        {"qh",     "Quick Hits"},
+        {"sc",     "Sound Choice"},
+        {"sf",     "SunFly"},
+        {"sk",     "Sing King"},
+        {"ss",     "Singer Solution"},
+        {"tt",     "Top Tunes"},
+        {"zp",     "Zoom Platinum"},
+        {nullptr,  nullptr}
     };
 
     for (int i = 0; kMap[i].key != nullptr; ++i)
@@ -177,37 +217,49 @@ juce::String LibraryScanner::vendorVersionFromCode(const juce::String& code)
     return {};
 }
 
-/** Return a quality rating 1–5 for a vendor catalog disc-code.
-    Ported from getRating() in karaoke-parser.js. */
-int LibraryScanner::ratingForCode(const juce::String& code)
+/** Return a quality rating 0.0–5.0 for a vendor catalog disc-code.
+    Synced with getRating() in karaoke-parser.js. */
+double LibraryScanner::ratingForCode(const juce::String& code)
 {
-    if (code.isEmpty()) return 1;
+    if (code.isEmpty()) return 1.0;
 
+    // Extract full alphabetic prefix, mixed-case safe
     juce::String prefix;
-    for (int i = 0; i < code.length() && code[i] >= 'A' && code[i] <= 'Z'; ++i)
-        prefix += code[i];
+    for (int i = 0; i < code.length(); ++i)
+    {
+        juce::juce_wchar c = code[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+            prefix += c;
+        else
+            break;
+    }
     prefix = prefix.toLowerCase();
 
-    static const struct { const char* key; int rating; } kRatings[] = {
-        {"ask",   4}, {"bc",    3}, {"bs",    3}, {"cb",    4},
-        {"dg",    3}, {"dis",   5}, {"dk",    4}, {"dkm",   4},
-        {"dm",    4}, {"ezh",   4}, {"gm",    5}, {"hspk",  4},
-        {"kar",   5}, {"kjt",   3}, {"kk",    5}, {"kv",    4},
-        {"lbl",   4}, {"leg",   4}, {"llc",   4}, {"mh",    4},
-        {"mhr",   4}, {"mm",    4}, {"par",   4}, {"pr",    5},
-        {"phm",   5}, {"pi",    3}, {"qh",    4}, {"rsv",   4},
-        {"rsz",   4}, {"sav",   1}, {"sbi",   4}, {"sc",    5},
-        {"scs",   5}, {"sdc",   5}, {"sdp",   5}, {"sf",    4},
-        {"sfg",   4}, {"sfmw",  4}, {"sfmz",  4}, {"sfpldu",4},
-        {"sgb",   4}, {"sk",    5}, {"ss",    4}, {"thm",   5},
-        {"tt",    1}, {"zp",    4}, {"zpcp",  4},
-        {nullptr, 0}
+    // Ordered longest-first so "sfpldu" matches before "sf"
+    static const struct { const char* key; double rating; } kRatings[] = {
+        {"sfpldu", 4.0 }, {"zpcp",   4.0 }, {"hspk",   4.0 },
+        {"sfmw",   4.0 }, {"sfmz",   4.0 }, {"dkm",    4.25},
+        {"llc",    4.0 }, {"mhr",    4.0 }, {"ask",    3.5 },
+        {"lbl",    4.0 }, {"phm",    4.5 }, {"rsv",    4.25},
+        {"rsz",    4.25}, {"sav",    1.0 }, {"sbi",    4.0 },
+        {"scs",    5.0 }, {"sdc",    4.5 }, {"sdp",    4.5 },
+        {"sgb",    3.5 }, {"thm",    4.5 }, {"kjt",    3.0 },
+        {"ezh",    3.75}, {"sfg",    4.25},
+        {"bc",     3.0 }, {"bs",     2.5 }, {"cb",     4.0 },
+        {"dg",     3.0 }, {"dis",    4.5 }, {"dk",     4.25},
+        {"dm",     3.5 }, {"gm",     4.5 }, {"kar",    4.5 },
+        {"kk",     4.5 }, {"kv",     4.0 }, {"leg",    4.0 },
+        {"mh",     3.75}, {"mm",     3.75}, {"par",    3.5 },
+        {"pi",     2.5 }, {"pr",     4.5 }, {"qh",     3.5 },
+        {"sc",     5.0 }, {"sf",     4.25}, {"sk",     4.5 },
+        {"ss",     3.5 }, {"tt",     1.0 }, {"zp",     3.5 },
+        {nullptr,  0.0 }
     };
 
     for (int i = 0; kRatings[i].key != nullptr; ++i)
         if (prefix == kRatings[i].key)
             return kRatings[i].rating;
-    return 1;
+    return 1.0;
 }
 
 //==============================================================================
@@ -301,10 +353,14 @@ void LibraryScanner::run()
         juce::String artist, songTitle, code, version;
         parseFilename(baseName, artist, songTitle, code, version);
 
+        // If no front catalog code, the parenthetical tag IS the vendor identifier
+        // e.g. "Acdc - Back In Black (Leg).cdg" → version="Leg", code=""
+        juce::String rawTag = code.isEmpty() ? version : code;
+
         // Resolve the human-readable vendor version string
-        juce::String versionStr = vendorVersionFromCode(code);
+        juce::String versionStr = vendorVersionFromCode(rawTag);
         if (versionStr.isEmpty())
-            versionStr = version.isEmpty() ? "Unknown" : version;
+            versionStr = rawTag.isEmpty() ? "Unknown" : rawTag;
 
         juce::String normKey = normaliseSongKey(artist, songTitle);
 
@@ -350,8 +406,8 @@ void LibraryScanner::run()
                     existing.fileType.push_back(ext.toStdString());
                 }
                 existing.version.push_back(versionStr.toStdString());
-                existing.code.push_back(code.toStdString());
-                existing.rating.push_back(ratingForCode(code));
+                existing.code.push_back(rawTag.toStdString());
+                existing.rating.push_back(ratingForCode(rawTag));
             }
         }
         else
@@ -520,12 +576,14 @@ CdgSong LibraryScanner::buildSong(const juce::String& baseName,
     }
 
     // Version & disc code — resolve vendor name from catalog code
-    juce::String versionStr = vendorVersionFromCode(code);
+    // If no front catalog code, the parenthetical tag IS the vendor identifier
+    juce::String rawTag = code.isEmpty() ? version : code;
+    juce::String versionStr = vendorVersionFromCode(rawTag);
     if (versionStr.isEmpty())
-        versionStr = version.isEmpty() ? "Unknown" : version;
+        versionStr = rawTag.isEmpty() ? "Unknown" : rawTag;
     song.version.push_back(versionStr.toStdString());
-    song.code.push_back(code.toStdString());
-    song.rating.push_back(ratingForCode(code));
+    song.code.push_back(rawTag.toStdString());
+    song.rating.push_back(ratingForCode(rawTag));
 
     // File size / date from primary file
     song.fileSize = sorted[0].getSize();
@@ -680,6 +738,13 @@ bool LibraryScanner::saveSongbook(const std::vector<CdgSong>& songs)
 {
     juce::File file = getSongbookFile();
     file.getParentDirectory().createDirectory();
+
+    // Persist the scan root so the UI can restore it on next launch
+    if (scanRoot_.isDirectory())
+    {
+        juce::File rootFile = file.getSiblingFile("scanRoot.txt");
+        rootFile.replaceWithText(scanRoot_.getFullPathName());
+    }
 
     juce::Array<juce::var> arr;
     for (auto& s : songs)

@@ -30,7 +30,7 @@ LibraryPage::LibraryPage()
     //--------------------------------------------------------------------------
     // Title
     titleLabel_ = std::make_unique<juce::Label>();
-    titleLabel_->setText("LIBRARY", juce::dontSendNotification);
+    titleLabel_->setText(lm.getText("library.title"), juce::dontSendNotification);
     titleLabel_->setFont(juce::Font(juce::FontOptions().withHeight(22.f)).boldened());
     titleLabel_->setColour(juce::Label::textColourId, juce::Colours::white);
     titleLabel_->setJustificationType(juce::Justification::centredLeft);
@@ -39,7 +39,7 @@ LibraryPage::LibraryPage()
     //--------------------------------------------------------------------------
     // Path section
     pathLabel_ = std::make_unique<juce::Label>();
-    pathLabel_->setText("Path to Karaoke Song Files:", juce::dontSendNotification);
+    pathLabel_->setText(lm.getText("library.path_label"), juce::dontSendNotification);
     pathLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
     pathLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
     addAndMakeVisible(*pathLabel_);
@@ -62,7 +62,7 @@ LibraryPage::LibraryPage()
     //--------------------------------------------------------------------------
     // Progress section (hidden until a scan starts)
     progressLabel_ = std::make_unique<juce::Label>();
-    progressLabel_->setText("Scanning:", juce::dontSendNotification);
+    progressLabel_->setText(lm.getText("library.scanning"), juce::dontSendNotification);
     progressLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
     progressLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
     progressLabel_->setVisible(false);
@@ -101,13 +101,13 @@ LibraryPage::LibraryPage()
         addAndMakeVisible(*btn);
     };
 
-    makeBtn("Initial Song Load", initialSongLoadBtn_,
+    makeBtn(lm.getText("library.btn_initial_load"), initialSongLoadBtn_,
             [this]() { onInitialSongLoad(); });
-    makeBtn("Add Songs",         addSongsBtn_,
+    makeBtn(lm.getText("library.btn_add_songs"),     addSongsBtn_,
             [this]() { onAddSongs(); });
-    makeBtn("Get Meta Data",     getMetaDataBtn_,
+    makeBtn(lm.getText("library.btn_get_metadata"),  getMetaDataBtn_,
             [this]() { onGetMetaData(); });
-    makeBtn("Edit Genres",       editGenresBtn_,
+    makeBtn(lm.getText("library.btn_edit_genres"),   editGenresBtn_,
             [this]() { onEditGenres(); });
 
     //--------------------------------------------------------------------------
@@ -154,7 +154,7 @@ LibraryPage::LibraryPage()
 
         refreshStats();
         setScanningState(false);
-        showMessage(juce::String(songs_.size()) + " songs loaded.", false);
+        showMessage(LocalizationManager::getInstance().getText("library.songs_loaded").replace("{n}", juce::String((int)songs_.size())), false);
 
         if (onSongbookChanged) onSongbookChanged(songs_);
     };
@@ -183,18 +183,34 @@ void LibraryPage::loadSongbook()
     stats_ = LibraryScanner::computeStats(songs_);
     refreshStats();
 
-    // Pre-populate path from saved prefs / first song
-    if (! songs_.empty() && ! songs_[0].filePath.empty())
+    // Restore the scan root from the saved file (written by saveSongbook)
     {
-        juce::File dir(juce::String(songs_[0].filePath[0]));
-        pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
+        juce::File rootFile = scanner_.getSongbookFile().getSiblingFile("scanRoot.txt");
+        if (rootFile.existsAsFile())
+        {
+            juce::String savedPath = rootFile.loadFileAsString().trim();
+            if (savedPath.isNotEmpty())
+                pathEditor_->setText(savedPath, juce::dontSendNotification);
+        }
+        else if (! songs_.empty() && ! songs_[0].filePath.empty())
+        {
+            // Legacy fallback — walk up until we reach a directory that looks like the root
+            juce::File dir(juce::String(songs_[0].filePath[0]));
+            pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
+        }
     }
 }
 
 //==============================================================================
 void LibraryPage::updateAllText()
 {
-    // Re-read any localized strings if/when localization covers library text
+    auto& lm = LocalizationManager::getInstance();
+    titleLabel_->setText(lm.getText("library.title"),      juce::dontSendNotification);
+    pathLabel_ ->setText(lm.getText("library.path_label"), juce::dontSendNotification);
+    initialSongLoadBtn_->setButtonText(lm.getText("library.btn_initial_load"));
+    addSongsBtn_       ->setButtonText(lm.getText("library.btn_add_songs"));
+    getMetaDataBtn_    ->setButtonText(lm.getText("library.btn_get_metadata"));
+    editGenresBtn_     ->setButtonText(lm.getText("library.btn_edit_genres"));
     refreshStats();
 }
 
@@ -344,8 +360,8 @@ void LibraryPage::startFolderChooser(bool appendMode)
     }
 
     fileChooser_ = std::make_shared<juce::FileChooser>(
-        appendMode ? "Select Directory to Add Songs From"
-                   : "Select Karaoke Collection Root Directory",
+        appendMode ? LocalizationManager::getInstance().getText("library.chooser_append")
+                   : LocalizationManager::getInstance().getText("library.chooser_root"),
         startDir);
 
     fileChooser_->launchAsync(
@@ -374,14 +390,14 @@ void LibraryPage::onGetMetaData()
 {
     if (songs_.empty())
     {
-        showMessage("No songs loaded. Run an Initial Song Load first.", true);
+        showMessage(LocalizationManager::getInstance().getText("library.no_songs"), true);
         return;
     }
 
     setScanningState(true);
     progressValue_ = -1.0;
     progressBar_->repaint();
-    progressLabel_->setText("Applying metadata:", juce::dontSendNotification);
+    progressLabel_->setText(LocalizationManager::getInstance().getText("library.applying_metadata"), juce::dontSendNotification);
 
     // Run on a background thread to avoid blocking the UI
     juce::Thread::launch([this]() {
@@ -402,11 +418,12 @@ void LibraryPage::onGetMetaData()
 //==============================================================================
 void LibraryPage::onEditGenres()
 {
+    auto& lm = LocalizationManager::getInstance();
     juce::AlertWindow::showMessageBoxAsync(
         juce::MessageBoxIconType::InfoIcon,
-        "Edit Genres",
-        "Genre editor coming soon.\n\nGenres are automatically extracted from your CDG collection folders and metadata.",
-        "OK");
+        lm.getText("library.edit_genres_title"),
+        lm.getText("library.edit_genres_body"),
+        lm.getText("button.ok"));
 }
 
 //==============================================================================
@@ -418,15 +435,16 @@ void LibraryPage::refreshStats()
         return juce::String(label) + juce::String(value);
     };
 
-    statsTotalLabel_  ->setText(fmt("Total Songs:        ", stats_.numSongs),   juce::dontSendNotification);
-    statsMetaLabel_   ->setText(fmt("Metadata Available: ", stats_.numMeta),    juce::dontSendNotification);
-    statsCDGLabel_    ->setText(fmt("CDG Files:          ", stats_.numCDG),     juce::dontSendNotification);
-    statsZipLabel_    ->setText(fmt("ZIP Files:          ", stats_.numZip),     juce::dontSendNotification);
-    statsMP4Label_    ->setText(fmt("MP4 Files:          ", stats_.numMP4),     juce::dontSendNotification);
-    statsM4ALabel_    ->setText(fmt("M4A Files:          ", stats_.numM4A),     juce::dontSendNotification);
-    statsXMLLabel_    ->setText(fmt("XML Files:          ", stats_.numXML),     juce::dontSendNotification);
-    statsUnknownLabel_->setText(fmt("Unknown Files:      ", stats_.numUnknown), juce::dontSendNotification);
-    statsGroupsLabel_ ->setText(fmt("Folders/Groups:     ", stats_.numGroups),  juce::dontSendNotification);
+    auto& lm = LocalizationManager::getInstance();
+    statsTotalLabel_  ->setText(fmt(lm.getText("library.stats_total")  .toRawUTF8(), stats_.numSongs),   juce::dontSendNotification);
+    statsMetaLabel_   ->setText(fmt(lm.getText("library.stats_meta")   .toRawUTF8(), stats_.numMeta),    juce::dontSendNotification);
+    statsCDGLabel_    ->setText(fmt(lm.getText("library.stats_cdg")    .toRawUTF8(), stats_.numCDG),     juce::dontSendNotification);
+    statsZipLabel_    ->setText(fmt(lm.getText("library.stats_zip")    .toRawUTF8(), stats_.numZip),     juce::dontSendNotification);
+    statsMP4Label_    ->setText(fmt(lm.getText("library.stats_mp4")    .toRawUTF8(), stats_.numMP4),     juce::dontSendNotification);
+    statsM4ALabel_    ->setText(fmt(lm.getText("library.stats_m4a")    .toRawUTF8(), stats_.numM4A),     juce::dontSendNotification);
+    statsXMLLabel_    ->setText(fmt(lm.getText("library.stats_xml")    .toRawUTF8(), stats_.numXML),     juce::dontSendNotification);
+    statsUnknownLabel_->setText(fmt(lm.getText("library.stats_unknown").toRawUTF8(), stats_.numUnknown), juce::dontSendNotification);
+    statsGroupsLabel_ ->setText(fmt(lm.getText("library.stats_groups") .toRawUTF8(), stats_.numGroups),  juce::dontSendNotification);
 
     repaint();
 }
@@ -452,7 +470,7 @@ void LibraryPage::setScanningState(bool scanning)
 
     if (scanning)
     {
-        progressLabel_->setText("Scanning:", juce::dontSendNotification);
+        progressLabel_->setText(LocalizationManager::getInstance().getText("library.scanning"), juce::dontSendNotification);
         messageLabel_->setVisible(false);
         startTimerHz(10);
     }

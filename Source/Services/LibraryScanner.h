@@ -69,6 +69,7 @@ public:
     bool                    saveSongbook(const std::vector<CdgSong>& songs);
     std::vector<CdgSong>    loadSongbook();
     juce::File              getSongbookFile() const;
+    juce::File              getScanRoot()     const { return scanRoot_; }
 
     //==========================================================================
     // Metadata enrichment
@@ -143,8 +144,8 @@ private:
     // vendor name (e.g. "Sound Choice").  Returns "" if unrecognised.
     static juce::String vendorVersionFromCode(const juce::String& code);
 
-    // Return a quality rating 1–5 for a given catalog disc-code prefix.
-    static int ratingForCode(const juce::String& code);
+    // Return a quality rating 0.0–5.0 for a given catalog disc-code prefix.
+    static double ratingForCode(const juce::String& code);
 
     //==========================================================================
     // Recognised karaoke extensions

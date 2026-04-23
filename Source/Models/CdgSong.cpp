@@ -29,19 +29,19 @@ static std::vector<std::string> varToStrVec(const juce::var& v)
     return r;
 }
 
-static juce::Array<juce::var> intVecToVar(const std::vector<int>& v)
+static juce::Array<juce::var> dblVecToVar(const std::vector<double>& v)
 {
     juce::Array<juce::var> a;
     for (auto& n : v) a.add(n);
     return a;
 }
 
-static std::vector<int> varToIntVec(const juce::var& v)
+static std::vector<double> varToDblVec(const juce::var& v)
 {
-    std::vector<int> r;
+    std::vector<double> r;
     if (v.isArray())
         for (int i = 0; i < v.size(); ++i)
-            r.push_back((int)v[i]);
+            r.push_back((double)v[i]);
     return r;
 }
 
@@ -67,7 +67,7 @@ juce::String CdgSong::toJson() const
     obj->setProperty("genres", juce::var(strVecToVar(genres)));
     obj->setProperty("version", juce::var(strVecToVar(version)));
     obj->setProperty("code", juce::var(strVecToVar(code)));
-    obj->setProperty("rating", juce::var(intVecToVar(rating)));
+    obj->setProperty("rating", juce::var(dblVecToVar(rating)));
 
     return juce::JSON::toString(juce::var(obj.get()));
 }
@@ -103,7 +103,7 @@ CdgSong CdgSong::fromJsonObject(juce::DynamicObject* obj)
     s.genres       = varToStrVec(obj->getProperty("genres"));
     s.version      = varToStrVec(obj->getProperty("version"));
     s.code         = varToStrVec(obj->getProperty("code"));
-    s.rating       = varToIntVec(obj->getProperty("rating"));
+    s.rating       = varToDblVec(obj->getProperty("rating"));
 
     return s;
 }

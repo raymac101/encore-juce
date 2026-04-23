@@ -545,14 +545,45 @@ void LocalizationManager::loadFallbackTranslations()
     translations["home.recommended_songs"] = "Recommended Songs";
 
     // Search page
-    translations["search.placeholder"] = "Search songs...";
-    translations["search.clear"] = "Clear";
-    translations["search.filter_all"] = "All";
-    translations["search.filter_song"] = "Song";
-    translations["search.filter_artist"] = "Artist";
-    translations["search.filter_year"] = "Year";
+    translations["search.placeholder"]  = "Search songs...";
+    translations["search.clear"]        = "Clear";
+    translations["search.filter_all"]   = "All";
+    translations["search.filter_song"]  = "Song";
+    translations["search.filter_artist"]= "Artist";
+    translations["search.filter_year"]  = "Year";
     translations["search.filter_genre"] = "Genre";
     translations["search.count_suffix"] = "songs in this list";
+    translations["search.col_song"]     = "SONG";
+    translations["search.col_artist"]   = "ARTIST";
+    translations["search.col_version"]  = "VERSION";
+    translations["search.col_year"]     = "YEAR";
+    translations["search.col_genre"]    = "GENRE";
+    translations["search.scroll_top"]   = "Top";
+    translations["search.row_edit"]     = "Edit";
+
+    translations["library.title"]             = "LIBRARY";
+    translations["library.path_label"]        = "Path to Karaoke Song Files:";
+    translations["library.scanning"]          = "Scanning:";
+    translations["library.applying_metadata"] = "Applying metadata:";
+    translations["library.btn_initial_load"]  = "Initial Song Load";
+    translations["library.btn_add_songs"]     = "Add Songs";
+    translations["library.btn_get_metadata"]  = "Get Meta Data";
+    translations["library.btn_edit_genres"]   = "Edit Genres";
+    translations["library.chooser_root"]      = "Select Karaoke Collection Root Directory";
+    translations["library.chooser_append"]    = "Select Directory to Add Songs From";
+    translations["library.no_songs"]          = "No songs loaded. Run an Initial Song Load first.";
+    translations["library.songs_loaded"]      = "{n} songs loaded.";
+    translations["library.stats_total"]       = "Total Songs:        ";
+    translations["library.stats_meta"]        = "Metadata Available: ";
+    translations["library.stats_cdg"]         = "CDG Files:          ";
+    translations["library.stats_zip"]         = "ZIP Files:          ";
+    translations["library.stats_mp4"]         = "MP4 Files:          ";
+    translations["library.stats_m4a"]         = "M4A Files:          ";
+    translations["library.stats_xml"]         = "XML Files:          ";
+    translations["library.stats_unknown"]     = "Unknown Files:      ";
+    translations["library.stats_groups"]      = "Folders/Groups:     ";
+    translations["library.edit_genres_title"] = "Edit Genres";
+    translations["library.edit_genres_body"]  = "Genre editor coming soon.\n\nGenres are automatically extracted from your CDG collection folders and metadata.";
 }
 
 juce::File LocalizationManager::findLanguageFile(const juce::String& languageCode)

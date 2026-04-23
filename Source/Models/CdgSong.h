@@ -40,7 +40,7 @@ struct CdgSong
     std::vector<std::string> genres;
     std::vector<std::string> version;       // e.g. "Male", "Female", "Duet"
     std::vector<std::string> code;          // Disc/track codes
-    std::vector<int> rating;                // Quality ratings per version
+    std::vector<double> rating;             // Quality ratings per version (0.0–5.0)
 
     //==============================================================================
     juce::String toJson() const;
