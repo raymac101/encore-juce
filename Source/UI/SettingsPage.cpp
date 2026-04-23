@@ -412,9 +412,9 @@ public:
     }
 
     //--------------------------------------------------------------------------
-    void paint(juce::Graphics& g) override
+    void paint(juce::Graphics& /*g*/) override
     {
-        g.fillAll(juce::Colour(kBg));
+        // Transparent — let the parent MainArea's textured tile background show through.
     }
 
     //--------------------------------------------------------------------------

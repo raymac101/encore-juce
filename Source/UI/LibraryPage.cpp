@@ -243,7 +243,8 @@ void LibraryPage::timerCallback()
 //==============================================================================
 void LibraryPage::paint(juce::Graphics& g)
 {
-    // Stats panel background
+    // Semi-transparent dark grey panel behind the stats area so the textured
+    // tile background from MainArea still shows through subtly.
     auto bounds = getLocalBounds();
     int panelY = titleLabel_->getBottom() + 8
                + pathLabel_->getHeight() + 4
@@ -255,7 +256,7 @@ void LibraryPage::paint(juce::Graphics& g)
     int panelH = bounds.getHeight() - panelY - 12;
     if (panelH > 0)
     {
-        g.setColour(juce::Colour(kPanel));
+        g.setColour(juce::Colour(0xff202428).withAlpha(0.55f));
         g.fillRoundedRectangle(juce::Rectangle<int>(12, panelY, bounds.getWidth() - 24, panelH).toFloat(), 6.f);
     }
 }
