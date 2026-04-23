@@ -16,18 +16,23 @@
 namespace
 {
     constexpr int kPadX       = 24;
-    constexpr int kRowH       = 40;
-    constexpr int kSectionH   = 44;
+    constexpr int kRowH       = 36;
+    constexpr int kSectionH   = 40;
     constexpr int kFieldGap   = 6;
-    constexpr int kSectionGap = 16;
-    constexpr int kLabelW     = 280;
+    constexpr int kSectionGap = 20;
+    constexpr int kLabelW     = 260;
     constexpr int kCtrlX      = kPadX + kLabelW + 16;
     constexpr int kComboW     = 210;
     constexpr int kToggleW    = 40;
+    constexpr int kCardOuterPad = 8;   // gap from panel edge to card edge
+    constexpr int kCardRadius   = 10;
 
     constexpr uint32_t kBg          = 0xff16213e;
     constexpr uint32_t kSectionBg   = 0xff1e2d5a;
+    constexpr uint32_t kCardFill    = 0xff1a2030;   // card background (alpha applied at paint)
+    constexpr uint32_t kCardBorder  = 0xff2d3a5a;   // card border
     constexpr uint32_t kAccent      = 0xff7b5ea7;
+    constexpr uint32_t kAccentSoft  = 0xff9d7fc9;   // lighter accent for headers
     constexpr uint32_t kBtnNormal   = 0xff2d2d3a;
     constexpr uint32_t kBtnDanger   = 0xff7b2d2d;
     constexpr uint32_t kBtnSuccess  = 0xff2d6b3a;
@@ -148,7 +153,7 @@ public:
 
         // Title + top action buttons
         initSectionLabel(titleLabel_, lm.getText("settings.title"));
-        titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(22.f)).boldened());
+        titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(26.f)).boldened());
         titleLabel_.setColour(juce::Label::textColourId,       juce::Colours::white);
         titleLabel_.setColour(juce::Label::backgroundColourId, juce::Colour(0));
 
@@ -197,9 +202,9 @@ public:
         initSectionLabel(secVenueCode_, lm.getText("settings.sec_venue_code"));
         initFieldLabel(lblCurrentCode_, lm.getText("settings.lbl_current_code"));
         initValueLabel(valCurrentCode_);
-        valCurrentCode_.setFont(juce::Font(juce::FontOptions().withHeight(16.f)).boldened());
-        valCurrentCode_.setColour(juce::Label::textColourId,       juce::Colour(kSaved));
-        valCurrentCode_.setColour(juce::Label::backgroundColourId, juce::Colour(0xff0a2010));
+        valCurrentCode_.setFont(juce::Font(juce::FontOptions().withHeight(18.f)).boldened());
+        valCurrentCode_.setColour(juce::Label::textColourId,       juce::Colours::white);
+        valCurrentCode_.setColour(juce::Label::backgroundColourId, juce::Colour(kAccent).withAlpha(0.85f));
         valCurrentCode_.setJustificationType(juce::Justification::centred);
         initFieldLabel(lblManualCode_, lm.getText("settings.lbl_manual_code"));
         initEditor(edManualCode_,      lm.getText("settings.ph_manual_code"));
@@ -412,9 +417,47 @@ public:
     }
 
     //--------------------------------------------------------------------------
-    void paint(juce::Graphics& /*g*/) override
+    void paint(juce::Graphics& g) override
     {
-        // Transparent — let the parent MainArea's textured tile background show through.
+        // Draw a rounded translucent "card" behind each section, plus a left
+        // accent stripe and a subtle outline. This gives the page a modern,
+        // visually-grouped feel while still letting the parent tiled
+        // background show through around the cards.
+        for (const auto& r : cardRects_)
+        {
+            auto rf = r.toFloat();
+
+            // Soft drop shadow
+            juce::DropShadow shadow(juce::Colours::black.withAlpha(0.35f), 10, {0, 2});
+            juce::Path shadowPath;
+            shadowPath.addRoundedRectangle(rf, (float)kCardRadius);
+            shadow.drawForPath(g, shadowPath);
+
+            // Card fill
+            g.setColour(juce::Colour(kCardFill).withAlpha(0.82f));
+            g.fillRoundedRectangle(rf, (float)kCardRadius);
+
+            // Border
+            g.setColour(juce::Colour(kCardBorder).withAlpha(0.8f));
+            g.drawRoundedRectangle(rf.reduced(0.5f), (float)kCardRadius, 1.f);
+
+            // Left accent stripe
+            auto stripe = rf.withWidth(3.f).reduced(0.f, 1.f);
+            g.setColour(juce::Colour(kAccentSoft));
+            g.fillRoundedRectangle(stripe, 2.f);
+        }
+
+        // Page-title accent underline (gradient from accent to transparent)
+        if (titleLabel_.getWidth() > 0)
+        {
+            auto tb = titleLabel_.getBounds();
+            int uy = tb.getBottom() + 2;
+            juce::ColourGradient grad(juce::Colour(kAccentSoft), (float)tb.getX(), (float)uy,
+                                      juce::Colour(kAccentSoft).withAlpha(0.f),
+                                      (float)tb.getX() + 220.f, (float)uy, false);
+            g.setGradientFill(grad);
+            g.fillRect(tb.getX(), uy, 220, 2);
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -422,6 +465,15 @@ public:
     {
         const int w = getWidth();
         int y = 20;
+
+        cardRects_.clear();
+        auto cardStart = [&]() { return y - 8; };
+        auto cardEnd   = [&](int cs) {
+            cardRects_.push_back(juce::Rectangle<int>(kCardOuterPad,
+                                                      cs,
+                                                      w - kCardOuterPad * 2,
+                                                      (y + 4) - cs));
+        };
 
         auto comboRow = [&](juce::Label& lbl, juce::ComboBox& cb) {
             lbl.setBounds(kPadX, y, kLabelW, kRowH);
@@ -446,12 +498,13 @@ public:
 
         // Title + top buttons
         titleLabel_.setBounds(kPadX, y, w - kPadX * 2, 36);
-        y += 36 + 8;
+        y += 36 + 10;
         btnEditVenue_.setBounds(kPadX, y, 160, 34);
         btnDeleteVenue_.setBounds(kPadX + 168, y, 140, 34);
         y += 34 + kSectionGap;
 
         // Section 1: Venue Info
+        int cs = cardStart();
         secVenueInfo_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         if (!venueEditMode_)
         {
@@ -478,9 +531,11 @@ public:
         y += 4;
         readRow(lblLicenseKey_, valLicenseKey_);
         readRow(lblVenueIdLbl_, valVenueId_);
-        y += kSectionGap - kFieldGap;
+        cardEnd(cs);
+        y += kSectionGap;
 
         // Section 2: Venue Code Management
+        cs = cardStart();
         secVenueCode_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         lblCurrentCode_.setBounds(kPadX, y, kLabelW, kRowH);
         valCurrentCode_.setBounds(kCtrlX, y, 120, kRowH);
@@ -500,9 +555,12 @@ public:
         btnSetEmerg_.setBounds(kPadX + 188, y, 100, kRowH);
         y += kRowH + kFieldGap;
         btnGenEmerg_.setBounds(kPadX, y, 260, kRowH);
-        y += kRowH + kSectionGap;
+        y += kRowH;
+        cardEnd(cs);
+        y += kSectionGap;
 
         // Section 3: User Management
+        cs = cardStart();
         secUsers_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         lblInviteHeader_.setBounds(kPadX, y, w - kPadX * 2, 26); y += 30;
         edInviteEmail_.setBounds(kPadX, y, w - kPadX * 2 - 280, kRowH);
@@ -517,10 +575,13 @@ public:
             userListPanel_->setBounds(0, y, w, userRowH * juce::jmax(1, numRows));
             for (int i = 0; i < numRows; ++i)
                 userRows_[(size_t)i]->setBounds(0, i * userRowH, w, userRowH);
-            y += userListPanel_->getHeight() + kSectionGap;
+            y += userListPanel_->getHeight();
         }
+        cardEnd(cs);
+        y += kSectionGap;
 
         // Section 4: Logo
+        cs = cardStart();
         secLogo_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         lblLogo_.setBounds(kPadX, y, kLabelW, kRowH);
         logoPathLabel_.setBounds(kCtrlX, y, w - kCtrlX - kPadX - 90, kRowH);
@@ -528,9 +589,12 @@ public:
         y += kRowH + kFieldGap;
         btnSaveLogo_.setBounds(kPadX, y, 140, kRowH);
         btnDefaultLogo_.setBounds(kPadX + 148, y, 150, kRowH);
-        y += kRowH + kSectionGap;
+        y += kRowH;
+        cardEnd(cs);
+        y += kSectionGap;
 
         // Section 5: Queue / Display
+        cs = cardStart();
         secQueue_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         comboRow(lblLyricsBg_,        cbLyricsBg_);
         comboRow(lblNumSongs_,         cbNumSongs_);
@@ -541,9 +605,11 @@ public:
         toggleRow(lblShowOnline_,       tbShowOnline_);
         toggleRow(lblShowOnlineEncore_, tbShowOnlineEncore_);
         toggleRow(lblShowMemory_,       tbShowMemory_);
-        y += kSectionGap - kFieldGap;
+        cardEnd(cs);
+        y += kSectionGap;
 
         // Section 6: Session Management
+        cs = cardStart();
         secSession_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         statRow(lblSongsToday_,    valSongsToday_);
         statRow(lblActiveMembers_, valActiveMembers_);
@@ -553,9 +619,12 @@ public:
         btnClearRecent_.setBounds(kPadX,       y, 200, kRowH);
         btnEndSession_.setBounds(kPadX + 208,  y, 200, kRowH);
         btnViewArchive_.setBounds(kPadX + 416, y, 200, kRowH);
-        y += kRowH + 30;
+        y += kRowH;
+        cardEnd(cs);
+        y += kSectionGap + 8;
 
         setSize(w, y);
+        repaint();
     }
 
     //--------------------------------------------------------------------------
@@ -778,13 +847,16 @@ private:
     juce::Label      lblReqSongs_,      valReqSongs_;
     juce::TextButton btnClearRecent_, btnEndSession_, btnViewArchive_;
 
+    // Computed in resized() and drawn in paint() — one rect per section card.
+    std::vector<juce::Rectangle<int>> cardRects_;
+
     //==========================================================================
     void initSectionLabel(juce::Label& lbl, const juce::String& text)
     {
         lbl.setText(text, juce::dontSendNotification);
-        lbl.setFont(juce::Font(juce::FontOptions().withHeight(13.f)).boldened());
-        lbl.setColour(juce::Label::backgroundColourId, juce::Colour(kSectionBg));
-        lbl.setColour(juce::Label::textColourId,       juce::Colour(kTextPrimary));
+        lbl.setFont(juce::Font(juce::FontOptions().withHeight(15.f)).boldened());
+        lbl.setColour(juce::Label::backgroundColourId, juce::Colour(0));
+        lbl.setColour(juce::Label::textColourId,       juce::Colour(kAccentSoft));
         lbl.setJustificationType(juce::Justification::centredLeft);
         lbl.setBorderSize(juce::BorderSize<int>(0, kPadX, 0, 0));
         addAndMakeVisible(lbl);
