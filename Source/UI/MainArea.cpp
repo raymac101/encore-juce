@@ -9,6 +9,7 @@
 */
 
 #include "MainArea.h"
+#include "SongSelectionDialog.h"
 
 //==============================================================================
 void MainArea::loadBackgroundTile()
@@ -35,7 +36,6 @@ MainArea::MainArea()
         addChildComponent(hp.get());
         pages[static_cast<int>(NavPage::Home)] = std::move(hp);
     }
-
     // Create real Search page
     {
         auto sp = std::make_unique<SearchPage>();
@@ -43,6 +43,16 @@ MainArea::MainArea()
         addChildComponent(sp.get());
         pages[static_cast<int>(NavPage::Search)] = std::move(sp);
     }
+
+    // Show the Song Selection dialog whenever a song is chosen from Search or Home.
+    auto openSongDialog = [this](const CdgSong& song) {
+        if (! song.isValid()) return;
+        SongSelectionDialog::launch(this, song,
+            [this](const SongSelectionResult& r) {
+                if (onSongSelectionResult) onSongSelectionResult(r);
+            });
+    };
+    searchPage->onSongClicked = openSongDialog;
 
     // Create real Library page
     {
@@ -59,7 +69,10 @@ MainArea::MainArea()
         if (searchPage)
             searchPage->setSongs(libraryPage->getSongs());
         if (homePage)
+        {
             homePage->setSongsFromLibrary(libraryPage->getSongs());
+            homePage->onSongClicked = openSongDialog;
+        }
 
         addChildComponent(lp.get());
         pages[static_cast<int>(NavPage::Library)] = std::move(lp);

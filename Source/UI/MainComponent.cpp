@@ -11,14 +11,95 @@
 */
 
 #include "MainComponent.h"
+#include "../Services/WaveformGenerator.h"
 #include <cmath>
+
+//==============================================================================
+// Simple semi-transparent overlay shown while a song is loading. It paints a
+// dim backdrop, a rounded card and a label, plus an indeterminate activity
+// indicator. It intercepts all mouse input so the user can't fire another
+// Play Now while the first one is still resolving.
+//==============================================================================
+class MainComponent::LoadingOverlay : public juce::Component,
+                                      private juce::Timer
+{
+public:
+    LoadingOverlay()
+    {
+        setInterceptsMouseClicks(true, false);
+        setAlwaysOnTop(true);
+        startTimerHz(30);
+    }
+
+    void setMessage(const juce::String& msg) { message_ = msg; repaint(); }
+
+    void paint(juce::Graphics& g) override
+    {
+        // Dimmed backdrop
+        g.fillAll(juce::Colour(0xcc000000));
+
+        // Centred card
+        const int cardW = 320;
+        const int cardH = 120;
+        auto card = juce::Rectangle<int>(cardW, cardH)
+                        .withCentre(getLocalBounds().getCentre());
+
+        g.setColour(juce::Colour(0xff1a2030));
+        g.fillRoundedRectangle(card.toFloat(), 10.0f);
+        g.setColour(juce::Colour(0xff30daff));
+        g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 10.0f, 1.5f);
+
+        // Spinner
+        auto spinnerBox = card.removeFromLeft(56).reduced(12).toFloat();
+        drawSpinner(g, spinnerBox);
+
+        // Message
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
+        g.drawFittedText(message_, card.reduced(12, 8), juce::Justification::centredLeft, 2);
+    }
+
+private:
+    void timerCallback() override
+    {
+        phase_ += 0.12f;
+        if (phase_ > juce::MathConstants<float>::twoPi)
+            phase_ -= juce::MathConstants<float>::twoPi;
+        repaint();
+    }
+
+    void drawSpinner(juce::Graphics& g, juce::Rectangle<float> r) const
+    {
+        const auto centre = r.getCentre();
+        const float radius = juce::jmin(r.getWidth(), r.getHeight()) * 0.5f - 2.0f;
+        const int segments = 12;
+        for (int i = 0; i < segments; ++i)
+        {
+            float angle = phase_ + (juce::MathConstants<float>::twoPi * i) / (float) segments;
+            float alpha = 0.15f + 0.85f * ((float) i / (float) segments);
+            g.setColour(juce::Colour(0xff30daff).withAlpha(alpha));
+            juce::Point<float> p1(centre.x + std::cos(angle) * radius * 0.55f,
+                                  centre.y + std::sin(angle) * radius * 0.55f);
+            juce::Point<float> p2(centre.x + std::cos(angle) * radius,
+                                  centre.y + std::sin(angle) * radius);
+            g.drawLine({ p1, p2 }, 2.6f);
+        }
+    }
+
+    juce::String message_ { "Loading song..." };
+    float phase_ = 0.0f;
+};
 
 //==============================================================================
 MainComponent::MainComponent()
 {
     // Set initial size (will be adjusted by responsive system)
     setSize(1200, 800);
-    
+
+    // Create audio engine up front so it's ready before UI hooks it.
+    audioEngine = std::make_unique<AudioEngine>();
+    audioEngine->initialize();
+
     try
     {
         // Setup UI components carefully
@@ -52,6 +133,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    if (audioEngine) audioEngine->shutdown();
 }
 
 void MainComponent::setupUI()
@@ -89,45 +171,57 @@ void MainComponent::setupUI()
     };
     
     // Set sample data for TopBar
-    topBar->setTrackInfo("My Way", "Frank Sinatra", "Karaoke Version");
-    topBar->setMusicInfo("Bb", 120);
     topBar->setOnlineStatus(true); // Start with online status
     topBar->setUserInfo("Demo User", juce::Image());
 
-    // BottomBar callbacks (placeholder transport logic for now)
+    // BottomBar callbacks — drive the AudioEngine
     bottomBar->onReturnToZero = [this]() {
-        DBG("BottomBar: Return to 0");
+        if (audioEngine) audioEngine->seekToPosition(0.0);
+        bottomBar->setProgress(0.0f);
     };
 
     bottomBar->onStopAndReturnToZero = [this]() {
-        DBG("BottomBar: Stop and return to zero");
+        if (audioEngine) audioEngine->stop();
+        bottomBar->setProgress(0.0f);
+        bottomBar->setPlaying(false);
     };
 
     bottomBar->onPlayPause = [this](bool isNowPlaying) {
-        DBG("BottomBar: " + juce::String(isNowPlaying ? "Play" : "Pause"));
+        if (! audioEngine) return;
+        if (isNowPlaying) audioEngine->play();
+        else              audioEngine->pause();
     };
 
     bottomBar->onJumpToEnd = [this]() {
-        DBG("BottomBar: Jump to end");
+        if (audioEngine && audioEngine->getTotalLength() > 0.25)
+            audioEngine->seekToPosition(audioEngine->getTotalLength() - 0.25);
     };
 
     bottomBar->onSeek = [this](float newProgress) {
-        DBG("BottomBar: Seek to " + juce::String(newProgress * 100.0f, 1) + "%");
+        if (! audioEngine) return;
+        double total = audioEngine->getTotalLength();
+        if (total > 0.0)
+            audioEngine->seekToPosition(total * (double) juce::jlimit(0.0f, 1.0f, newProgress));
     };
 
     bottomBar->onPitchChanged = [this](int semitones) {
-        DBG("BottomBar: Pitch set to " + juce::String(semitones) + " semitones");
+        if (audioEngine) audioEngine->setPitchShift((float) semitones);
     };
 
     bottomBar->onVolumeChanged = [this](int volumeStep) {
-        DBG("BottomBar: Volume set to " + juce::String(volumeStep));
+        if (! audioEngine) return;
+        // volumeStep is 0..10 in the slider -> map to 0..1.
+        float v = juce::jlimit(0.0f, 1.0f, (float) volumeStep / 10.0f);
+        audioEngine->setMasterVolume(v);
+        audioEngine->setMusicVolume(v);
     };
 
-    // Demo duration until real audio metadata is wired in.
-    bottomBar->setDurationSeconds(210.0);
-    
-    // Start timer to simulate audio levels for VU meter
-    startTimer(100); // Update every 100ms for smooth audio levels
+    // The BottomBar's own 30Hz timer will no longer auto-advance progress —
+    // our 100ms timer below polls the real AudioEngine position instead.
+    bottomBar->setExternalProgressControl(true);
+
+    // Start timer to poll audio engine + update VU / progress UI
+    startTimer(50);
     
     DBG("TopBar created and configured");
     
@@ -143,6 +237,14 @@ void MainComponent::setupUI()
     navBar->onPageSelected = [this](NavPage page) {
         DBG("NavBar: page selected -> " + juce::String(static_cast<int>(page)));
         mainArea->setCurrentPage(page);
+    };
+
+    // Handle Song Selection dialog result from Home / Search
+    mainArea->onSongSelectionResult = [this](const SongSelectionResult& r)
+    {
+        if (r.action == SongSelectionResult::Action::PlayNow)
+            loadAndPlaySong(r.song, r.versionIndex, r.pitchSemitones);
+        // Play Next / Add to Queue will be wired to the queue service later.
     };
 
     // When NavBar width changes via drag, re-layout
@@ -377,6 +479,10 @@ void MainComponent::resized()
         mainArea->setBounds(bounds);
     }
 
+    // Loading overlay always covers the full window when visible.
+    if (loadingOverlay_)
+        loadingOverlay_->setBounds(getLocalBounds());
+
     // The old placeholder labels are no longer laid out in the centre;
     // they can be hidden or removed entirely later.
     if (titleLabel)     titleLabel->setVisible(false);
@@ -486,18 +592,24 @@ void MainComponent::timerCallback()
 {
     updateConnectionStatus();
     updateDebugInfo();
-    
-    // Simulate VU meter audio levels with a sine wave
+
+    if (audioEngine == nullptr)
+        return;
+
+    // Feed real audio level into the VU meter.
     if (topBar != nullptr)
+        topBar->setAudioLevel(juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevel() * 4.0f));
+
+    // Feed real playback position into the BottomBar progress/time labels.
+    if (bottomBar != nullptr)
     {
-        static float time = 0.0f;
-        time += 0.1f;
-        
-        // Create a dynamic audio level simulation (0.0 to 1.0)
-        float audioLevel = (std::sin(time * 2.0f) + 1.0f) * 0.5f; // Sine wave from 0 to 1
-        audioLevel = audioLevel * audioLevel; // Square it for more realistic audio behavior
-        
-        topBar->setAudioLevel(audioLevel);
+        double total = audioEngine->getTotalLength();
+        if (total > 0.0)
+        {
+            double pos = juce::jlimit(0.0, total, audioEngine->getCurrentPosition());
+            bottomBar->setProgress((float) (pos / total));
+        }
+        bottomBar->setPlaying(audioEngine->isPlaying());
     }
 }
 
@@ -884,3 +996,144 @@ void MainComponent::setLargeTextMode(bool enabled)
     resized(); // Relayout with new font sizes
 }
 */
+//==============================================================================
+// Song playback
+//==============================================================================
+void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones)
+{
+    if (! audioEngine)
+        return;
+
+    // Show the loading overlay immediately so the user gets instant feedback
+    // instead of the OS beach-ball that the synchronous load would otherwise
+    // produce.
+    showLoadingOverlay("Loading \"" + juce::String(song.songName) + "\"...");
+
+    // Defer the actual load work to the next message-loop tick so the overlay
+    // has a chance to paint before we block the UI thread on file I/O.
+    juce::Component::SafePointer<MainComponent> self(this);
+    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones]()
+    {
+        if (! self || ! self->audioEngine)
+            return;
+
+    // Pick the file path for the chosen version (fall back to the first path).
+    juce::String path;
+    if (versionIndex >= 0 && versionIndex < (int) song.fullPath.size())
+        path = juce::String(song.fullPath[(size_t) versionIndex]);
+    else if (! song.fullPath.empty())
+        path = juce::String(song.fullPath.front());
+
+    if (path.isEmpty())
+    {
+        DBG("loadAndPlaySong: no file path on song \"" + juce::String(song.songName) + "\"");
+        self->hideLoadingOverlay();
+        return;
+    }
+
+    juce::File audioFile(path);
+
+    // Some karaoke libraries store a ZIP containing CDG + MP3, or a .cdg file
+    // beside a .mp3 — try a sibling MP3 if the direct path isn't playable.
+    auto ext = audioFile.getFileExtension().toLowerCase();
+    if (ext == ".cdg" || ext == ".zip")
+    {
+        auto sibling = audioFile.withFileExtension("mp3");
+        if (sibling.existsAsFile())
+            audioFile = sibling;
+    }
+
+    if (! audioFile.existsAsFile())
+    {
+        DBG("loadAndPlaySong: file not found: " + audioFile.getFullPathName());
+        self->hideLoadingOverlay();
+        return;
+    }
+
+    if (! self->audioEngine->loadSong(audioFile))
+    {
+        DBG("loadAndPlaySong: AudioEngine failed to load " + audioFile.getFullPathName());
+        self->hideLoadingOverlay();
+        return;
+    }
+
+    self->currentSong          = song;
+    self->currentSongImageUrl  = juce::String(song.imageUrl);
+    self->currentSongDuration  = self->audioEngine->getTotalLength();
+
+    // Apply pitch (the dialog's semitone adjustment)
+    self->audioEngine->setPitchShift((float) pitchSemitones);
+
+    // TopBar — song info
+    if (self->topBar)
+    {
+        juce::String version;
+        if (versionIndex >= 0 && versionIndex < (int) song.version.size())
+            version = juce::String(song.version[(size_t) versionIndex]);
+
+        self->topBar->setTrackInfo(juce::String(song.songName),
+                             juce::String(song.artistName),
+                             version);
+
+        int bpm = (int) std::round(song.tempo);
+        self->topBar->setMusicInfo(juce::String(song.keySignature), bpm);
+
+        // Artwork (async via ArtworkCache)
+        if (self->currentSongImageUrl.isNotEmpty())
+        {
+            juce::Component::SafePointer<TopBar> safeTop(self->topBar.get());
+            juce::String url = self->currentSongImageUrl;
+            juce::Image img = ArtworkCache::getInstance().getOrFetch(url, [safeTop, url]() {
+                if (! safeTop) return;
+                auto cached = ArtworkCache::getInstance().getOrFetch(url, nullptr);
+                if (cached.isValid()) safeTop->setCoverArt(cached);
+            });
+            if (img.isValid())
+                self->topBar->setCoverArt(img);
+        }
+        else
+        {
+            self->topBar->setCoverArt({}); // reset
+        }
+    }
+
+    // BottomBar — duration + waveform
+    if (self->bottomBar)
+    {
+        self->bottomBar->setDurationSeconds(self->currentSongDuration);
+        self->bottomBar->setProgress(0.0f);
+        self->bottomBar->setPlaying(true);
+        self->bottomBar->setPitch(pitchSemitones);
+
+        // Build a real waveform asynchronously.
+        juce::Component::SafePointer<BottomBar> safeBottom(self->bottomBar.get());
+        WaveformGenerator::generateAsync(audioFile, 240, [safeBottom](std::vector<float> peaks) {
+            if (safeBottom) safeBottom->setWaveformSamples(peaks);
+        });
+    }
+
+    self->audioEngine->play();
+    self->hideLoadingOverlay();
+    });
+}
+
+//==============================================================================
+void MainComponent::showLoadingOverlay(const juce::String& message)
+{
+    if (! loadingOverlay_)
+    {
+        loadingOverlay_ = std::make_unique<LoadingOverlay>();
+        addAndMakeVisible(loadingOverlay_.get());
+    }
+    loadingOverlay_->setMessage(message);
+    loadingOverlay_->setBounds(getLocalBounds());
+    loadingOverlay_->toFront(false);
+    loadingOverlay_->setVisible(true);
+    loadingOverlay_->repaint();
+}
+
+void MainComponent::hideLoadingOverlay()
+{
+    if (loadingOverlay_)
+        loadingOverlay_->setVisible(false);
+}

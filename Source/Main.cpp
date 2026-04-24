@@ -14,6 +14,7 @@
 #include <JuceHeader.h>
 #include "UI/MainComponent.h"
 #include "Localization/LocalizationManager.h"
+#include "Services/UserPreferences.h"
 
 //==============================================================================
 class EncoreApplication : public juce::JUCEApplication
@@ -78,9 +79,32 @@ public:
            #if JUCE_IOS || JUCE_ANDROID
             setFullScreen (true);
            #else
-            // Set initial window size (will be made responsive)
+            // Restore saved window bounds, or use a sensible default (1920x1080 centred).
             setResizable (true, true);
-            centreWithSize (1200, 800);
+            auto saved = UserPreferences::getInstance().getWindowBounds();
+            if (saved.getWidth() > 0 && saved.getHeight() > 0)
+            {
+                if (saved.getX() > 0 || saved.getY() > 0)
+                {
+                    // Clamp to the current display so we don't end up off-screen
+                    // if the user disconnected a monitor since last run.
+                    auto displayArea = juce::Desktop::getInstance().getDisplays()
+                                           .getTotalBounds(true);
+                    auto target = saved;
+                    if (! displayArea.intersects(target))
+                        target.setPosition(displayArea.getCentreX() - target.getWidth()  / 2,
+                                           displayArea.getCentreY() - target.getHeight() / 2);
+                    setBounds(target);
+                }
+                else
+                {
+                    centreWithSize(saved.getWidth(), saved.getHeight());
+                }
+            }
+            else
+            {
+                centreWithSize(1920, 1080);
+            }
            #endif
 
             setVisible (true);
@@ -91,6 +115,48 @@ public:
             // This is called when the user tries to close this window
             JUCEApplication::getInstance()->systemRequestedQuit();
         }
+
+        void resized() override
+        {
+            juce::DocumentWindow::resized();
+            scheduleBoundsSave();
+        }
+
+        void moved() override
+        {
+            juce::DocumentWindow::moved();
+            scheduleBoundsSave();
+        }
+
+    private:
+        // Debounce bounds saves so dragging doesn't hammer the disk.
+        void scheduleBoundsSave()
+        {
+            if (boundsSaveTimer_ == nullptr)
+            {
+                boundsSaveTimer_ = std::make_unique<BoundsSaveTimer>(*this);
+            }
+            boundsSaveTimer_->startTimer(400);
+        }
+
+        void writeBoundsNow()
+        {
+            if (isFullScreen() || isMinimised()) return;
+            UserPreferences::getInstance().setWindowBounds(getBounds());
+        }
+
+        class BoundsSaveTimer : public juce::Timer
+        {
+        public:
+            explicit BoundsSaveTimer(MainWindow& o) : owner(o) {}
+            void timerCallback() override
+            {
+                stopTimer();
+                owner.writeBoundsNow();
+            }
+            MainWindow& owner;
+        };
+        std::unique_ptr<BoundsSaveTimer> boundsSaveTimer_;
 
         /* Note: Be careful if you override any DocumentWindow methods - the base
            class uses a lot of them, so by overriding you might break its functionality.

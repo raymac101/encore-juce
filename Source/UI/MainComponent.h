@@ -15,11 +15,15 @@
 #include <JuceHeader.h>
 #include "ResponsiveLayout.h"
 #include "../Localization/LocalizationManager.h"
+#include "../Audio/AudioEngine.h"
+#include "../Services/ImageCache.h"
+#include "../Models/CdgSong.h"
 #include "TopBar.h"
 #include "BottomBar.h"
 #include "NavBar.h"
 #include "MainArea.h"
 #include "QueueBar.h"
+#include "SongSelectionDialog.h"
 
 //==============================================================================
 /**
@@ -78,6 +82,23 @@ private:
     
     // Language selector popup
     std::unique_ptr<juce::PopupMenu> languageMenu;
+
+    //==============================================================================
+    // Audio playback
+    std::unique_ptr<AudioEngine> audioEngine;
+    CdgSong      currentSong;
+    juce::String currentSongImageUrl;
+    double       currentSongDuration = 0.0;
+
+    /** Begin playback of the chosen song (PlayNow action). */
+    void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones);
+
+    /** Show / hide a full-window "Loading song..." overlay. */
+    void showLoadingOverlay(const juce::String& message);
+    void hideLoadingOverlay();
+
+    class LoadingOverlay;
+    std::unique_ptr<LoadingOverlay> loadingOverlay_;
     
     //==============================================================================
     // Background Tile

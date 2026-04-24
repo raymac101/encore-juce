@@ -135,14 +135,23 @@ public:
     /** Re-read translatable strings. */
     void updateAllText();
 
-    /** Called when a song card is clicked. */
-    std::function<void(const juce::String& sectionId, int index)> onSongClicked;
+    /** Called when a song card is clicked. Passes the resolved CdgSong so
+        the caller can open the Song Selection dialog. The song will be empty
+        (isValid()==false) for sections sourced from Track lists that don't
+        have a matching library entry. */
+    std::function<void(const CdgSong& song)> onSongClicked;
 
 private:
     std::unique_ptr<SongRow> recentRow;
     std::unique_ptr<SongRow> newSongsRow;
     std::unique_ptr<SongRow> popularRow;
     std::unique_ptr<SongRow> recommendedRow;
+
+    // Per-section CdgSong backing lists (populated by setSongsFromLibrary).
+    // Used to look up the full song record when a card is clicked.
+    std::vector<CdgSong> newSongsSongs_;
+    std::vector<CdgSong> popularSongsSongs_;
+    std::vector<CdgSong> recommendedSongsSongs_;
 
     juce::Viewport  pageViewport;
     juce::Component pageContent;

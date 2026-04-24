@@ -32,8 +32,11 @@ target_sources(EncoreJUCE
         Source/UI/SearchPage.cpp
         Source/UI/LibraryPage.cpp
         Source/UI/SettingsPage.cpp
+        Source/UI/SongSelectionDialog.cpp
         Source/Services/LibraryScanner.cpp
         Source/Services/ImageCache.cpp
+        Source/Services/UserPreferences.cpp
+        Source/Services/WaveformGenerator.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
         Source/Models/QueueItem.cpp

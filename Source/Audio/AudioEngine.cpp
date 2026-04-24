@@ -142,7 +142,23 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
     
     // Stop current playback
     stop();
-    
+
+    // Detach the audio callback from any previous source BEFORE we destroy
+    // those sources, otherwise the audio thread may dereference a dangling
+    // pointer when we rebuild the chain below (crash on loading a 2nd song).
+    if (audioSourcePlayer != nullptr)
+        audioSourcePlayer->setSource(nullptr);
+
+    // Tear down previous source chain in a safe order (top-down).
+    if (resamplingSource != nullptr)
+        resamplingSource.reset();
+    if (transportSource != nullptr)
+    {
+        transportSource->setSource(nullptr);
+        transportSource.reset();
+    }
+    readerSource.reset();
+
     try
     {
         // Create reader for the audio file
@@ -168,7 +184,12 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
             currentSampleRate = device->getCurrentSampleRate();
             
         resamplingSource->setResamplingRatio(currentSampleRate / reader->sampleRate);
-        
+
+        // Route output through the AudioEngine itself (it is an AudioSource),
+        // so getNextAudioBlock can update position, VU level, CDG sync, etc.
+        if (audioSourcePlayer != nullptr)
+            audioSourcePlayer->setSource(this);
+
         // Update total length
         totalLength = reader->lengthInSamples / reader->sampleRate;
         currentPosition = 0.0;

@@ -365,7 +365,7 @@ void BottomBar::setVolume(int volumeStep)
 
 void BottomBar::timerCallback()
 {
-    if (!isPlaying)
+    if (externalProgressControl_ || !isPlaying)
         return;
 
     progress += 0.0015f;
@@ -608,6 +608,15 @@ void BottomBar::generateWaveform()
         const float noise = (rng.nextFloat() - 0.5f) * 0.18f;
         waveform.push_back(juce::jlimit(0.08f, 1.0f, base + noise));
     }
+}
+
+void BottomBar::setWaveformSamples(const std::vector<float>& samples)
+{
+    if (samples.empty())
+        generateWaveform();
+    else
+        waveform = samples;
+    repaint(getWaveformArea());
 }
 
 juce::Rectangle<int> BottomBar::getTransportArea() const

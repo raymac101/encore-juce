@@ -20,10 +20,10 @@
 #include "SearchPage.h"
 #include "LibraryPage.h"
 #include "SettingsPage.h"
+#include "SongSelectionDialog.h"
 #include "../Models/VenueItem.h"
 #include "../Localization/LocalizationManager.h"
 #include <unordered_map>
-
 //==============================================================================
 /**
     A simple placeholder page that displays the page name.
@@ -94,6 +94,11 @@ public:
 
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;
+
+    /** Fired when the user presses Add to Queue / Play Next / Play Now in the
+        Song Selection dialog (or cancels it). Wire this up in the app shell
+        to drive the queue / player. */
+    std::function<void(const SongSelectionResult&)> onSongSelectionResult;
 
 private:
 

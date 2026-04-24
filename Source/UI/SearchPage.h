@@ -74,6 +74,11 @@ private:
         int     index = 0;
         bool    hovering = false;
 
+        // Pointer to the owning SearchPage's column fractions (indices 0-6:
+        // art, song, artist, version, year, genre, edit). nullptr falls back
+        // to built-in defaults.
+        const std::vector<float>* columnFractions = nullptr;
+
         std::function<void(int)> onClicked;
         std::function<void(int)> onEditClicked;
 
@@ -110,6 +115,48 @@ private:
     std::unique_ptr<juce::TextButton> colYearBtn;
     std::unique_ptr<juce::TextButton> colGenreBtn;
 
+    // Header bar that owns the column buttons and supports drag-to-resize.
+    class ColumnHeaderBar : public juce::Component
+    {
+    public:
+        ColumnHeaderBar();
+
+        std::vector<float>* fractions = nullptr;     // owned by SearchPage, size 7
+        std::function<void()> onDragLive;            // fired during drag (relayout only)
+        std::function<void()> onDragCommitted;       // fired on mouseUp (persist)
+        juce::TextButton* cols[5] = { nullptr };     // song/artist/version/year/genre
+
+        void layoutColumns();
+        void resized() override;
+        void paint(juce::Graphics& g) override;
+        void mouseMove(const juce::MouseEvent& e) override;
+        void mouseDown(const juce::MouseEvent& e) override;
+        void mouseDrag(const juce::MouseEvent& e) override;
+        void mouseUp  (const juce::MouseEvent& e) override;
+
+        int findDivider(int localX) const;  // returns leftColIdx (1..4) or -1
+
+    private:
+        // Transparent overlay sitting above the column buttons. Only hit-tests
+        // true within a few pixels of a divider so clicks on column labels still
+        // reach the buttons, while drags on dividers reach the header bar.
+        class DividerOverlay : public juce::Component
+        {
+        public:
+            ColumnHeaderBar* owner = nullptr;
+            DividerOverlay() { setInterceptsMouseClicks(true, false); }
+            bool hitTest(int x, int y) override;
+            void mouseMove(const juce::MouseEvent& e) override;
+            void mouseDown(const juce::MouseEvent& e) override;
+            void mouseDrag(const juce::MouseEvent& e) override;
+            void mouseUp  (const juce::MouseEvent& e) override;
+        };
+
+        DividerOverlay dividerOverlay_;
+        int draggingDivider_ = -1;
+    };
+    ColumnHeaderBar columnHeaderBar;
+
     // Results list — custom viewport to detect scroll
     class ScrollViewport : public juce::Viewport
     {
@@ -139,24 +186,39 @@ private:
     static constexpr int kInitialBatch = 100;
     static constexpr int kScrollBatch  = 50;
 
+    // Column fractions (sum ~1.0): art, song, artist, version, year, genre, edit.
+    // Loaded from / saved to UserPreferences when the user drags a divider.
+    std::vector<float> columnFractions_ {0.06f, 0.23f, 0.23f, 0.16f, 0.08f, 0.16f, 0.08f};
+    void loadColumnFractions();
+    void saveColumnFractions() const;
+
     //==============================================================================
     // Colours
     juce::Colour bgColour          { 0xff16213e };
     juce::Colour textColour        { 0xffe4e4e4 };
     juce::Colour accentColour      { 0xff30daff };
+    juce::Colour accentSoftColour  { 0xff70e6ff };
     juce::Colour darkColour        { 0xff222428 };
     juce::Colour hoverBgColour     { 0xff292929 };
     juce::Colour headerLineColour  { 0xff585757 };
     juce::Colour artistTextColour  { 0xffa3a6a8 };
+    juce::Colour cardFillColour    { 0xff1a2030 };
+    juce::Colour cardBorderColour  { 0xff2d3a5a };
 
     //==============================================================================
     // Layout constants
     static constexpr int titleBarHeight     = 64;
-    static constexpr int searchBarHeight    = 40;
+    static constexpr int searchBarHeight    = 44;
     static constexpr int letterBarHeight    = 32;
     static constexpr int filterBarHeight    = 36;
     static constexpr int columnHeaderHeight = 28;
     static constexpr int resultRowHeight    = 48;
+    static constexpr int kCardPad           = 12;
+    static constexpr int kCardRadius        = 10;
+    static constexpr int kCardGap           = 12;
+
+    // Card rectangles computed in resized() and drawn in paint()
+    std::vector<juce::Rectangle<int>> cardRects_;
 
     //==============================================================================
     // Internal methods

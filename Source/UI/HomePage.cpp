@@ -247,21 +247,25 @@ HomePage::HomePage()
     recommendedRow->setTitle(lm.getText("home.recommended_songs"));
 
     // Wire click callbacks
-    recentRow->onSongClicked = [this](int idx)
+    recentRow->onSongClicked = [this](int /*idx*/)
     {
-        if (onSongClicked) onSongClicked("recent", idx);
+        // Recent row is sourced from Track records without a CdgSong counterpart.
+        if (onSongClicked) onSongClicked(CdgSong{});
     };
     newSongsRow->onSongClicked = [this](int idx)
     {
-        if (onSongClicked) onSongClicked("new", idx);
+        if (onSongClicked && idx >= 0 && idx < (int)newSongsSongs_.size())
+            onSongClicked(newSongsSongs_[(size_t)idx]);
     };
     popularRow->onSongClicked = [this](int idx)
     {
-        if (onSongClicked) onSongClicked("popular", idx);
+        if (onSongClicked && idx >= 0 && idx < (int)popularSongsSongs_.size())
+            onSongClicked(popularSongsSongs_[(size_t)idx]);
     };
     recommendedRow->onSongClicked = [this](int idx)
     {
-        if (onSongClicked) onSongClicked("recommended", idx);
+        if (onSongClicked && idx >= 0 && idx < (int)recommendedSongsSongs_.size())
+            onSongClicked(recommendedSongsSongs_[(size_t)idx]);
     };
 
     // Add rows to scroll content
@@ -388,12 +392,14 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
 
         // Only include songs that actually have a rating
         std::vector<Playlist> popular;
+        popularSongsSongs_.clear();
         for (auto* sp : sorted)
         {
             double total = 0.0;
             for (auto r : sp->rating) total += r;
             if (total <= 0.0) break;
             popular.push_back(toPlaylist(*sp));
+            popularSongsSongs_.push_back(*sp);
             if ((int)popular.size() >= maxCards) break;
         }
         if (! popular.empty())
@@ -411,9 +417,11 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
         });
 
         std::vector<Playlist> newest;
+        newSongsSongs_.clear();
         for (auto* sp : dated)
         {
             newest.push_back(toPlaylist(*sp));
+            newSongsSongs_.push_back(*sp);
             if ((int)newest.size() >= maxCards) break;
         }
         if (! newest.empty())
@@ -435,9 +443,11 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
         }
 
         std::vector<Playlist> rec;
+        recommendedSongsSongs_.clear();
         for (auto* sp : withArt)
         {
             rec.push_back(toPlaylist(*sp));
+            recommendedSongsSongs_.push_back(*sp);
             if ((int)rec.size() >= maxCards) break;
         }
         if (! rec.empty())

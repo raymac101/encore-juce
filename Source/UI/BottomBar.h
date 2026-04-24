@@ -56,6 +56,15 @@ public:
     void setPitch(int semitones);
     void setVolume(int volumeStep);
 
+    /** Replace the procedural waveform with real peaks. Values should be in
+        [0.0, 1.0]. Pass an empty vector to restore the default procedural
+        waveform. */
+    void setWaveformSamples(const std::vector<float>& samples);
+
+    /** When true, the internal 30Hz timer stops auto-advancing progress so that
+        an external source (e.g. the audio engine) drives it via setProgress(). */
+    void setExternalProgressControl(bool externalControl) { externalProgressControl_ = externalControl; }
+
     std::function<void()> onReturnToZero;
     std::function<void()> onStopAndReturnToZero;
     std::function<void(bool isNowPlaying)> onPlayPause;
@@ -101,6 +110,7 @@ private:
     float progress = 0.0f;
     double durationSeconds = 0.0;
     std::vector<float> waveform;
+    bool externalProgressControl_ = false;
 
     //==============================================================================
     // Resize handle - Visual Studio style (at the TOP edge for bottom bar)
