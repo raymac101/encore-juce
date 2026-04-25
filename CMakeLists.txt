@@ -33,6 +33,9 @@ target_sources(EncoreJUCE
         Source/UI/LibraryPage.cpp
         Source/UI/SettingsPage.cpp
         Source/UI/SongSelectionDialog.cpp
+        Source/UI/LyricDisplayComponent.cpp
+        Source/UI/LyricDisplayWindow.cpp
+        Source/CDG/CDGDecoder.cpp
         Source/Services/LibraryScanner.cpp
         Source/Services/ImageCache.cpp
         Source/Services/UserPreferences.cpp
@@ -91,6 +94,23 @@ add_custom_command(TARGET EncoreJUCE POST_BUILD
         ${CMAKE_SOURCE_DIR}/assets
         $<TARGET_FILE_DIR:EncoreJUCE>/assets
     COMMENT "Copying assets to output directory")
+
+# Copy localisation files. On macOS they go inside the .app bundle's
+# Contents/Resources/Languages/ (standard bundle layout). On other platforms
+# they sit alongside the executable in Resources/Languages/.
+if(APPLE)
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/Resources/Languages
+            $<TARGET_BUNDLE_CONTENT_DIR:EncoreJUCE>/Resources/Languages
+        COMMENT "Copying language files into app bundle Resources")
+else()
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/Resources/Languages
+            $<TARGET_FILE_DIR:EncoreJUCE>/Resources/Languages
+        COMMENT "Copying language files next to executable")
+endif()
 
 # Set assets path for the application to find resources
 target_compile_definitions(EncoreJUCE

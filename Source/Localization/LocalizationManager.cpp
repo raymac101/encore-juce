@@ -73,11 +73,15 @@ void LocalizationManager::setLanguage(const juce::String& languageCode)
     {
         if (supportedLanguages.find(languageCode) != supportedLanguages.end())
         {
+            const bool changed = (currentLanguage != languageCode);
             currentLanguage = languageCode;
             loadLanguageFile(languageCode);
             updateCulturalSettings();
-            
+
             DBG("LocalizationManager: Language set to " + languageCode);
+
+            if (changed)
+                sendChangeMessage();
         }
         else
         {
@@ -538,6 +542,16 @@ void LocalizationManager::loadFallbackTranslations()
     translations["queue.auto_play"] = "Auto Play";
     translations["queue.delay_label"] = "Delay (sec):";
 
+    // ── Menu bar ──
+    translations["menu.window"] = "Window";
+    translations["menu.window.fullscreen"] = "Fullscreen";
+    translations["menu.window.reset_position"] = "Reset Screen Position";
+    translations["menu.window.show_title_bar"] = "Show Title Bar";
+    translations["menu.local"] = "Local";
+
+    // ── Lyric (secondary) display window ──
+    translations["lyric_window.title"] = "Encore - Lyrics";
+
     // ── HomePage ──
     translations["home.recently_played"] = "Recently Played";
     translations["home.new_songs"] = "New Songs";
@@ -699,11 +713,16 @@ juce::File LocalizationManager::findLanguageFile(const juce::String& languageCod
     // Try multiple locations for language files
     juce::StringArray searchPaths = 
     {
-        // Application directory
+       #if JUCE_MAC
+        // Inside the .app bundle: Encore.app/Contents/Resources/Languages/
+        juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+            .getChildFile("Contents/Resources/Languages").getFullPathName(),
+       #endif
+        // Application directory (Win/Linux: next to executable; macOS: outside bundle)
         juce::File::getSpecialLocation(juce::File::currentApplicationFile).getParentDirectory().getChildFile("Resources/Languages").getFullPathName(),
         // Working directory (development)
         juce::File::getCurrentWorkingDirectory().getChildFile("Resources/Languages").getFullPathName(),
-        // User documents (fallback)
+        // User documents (fallback / user override)
         juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("EncoreKaraoke/Languages").getFullPathName()
     };
     

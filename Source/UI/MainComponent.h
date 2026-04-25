@@ -24,6 +24,7 @@
 #include "MainArea.h"
 #include "QueueBar.h"
 #include "SongSelectionDialog.h"
+#include "LyricDisplayWindow.h"
 
 //==============================================================================
 /**
@@ -53,6 +54,15 @@ public:
     // Screen Management
     void detectAndConfigureScreens();
     void setupDualScreenLayout();  // DJ screen + public display
+
+    /** Accessor for the secondary (singer-facing) lyric window. May be null
+        if the window couldn't be constructed. */
+    LyricDisplayWindow* getLyricWindow() noexcept { return lyricWindow_.get(); }
+
+    /** Install (or remove) the application's MenuBarModel. On Windows/Linux
+        this embeds a MenuBarComponent at the top of the window. On macOS the
+        system menu bar is used instead so this is a no-op. */
+    void installMenuBarModel (juce::MenuBarModel* model);
     
     //==============================================================================
     // Accessibility
@@ -89,6 +99,19 @@ private:
     CdgSong      currentSong;
     juce::String currentSongImageUrl;
     double       currentSongDuration = 0.0;
+
+    //==============================================================================
+    // Secondary-monitor lyric / CDG display
+    std::unique_ptr<LyricDisplayWindow> lyricWindow_;
+
+    //==============================================================================
+    // Embedded menu bar (Windows/Linux only — macOS uses the system bar).
+    std::unique_ptr<juce::MenuBarComponent> menuBar_;
+
+    /** Resolve the .cdg file that pairs with a given audio file (typically
+        a sibling with the same base name). Returns juce::File{} if none is
+        found. */
+    juce::File resolveCdgFileFor (const juce::File& audioFile) const;
 
     /** Begin playback of the chosen song (PlayNow action). */
     void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones);

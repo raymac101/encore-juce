@@ -30,6 +30,20 @@ public:
     juce::Rectangle<int> getWindowBounds() const;
     void setWindowBounds(const juce::Rectangle<int>& bounds);
 
+    //--- Lyric (secondary) window bounds --------------------------------------
+    juce::Rectangle<int> getLyricWindowBounds() const;
+    void setLyricWindowBounds(const juce::Rectangle<int>& bounds);
+    bool getLyricWindowFullScreen() const;
+    void setLyricWindowFullScreen(bool fullScreen);
+
+    //--- Title bar visibility (applies to both windows) -----------------------
+    bool getShowTitleBar() const;
+    void setShowTitleBar(bool show);
+
+    //--- UI language (locale code, e.g. "en_US") -------------------------------
+    juce::String getLanguage() const;
+    void setLanguage(const juce::String& languageCode);
+
     //--- Venue -----------------------------------------------------------------
     juce::String getVenueId() const;
     void setVenueId(const juce::String& id);

@@ -129,6 +129,81 @@ void UserPreferences::setWindowBounds(const juce::Rectangle<int>& bounds)
 }
 
 //==============================================================================
+juce::Rectangle<int> UserPreferences::getLyricWindowBounds() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto wb = root_.getProperty("lyricWindowBounds", juce::var());
+    if (! wb.isObject()) return {};
+
+    int w = (int) wb.getProperty("width",  0);
+    int h = (int) wb.getProperty("height", 0);
+    int x = (int) wb.getProperty("x", -1);
+    int y = (int) wb.getProperty("y", -1);
+
+    if (w <= 0 || h <= 0) return {};
+    if (x < 0 || y < 0)   return juce::Rectangle<int>(w, h);
+    return juce::Rectangle<int>(x, y, w, h);
+}
+
+void UserPreferences::setLyricWindowBounds(const juce::Rectangle<int>& bounds)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* rootObj = asObj(root_);
+    auto* wb = new juce::DynamicObject();
+    wb->setProperty("x",      bounds.getX());
+    wb->setProperty("y",      bounds.getY());
+    wb->setProperty("width",  bounds.getWidth());
+    wb->setProperty("height", bounds.getHeight());
+    rootObj->setProperty("lyricWindowBounds", juce::var(wb));
+    save();
+}
+
+bool UserPreferences::getLyricWindowFullScreen() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("lyricWindowFullScreen", juce::var(false));
+}
+
+void UserPreferences::setLyricWindowFullScreen(bool fullScreen)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* rootObj = asObj(root_);
+    rootObj->setProperty("lyricWindowFullScreen", juce::var(fullScreen));
+    save();
+}
+
+//==============================================================================
+bool UserPreferences::getShowTitleBar() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: title bars visible.
+    return (bool) root_.getProperty("showTitleBar", juce::var(true));
+}
+
+void UserPreferences::setShowTitleBar(bool show)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* rootObj = asObj(root_);
+    rootObj->setProperty("showTitleBar", juce::var(show));
+    save();
+}
+
+//==============================================================================
+juce::String UserPreferences::getLanguage() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("language", juce::var()).toString();
+}
+
+void UserPreferences::setLanguage(const juce::String& languageCode)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* rootObj = asObj(root_);
+    rootObj->setProperty("language", juce::var(languageCode));
+    save();
+}
+
+//==============================================================================
 juce::String UserPreferences::getVenueId() const
 {
     const juce::ScopedLock sl(lock_);

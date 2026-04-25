@@ -21,7 +21,7 @@
     Centralized localization manager providing text translation, date/time formatting,
     number formatting, and cultural adaptations for international markets.
 */
-class LocalizationManager
+class LocalizationManager : public juce::ChangeBroadcaster
 {
 public:
     //==============================================================================

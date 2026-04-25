@@ -1,0 +1,281 @@
+# =============================================================================
+# Encore Karaoke — Translation Template
+# =============================================================================
+#
+# How to use:
+#   1. Copy this file to <locale>.txt where <locale> is one of the codes
+#      registered in LocalizationManager::initializeSupportedLanguages()
+#      (e.g. en_US, en_GB, es_ES, es_MX, fr_FR, de_DE, pt_BR, ja_JP, ko_KR,
+#      zh_CN). Adding a new locale also requires adding it there.
+#
+#   2. Translate the right-hand side of every key=value pair below. Leave
+#      keys unchanged. Untranslated keys fall back to the built-in English
+#      strings, so partial files are valid.
+#
+#   3. Save as UTF-8 (no BOM). Place in one of:
+#        - <App>/Contents/Resources/Languages/      (shipped with app)
+#        - <cwd>/Resources/Languages/               (development)
+#        - ~/Documents/EncoreKaraoke/Languages/    (user override)
+#
+# Syntax:
+#   key=value             ← straight assignment
+#   # comment             ← lines starting with # are ignored
+#   "value with spaces"   ← surrounding double quotes are stripped
+#   {n}, {0}, {1}, ...    ← parameter placeholders, keep them in output
+#   \n                    ← literal backslash-n in the file (kept as-is by
+#                            the parser; render code interprets it)
+#
+# Notes:
+#   • Trailing whitespace in stats labels (e.g. "Total Songs:        ")
+#     is intentional — it column-aligns the numeric values that follow.
+#     Preserve trailing spaces if you want the same alignment.
+#   • Some keys are shown UPPER-CASE in the UI (headers, buttons). Match
+#     that convention in your language if it reads naturally; otherwise
+#     translate normally — the UI does not force-uppercase.
+#   • {n} in library.songs_loaded is replaced with a number at runtime.
+# =============================================================================
+
+# ── Application ──────────────────────────────────────────────────────────────
+app.name=Encore Karaoke
+
+# ── Navigation bar (left side) ───────────────────────────────────────────────
+nav.home=Accueil
+nav.search=Recherche
+nav.library=Bibliothèque
+nav.charts=Classements
+nav.mixer=Mixeur
+nav.settings=Paramètres
+nav.testing=Tests
+nav.ads=Publicités
+nav.playlist=Playlist
+nav.venue_management=Gestion lieu
+nav.queue=File
+nav.songs=Chansons
+nav.genres=GENRES :
+
+# ── Top bar ──────────────────────────────────────────────────────────────────
+topbar.key=TONALITÉ
+topbar.bpm=BPM
+topbar.offline_warning=VOTRE ORDINATEUR EST HORS LIGNE - VEUILLEZ VOUS CONNECTER À INTERNET
+topbar.no_cover=Pas de pochette
+topbar.anonymous=Anonyme
+topbar.vu=VU
+
+# ── Bottom bar (transport controls) ──────────────────────────────────────────
+bottombar.pitch=HAUTEUR
+bottombar.volume=VOL
+bottombar.return_to_zero=Retour à 0
+bottombar.stop=Arrêter et revenir à zéro
+bottombar.play_pause=Lecture/Pause
+bottombar.jump_to_end=Aller à la fin
+
+# ── Page titles ──────────────────────────────────────────────────────────────
+page.home=Accueil
+page.search=Recherche
+page.library=Bibliothèque
+page.charts=Classements
+page.mixer=Mixeur
+page.settings=Paramètres
+page.testing=Tests
+page.ads=Publicités
+page.playlist=Playlist
+page.venue_management=Gestion du lieu
+
+# ── Audio controls ───────────────────────────────────────────────────────────
+audio.play=Lecture
+audio.pause=Pause
+audio.stop=Arrêter
+
+# ── Status messages ──────────────────────────────────────────────────────────
+status.ready=Prêt
+status.loading=Chargement…
+status.connected=Connecté
+status.disconnected=Déconnecté
+
+# ── Generic buttons ──────────────────────────────────────────────────────────
+button.ok=OK
+button.cancel=Annuler
+button.close=Fermer
+
+# ── Language names (shown in pickers) ────────────────────────────────────────
+language.english=English
+language.spanish=Español
+language.french=Français
+language.german=Deutsch
+
+# ── Queue bar / queue management ─────────────────────────────────────────────
+queue.now_singing=Chante actuellement :
+queue.clear_queue=Vider la file
+queue.queue_label=File d'attente
+queue.auto_play=Lecture auto
+queue.delay_label=Délai (sec) :
+
+# ── Application menu bar ─────────────────────────────────────────────────────
+menu.window=Fenêtre
+menu.window.fullscreen=Plein écran
+menu.window.reset_position=Réinitialiser la position de l'écran
+menu.window.show_title_bar=Afficher la barre de titre
+menu.local=Local
+
+# ── Lyric (secondary) display window ─────────────────────────────────────────
+lyric_window.title=Encore - Paroles
+
+# ── Home page ────────────────────────────────────────────────────────────────
+home.recently_played=Récemment jouées
+home.new_songs=Nouvelles chansons
+home.popular_songs=Chansons populaires
+home.recommended_songs=Chansons recommandées
+
+# ── Search page ──────────────────────────────────────────────────────────────
+search.placeholder=Rechercher des chansons…
+search.clear=Effacer
+search.filter_all=Tout
+search.filter_song=Chanson
+search.filter_artist=Artiste
+search.filter_year=Année
+search.filter_genre=Genre
+search.count_suffix=chansons dans cette liste
+search.col_song=CHANSON
+search.col_artist=ARTISTE
+search.col_version=VERSION
+search.col_year=ANNÉE
+search.col_genre=GENRE
+search.scroll_top=Haut
+search.row_edit=Modifier
+
+# ── Library page ─────────────────────────────────────────────────────────────
+library.title=BIBLIOTHÈQUE
+library.path_label=Chemin vers les fichiers karaoké :
+library.scanning=Analyse :
+library.applying_metadata=Application des métadonnées :
+library.btn_initial_load=Chargement initial des chansons
+library.btn_add_songs=Ajouter des chansons
+library.btn_get_metadata=Obtenir les métadonnées
+library.btn_edit_genres=Modifier les genres
+library.chooser_root=Sélectionner le dossier racine de la collection karaoké
+library.chooser_append=Sélectionner le dossier source pour ajouter des chansons
+library.no_songs=Aucune chanson chargée. Lancez d'abord un chargement initial.
+library.songs_loaded={n} chansons chargées.
+
+# Trailing whitespace in stats_* labels is intentional — preserves column
+# alignment with the numeric values displayed next to them.
+library.stats_total=Total chansons :    
+library.stats_meta=Avec métadonnées :  
+library.stats_cdg=Fichiers CDG :      
+library.stats_zip=Fichiers ZIP :      
+library.stats_mp4=Fichiers MP4 :      
+library.stats_m4a=Fichiers M4A :      
+library.stats_xml=Fichiers XML :      
+library.stats_unknown=Fichiers inconnus : 
+library.stats_groups=Dossiers/Groupes :  
+
+library.edit_genres_title=Modifier les genres
+library.edit_genres_body=L'éditeur de genres sera bientôt disponible.\n\nLes genres sont automatiquement extraits de vos dossiers de collection CDG et de leurs métadonnées.
+
+# ── Settings page ────────────────────────────────────────────────────────────
+settings.title=PARAMÈTRES
+
+# Section headers
+settings.sec_venue_info=INFORMATIONS DU LIEU
+settings.sec_venue_id=IDENTITÉ DU LIEU
+settings.sec_queue=PARAMÈTRES DE LA FILE
+settings.sec_display=PARAMÈTRES D'AFFICHAGE
+settings.sec_session=GESTION DE SESSION
+
+# Venue info — labels / placeholders
+settings.lbl_venue_name=Nom du lieu :
+settings.lbl_address=Adresse :
+settings.lbl_city=Ville :
+settings.lbl_country=Pays :
+settings.ph_venue_name=Saisir le nom du lieu
+settings.ph_address=Saisir l'adresse
+settings.ph_city=Saisir la ville
+settings.ph_country=Saisir le pays (facultatif)
+settings.btn_save_venue=ENREGISTRER LES MODIFICATIONS
+settings.saved=Paramètres enregistrés.
+
+# Venue identity
+settings.lbl_venue_id=ID du lieu :
+settings.lbl_venue_code=Code du lieu :
+settings.lbl_emerg_code=Code d'urgence :
+
+# Queue settings
+settings.lbl_num_songs=Chansons autorisées par chanteur :
+settings.lbl_num_singers=Chanteurs visibles dans la file :
+settings.lbl_num_skips=Sauts de chanson autorisés par chanteur :
+settings.lbl_repeat_songs=Autoriser les chansons répétées :
+settings.lbl_auto_approve=Approuver les chanteurs automatiquement :
+
+# Display settings
+settings.lbl_lyrics_bg=Fond des paroles :
+settings.lbl_show_online=Afficher les chansons en ligne (Tagg) :
+settings.lbl_show_online_encore=Afficher les chansons en ligne (Encore) :
+settings.lbl_show_memory=Afficher les stats mémoire :
+
+# Session buttons
+settings.btn_clear_recent=EFFACER LES RÉCEMMENT JOUÉES
+settings.btn_end_session=TERMINER LA SESSION ET ARCHIVER
+
+# Shared option strings (numeric/spinner choices)
+settings.opt_zero=Zéro
+settings.opt_one=Un
+settings.opt_two=Deux
+settings.opt_three=Trois
+settings.opt_four=Quatre
+settings.opt_five=Cinq
+settings.opt_six=Six
+settings.opt_ten=Dix
+settings.opt_any=Illimité
+settings.opt_next=Suivant
+settings.opt_all=Tous
+settings.opt_hide=Masquer la file
+
+# Lyrics background visualizer choices
+settings.bg_none=Aucun
+settings.bg_squares=Carrés vers cercles
+settings.bg_lines=Lignes
+settings.bg_fading=Fond en fondu
+settings.bg_circles=Cercles
+settings.bg_rotating=Carrés rotatifs
+settings.bg_snow=Neige
+
+# Venue info — edit mode
+settings.btn_edit_venue=MODIFIER LES INFOS DU LIEU
+settings.btn_delete_venue=SUPPRIMER LE LIEU
+settings.btn_cancel=ANNULER
+settings.lbl_license_key=Clé de licence du lieu :
+
+# Venue Code Management
+settings.sec_venue_code=Gestion du code du lieu
+settings.lbl_current_code=Code actuel du lieu :
+settings.lbl_manual_code=Définir un code manuel (6 lettres) :
+settings.ph_manual_code=ABCDEF
+settings.btn_set_code=DÉFINIR LE CODE
+settings.btn_gen_code=GÉNÉRER UN CODE ALÉATOIRE
+settings.lbl_emerg_header=Code d'urgence
+settings.lbl_current_emerg=Code d'urgence actuel :
+settings.ph_emerg_code=SAISIR UN CODE À 6 LETTRES
+settings.btn_set_emerg=DÉFINIR LE CODE D'URGENCE
+settings.btn_gen_emerg=GÉNÉRER UN CODE D'URGENCE ALÉATOIRE
+
+# User management
+settings.sec_users=Gestion des utilisateurs du lieu
+settings.lbl_invite_header=Inviter un nouvel utilisateur
+settings.ph_invite_email=Saisir l'adresse e-mail
+settings.btn_invite_user=INVITER L'UTILISATEUR
+settings.lbl_current_users=Utilisateurs actuels
+
+# Logo management
+settings.sec_logo=Logo
+settings.lbl_logo=Logo :
+settings.ph_logo_file=Sélectionnez votre fichier !
+settings.btn_browse=PARCOURIR
+settings.btn_save_logo=ENREGISTRER LE LOGO
+settings.btn_default_logo=LOGO PAR DÉFAUT
+
+# Session statistics
+settings.lbl_songs_today=Chansons jouées aujourd'hui :
+settings.lbl_active_members=Membres actifs :
+settings.lbl_singers_queue=Chanteurs dans la file :
+settings.lbl_req_songs=Chansons demandées :
+settings.btn_view_archive=Voir l'historique des archives

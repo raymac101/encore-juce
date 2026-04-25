@@ -100,6 +100,11 @@ MainComponent::MainComponent()
     audioEngine = std::make_unique<AudioEngine>();
     audioEngine->initialize();
 
+    // Open the singer-facing lyric display window on the secondary monitor
+    // (falls back to a windowed display if there's only one screen). It
+    // shows an idle screen until a song is loaded.
+    lyricWindow_ = std::make_unique<LyricDisplayWindow> (audioEngine.get());
+
     try
     {
         // Setup UI components carefully
@@ -133,6 +138,9 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    // Close the secondary display before the audio engine goes away — its
+    // timer may be trying to poll the engine's position.
+    lyricWindow_.reset();
     if (audioEngine) audioEngine->shutdown();
 }
 
@@ -444,6 +452,15 @@ void MainComponent::resized()
 {
     // Basic responsive resized method
     auto bounds = getLocalBounds();
+
+    // Non-mac: embedded menu bar at the very top.
+   #if ! JUCE_MAC
+    if (menuBar_ != nullptr && menuBar_->isVisible())
+    {
+        auto menuBounds = bounds.removeFromTop (24);
+        menuBar_->setBounds (menuBounds);
+    }
+   #endif
 
     // Reserve bottom area for BottomBar
     if (bottomBar)
@@ -1057,6 +1074,14 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         return;
     }
 
+    // Push the matching CDG file to the secondary lyric display. If no CDG
+    // companion exists the window will simply fall back to its idle screen.
+    if (self->lyricWindow_)
+    {
+        const auto cdgFile = self->resolveCdgFileFor (audioFile);
+        self->lyricWindow_->loadCDG (cdgFile);
+    }
+
     self->currentSong          = song;
     self->currentSongImageUrl  = juce::String(song.imageUrl);
     self->currentSongDuration  = self->audioEngine->getTotalLength();
@@ -1136,4 +1161,54 @@ void MainComponent::hideLoadingOverlay()
 {
     if (loadingOverlay_)
         loadingOverlay_->setVisible(false);
+}
+
+//==============================================================================
+juce::File MainComponent::resolveCdgFileFor (const juce::File& audioFile) const
+{
+    if (! audioFile.existsAsFile())
+        return {};
+
+    // If the audio file is itself a .cdg, that's our target.
+    if (audioFile.getFileExtension().equalsIgnoreCase (".cdg"))
+        return audioFile;
+
+    // Common case: the audio file is an .mp3/.m4a and the CDG graphics sit
+    // in a sibling file with the same stem. Probe a couple of common casings.
+    for (const juce::String& ext : { ".cdg", ".CDG", ".Cdg" })
+    {
+        auto sibling = audioFile.withFileExtension (ext);
+        if (sibling.existsAsFile())
+            return sibling;
+    }
+
+    return {};
+}
+
+//==============================================================================
+void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
+{
+   #if JUCE_MAC
+    juce::ignoreUnused (model);
+    // macOS uses the system menu bar, managed directly by EncoreApplication
+    // via juce::MenuBarModel::setMacMainMenu. Nothing to do here.
+   #else
+    if (model == nullptr)
+    {
+        menuBar_.reset();
+    }
+    else
+    {
+        if (menuBar_ == nullptr)
+        {
+            menuBar_ = std::make_unique<juce::MenuBarComponent> (model);
+            addAndMakeVisible (menuBar_.get());
+        }
+        else
+        {
+            menuBar_->setModel (model);
+        }
+    }
+    resized();
+   #endif
 }
