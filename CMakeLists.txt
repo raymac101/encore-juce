@@ -35,11 +35,15 @@ target_sources(EncoreJUCE
         Source/UI/SongSelectionDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
+        Source/UI/LoginWindow.cpp
         Source/CDG/CDGDecoder.cpp
         Source/Services/LibraryScanner.cpp
         Source/Services/ImageCache.cpp
         Source/Services/UserPreferences.cpp
         Source/Services/WaveformGenerator.cpp
+        Source/Services/FirestoreClient.cpp
+        Source/Services/VenueService.cpp
+        Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
         Source/Models/QueueItem.cpp
@@ -84,6 +88,7 @@ target_link_libraries(EncoreJUCE
         juce::juce_gui_basics
         juce::juce_gui_extra
         juce::juce_opengl
+        juce::juce_video
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)

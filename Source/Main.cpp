@@ -14,8 +14,10 @@
 #include <JuceHeader.h>
 #include "UI/MainComponent.h"
 #include "UI/LyricDisplayWindow.h"
+#include "UI/LoginWindow.h"
 #include "Localization/LocalizationManager.h"
 #include "Services/UserPreferences.h"
+#include "Services/VenueService.h"
 
 //==============================================================================
 class EncoreApplication : public juce::JUCEApplication,
@@ -40,18 +42,10 @@ public:
         else
             LocalizationManager::getInstance().detectSystemLanguage();
 
-        // Create the main application window
-        mainWindow.reset (new MainWindow (getApplicationName()));
-
-        // Install the platform menu.
-       #if JUCE_MAC
-        // macOS uses the system menu bar at the top of the screen.
-        juce::MenuBarModel::setMacMainMenu (this);
-       #else
-        // Windows/Linux: embed a MenuBarComponent at the top of the main window.
-        if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
-            content->installMenuBarModel (this);
-       #endif
+        // Show the login + venue-selection flow first. The main app window
+        // is constructed only after the user is signed in and a venue (or
+        // an admin "create venue" decision) has been resolved.
+        showLoginWindow();
     }
 
     void shutdown() override
@@ -66,6 +60,7 @@ public:
 
         // Clear the main window
         mainWindow = nullptr;
+        loginWindow_ = nullptr;
 
         // Note: LocalizationManager will be cleaned up automatically as static instance
     }
@@ -323,6 +318,11 @@ public:
 
             setContentOwned (new MainComponent(), true);
 
+            // Re-apply the active venue so the queue/lyric UI doesn't go blank
+            // after the rebuild.
+            if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+                content->setVenueId (VenueService::getInstance().getCurrentVenueId());
+
             setBounds (previousBounds);
             if (wasFullScreen)
                 setFullScreen (true);
@@ -381,7 +381,40 @@ public:
     };
 
 private:
-    std::unique_ptr<MainWindow> mainWindow;
+    //==============================================================================
+    void showLoginWindow()
+    {
+        loginWindow_.reset (new LoginWindow ([this](juce::String venueId)
+        {
+            // Defer so the login window can finish closing on the message thread.
+            juce::MessageManager::callAsync ([this, venueId]
+            {
+                loginWindow_ = nullptr;
+                createMainWindow (venueId);
+            });
+        }));
+    }
+
+    void createMainWindow (const juce::String& venueId)
+    {
+        if (mainWindow != nullptr)
+            return;
+
+        mainWindow.reset (new MainWindow (getApplicationName()));
+
+        if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+            content->setVenueId (venueId);
+
+       #if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu (this);
+       #else
+        if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+            content->installMenuBarModel (this);
+       #endif
+    }
+
+    std::unique_ptr<LoginWindow> loginWindow_;
+    std::unique_ptr<MainWindow>  mainWindow;
 
     // Language codes for the dynamic Local menu, index matches (menuID - cmdLanguageBase).
     juce::StringArray languageCodes_;

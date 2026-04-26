@@ -63,6 +63,11 @@ public:
         this embeds a MenuBarComponent at the top of the window. On macOS the
         system menu bar is used instead so this is a no-op. */
     void installMenuBarModel (juce::MenuBarModel* model);
+
+    /** Load the active venue from Firestore and propagate its name/code to
+        the queue bar and its logo + code to the lyric display window. Safe
+        to call from the message thread; network work happens in background. */
+    void setVenueId (const juce::String& venueId);
     
     //==============================================================================
     // Accessibility
@@ -134,6 +139,8 @@ private:
     bool highContrastMode = false;
     bool largeTextMode = false;
     bool isConnectedToFirebase = false;
+
+    juce::String activeVenueId_;
     
     //==============================================================================
     // UI Setup

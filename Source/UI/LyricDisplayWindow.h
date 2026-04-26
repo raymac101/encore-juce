@@ -31,6 +31,21 @@ public:
     /** Convenience passthrough to the component. */
     void loadCDG (const juce::File& cdgFile);
 
+    /** Loads an MP4/M4V/MOV video for full-screen playback on the lyric
+        display. Audio is provided by the video itself — the AudioEngine is
+        not used in this mode. Returns true on success. */
+    bool loadVideo (const juce::File& videoFile);
+
+    /** Stops any video playback and reverts to the CDG/idle view. */
+    void stopVideo();
+
+    /** True while a video is loaded on this window. */
+    bool isVideoActive() const;
+
+    /** Current play position / total duration of the loaded video, seconds. */
+    double getVideoPosition() const;
+    double getVideoDuration() const;
+
     void closeButtonPressed() override;
 
     /** Place the window on the first non-primary display if one exists,

@@ -12,6 +12,8 @@
 
 #include "MainComponent.h"
 #include "../Services/WaveformGenerator.h"
+#include "../Services/VenueService.h"
+#include "../Services/ImageCache.h"
 #include <cmath>
 
 //==============================================================================
@@ -255,6 +257,34 @@ void MainComponent::setupUI()
         // Play Next / Add to Queue will be wired to the queue service later.
     };
 
+    // Push settings-page edits back to Firestore. On success the queue bar
+    // and lyric display also pick up any name / code changes.
+    mainArea->onVenueSettingsChanged = [this](const VenueItem& updated)
+    {
+        if (activeVenueId_.isEmpty())
+            return;
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        const auto venueId = activeVenueId_;
+        VenueService::getInstance().saveVenue (venueId, updated,
+            [safe, updated](bool ok, juce::String error)
+            {
+                if (safe == nullptr) return;
+                if (! ok)
+                {
+                    DBG ("[Venue] save failed: " << error);
+                    return;
+                }
+
+                if (safe->queueBar != nullptr)
+                    safe->queueBar->setVenueInfo (juce::String(updated.name),
+                                                  juce::String(updated.code));
+                if (safe->lyricWindow_ != nullptr)
+                    if (auto* d = safe->lyricWindow_->getDisplay())
+                        d->setVenueCode (juce::String(updated.code));
+            });
+    };
+
     // When NavBar width changes via drag, re-layout
     navBar->onWidthChanged = [this](int /*newWidth*/) {
         resized();
@@ -345,7 +375,6 @@ void MainComponent::setupUI()
         nq.duration = 277;
         nowSinger.songs.push_back(nq);
 
-        queueBar->setVenueInfo("The Blue Note", "BLUE42");
         queueBar->setNowPlaying(nowSinger);
         queueBar->setSingers({ s1, s2, s3 });
     }
@@ -620,13 +649,19 @@ void MainComponent::timerCallback()
     // Feed real playback position into the BottomBar progress/time labels.
     if (bottomBar != nullptr)
     {
-        double total = audioEngine->getTotalLength();
+        // Prefer the lyric-window video's position when an MP4 is playing.
+        const bool videoActive = (lyricWindow_ != nullptr && lyricWindow_->isVideoActive());
+
+        double total = videoActive ? lyricWindow_->getVideoDuration()
+                                   : audioEngine->getTotalLength();
         if (total > 0.0)
         {
-            double pos = juce::jlimit(0.0, total, audioEngine->getCurrentPosition());
+            double pos = videoActive ? lyricWindow_->getVideoPosition()
+                                     : audioEngine->getCurrentPosition();
+            pos = juce::jlimit (0.0, total, pos);
             bottomBar->setProgress((float) (pos / total));
         }
-        bottomBar->setPlaying(audioEngine->isPlaying());
+        bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
     }
 }
 
@@ -1058,11 +1093,78 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         auto sibling = audioFile.withFileExtension("mp3");
         if (sibling.existsAsFile())
             audioFile = sibling;
+        ext = audioFile.getFileExtension().toLowerCase();
     }
 
     if (! audioFile.existsAsFile())
     {
         DBG("loadAndPlaySong: file not found: " + audioFile.getFullPathName());
+        self->hideLoadingOverlay();
+        return;
+    }
+
+    // ─── MP4 / video branch ────────────────────────────────────────────────
+    // The lyric display owns its own video player (juce::VideoComponent) which
+    // handles audio + video together. We bypass AudioEngine entirely for
+    // these formats so the two pipelines don't double-up the audio.
+    const bool isVideo = (ext == ".mp4" || ext == ".m4v" || ext == ".mov");
+
+    if (isVideo)
+    {
+        // Stop any currently-playing audio song so we don't overlap.
+        self->audioEngine->stop();
+
+        if (self->lyricWindow_ == nullptr
+            || ! self->lyricWindow_->loadVideo (audioFile))
+        {
+            DBG("loadAndPlaySong: video load failed: " + audioFile.getFullPathName());
+            self->hideLoadingOverlay();
+            return;
+        }
+
+        self->currentSong         = song;
+        self->currentSongImageUrl = juce::String (song.imageUrl);
+        self->currentSongDuration = self->lyricWindow_->getVideoDuration();
+
+        if (self->topBar)
+        {
+            juce::String version;
+            if (versionIndex >= 0 && versionIndex < (int) song.version.size())
+                version = juce::String (song.version[(size_t) versionIndex]);
+
+            self->topBar->setTrackInfo (juce::String (song.songName),
+                                        juce::String (song.artistName),
+                                        version);
+            self->topBar->setMusicInfo (juce::String (song.keySignature),
+                                        (int) std::round (song.tempo));
+
+            if (self->currentSongImageUrl.isNotEmpty())
+            {
+                juce::Component::SafePointer<TopBar> safeTop (self->topBar.get());
+                juce::String url = self->currentSongImageUrl;
+                juce::Image img = ArtworkCache::getInstance().getOrFetch (url, [safeTop, url]() {
+                    if (! safeTop) return;
+                    auto cached = ArtworkCache::getInstance().getOrFetch (url, nullptr);
+                    if (cached.isValid()) safeTop->setCoverArt (cached);
+                });
+                if (img.isValid())
+                    self->topBar->setCoverArt (img);
+            }
+            else
+            {
+                self->topBar->setCoverArt ({});
+            }
+        }
+
+        if (self->bottomBar)
+        {
+            self->bottomBar->setDurationSeconds (self->currentSongDuration);
+            self->bottomBar->setProgress (0.0f);
+            self->bottomBar->setPlaying (true);
+            self->bottomBar->setPitch (pitchSemitones);
+            self->bottomBar->setWaveformSamples ({}); // No waveform for video.
+        }
+
         self->hideLoadingOverlay();
         return;
     }
@@ -1211,4 +1313,78 @@ void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
     }
     resized();
    #endif
+}
+
+//==============================================================================
+void MainComponent::setVenueId (const juce::String& venueId)
+{
+    activeVenueId_ = venueId;
+
+    if (venueId.isEmpty())
+    {
+        if (queueBar != nullptr)
+            queueBar->setVenueInfo ("No Venue", "");
+        if (lyricWindow_ != nullptr)
+            if (auto* d = lyricWindow_->getDisplay())
+                d->setVenueCode ({});
+        return;
+    }
+
+    // Provisional state until the doc loads.
+    if (queueBar != nullptr)
+        queueBar->setVenueInfo ("Loading…", "");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    VenueService::getInstance().loadVenue (venueId,
+        [safe] (bool ok, VenueItem v, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            if (! ok)
+            {
+                DBG ("[Venue] load failed: " << error);
+                if (safe->queueBar != nullptr)
+                    safe->queueBar->setVenueInfo ("Venue unavailable", "");
+                return;
+            }
+
+            const juce::String name (v.name);
+            const juce::String code (v.code);
+            const juce::String logoUrl (v.logoUrl);
+
+            if (safe->queueBar != nullptr)
+                safe->queueBar->setVenueInfo (name, code);
+
+            if (safe->lyricWindow_ != nullptr)
+                if (auto* d = safe->lyricWindow_->getDisplay())
+                    d->setVenueCode (code);
+
+            // Push the full venue snapshot into the Settings page so the admin
+            // can edit any field. Saves are routed through MainArea's
+            // onVenueSettingsChanged callback wired in the constructor.
+            if (safe->mainArea != nullptr)
+                safe->mainArea->setVenueData (v);
+
+            // Fetch the venue logo asynchronously and push it into the lyric
+            // display once it arrives. ArtworkCache invokes the callback on
+            // the message thread.
+            if (logoUrl.isNotEmpty())
+            {
+                auto img = ArtworkCache::getInstance().getOrFetch (logoUrl,
+                    [safe, logoUrl]
+                    {
+                        if (safe == nullptr) return;
+                        auto loaded = ArtworkCache::getInstance().getOrFetch (logoUrl);
+                        if (loaded.isValid() && safe->lyricWindow_ != nullptr)
+                            if (auto* d = safe->lyricWindow_->getDisplay())
+                                d->setVenueLogo (loaded);
+                    });
+
+                if (img.isValid() && safe->lyricWindow_ != nullptr)
+                    if (auto* d = safe->lyricWindow_->getDisplay())
+                        d->setVenueLogo (img);
+            }
+        });
 }

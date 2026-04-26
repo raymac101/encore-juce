@@ -104,6 +104,32 @@ void LyricDisplayWindow::loadCDG (const juce::File& cdgFile)
         display_->loadCDG (cdgFile);
 }
 
+bool LyricDisplayWindow::loadVideo (const juce::File& videoFile)
+{
+    return display_ != nullptr && display_->loadVideo (videoFile);
+}
+
+void LyricDisplayWindow::stopVideo()
+{
+    if (display_ != nullptr)
+        display_->stopVideo();
+}
+
+bool LyricDisplayWindow::isVideoActive() const
+{
+    return display_ != nullptr && display_->isVideoActive();
+}
+
+double LyricDisplayWindow::getVideoPosition() const
+{
+    return display_ != nullptr ? display_->getVideoPosition() : 0.0;
+}
+
+double LyricDisplayWindow::getVideoDuration() const
+{
+    return display_ != nullptr ? display_->getVideoDuration() : 0.0;
+}
+
 void LyricDisplayWindow::closeButtonPressed()
 {
     // Just hide the window — it can be reopened from the main window. We
