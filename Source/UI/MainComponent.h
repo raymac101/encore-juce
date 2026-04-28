@@ -66,8 +66,11 @@ public:
 
     /** Load the active venue from Firestore and propagate its name/code to
         the queue bar and its logo + code to the lyric display window. Safe
-        to call from the message thread; network work happens in background. */
-    void setVenueId (const juce::String& venueId);
+        to call from the message thread; network work happens in background.
+        If `requestInitialScan` is true, the user is switching to a venue
+        that wasn't configured on this PC — once the venue loads we switch
+        to the Library page and start the initial song-load flow. */
+    void setVenueId (const juce::String& venueId, bool requestInitialScan = false);
     
     //==============================================================================
     // Accessibility

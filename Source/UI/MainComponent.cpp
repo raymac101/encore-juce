@@ -13,6 +13,7 @@
 #include "MainComponent.h"
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
+#include "../Services/QueueService.h"
 #include "../Services/ImageCache.h"
 #include <cmath>
 
@@ -326,60 +327,14 @@ void MainComponent::setupUI()
 
     // Populate with sample data so the queue is visible on launch
     {
-        Singers s1;
-        s1.name = "Alice";
-        s1.order = 0;
-        s1.rotationOrder = 0;
-        s1.songsPerformed = 2;
-        QueueItem q1;
-        q1.songArtist = "Adele";
-        q1.songName = "Rolling in the Deep";
-        q1.duration = 228;
-        s1.songs.push_back(q1);
-
-        Singers s2;
-        s2.name = "Bob";
-        s2.order = 1;
-        s2.rotationOrder = 1;
-        s2.songsPerformed = 1;
-        QueueItem q2;
-        q2.songArtist = "Journey";
-        q2.songName = "Don't Stop Believin'";
-        q2.duration = 251;
-        QueueItem q2b;
-        q2b.songArtist = "Queen";
-        q2b.songName = "Bohemian Rhapsody";
-        q2b.duration = 354;
-        s2.songs.push_back(q2);
-        s2.songs.push_back(q2b);
-
-        Singers s3;
-        s3.name = "Carol";
-        s3.order = 2;
-        s3.rotationOrder = 2;
-        s3.songsPerformed = 0;
-        QueueItem q3;
-        q3.songArtist = "Whitney Houston";
-        q3.songName = "I Will Always Love You";
-        q3.duration = 273;
-        s3.songs.push_back(q3);
-
-        Singers nowSinger;
-        nowSinger.name = "Dave";
-        nowSinger.order = -1;
-        nowSinger.rotationOrder = -1;
-        nowSinger.songsPerformed = 3;
-        QueueItem nq;
-        nq.songArtist = "Frank Sinatra";
-        nq.songName = "My Way";
-        nq.duration = 277;
-        nowSinger.songs.push_back(nq);
-
-        queueBar->setNowPlaying(nowSinger);
-        queueBar->setSingers({ s1, s2, s3 });
+        // Queue starts empty until a venue is loaded; setVenueId() fetches
+        // the live queue from Firestore at venues/<venueId>/queue and
+        // populates the bar via QueueService.
+        queueBar->clearNowPlaying();
+        queueBar->setSingers({});
     }
 
-    DBG("QueueBar created and configured with sample data");
+    DBG("QueueBar created (waiting on venue queue load)");
 
     // Title label - using LocalizationManager
     titleLabel = std::make_unique<juce::Label>("title", LocalizationManager::getInstance().getText("app.name"));
@@ -1316,7 +1271,7 @@ void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
 }
 
 //==============================================================================
-void MainComponent::setVenueId (const juce::String& venueId)
+void MainComponent::setVenueId (const juce::String& venueId, bool requestInitialScan)
 {
     activeVenueId_ = venueId;
 
@@ -1332,12 +1287,12 @@ void MainComponent::setVenueId (const juce::String& venueId)
 
     // Provisional state until the doc loads.
     if (queueBar != nullptr)
-        queueBar->setVenueInfo ("Loading…", "");
+        queueBar->setVenueInfo ("Loading...", "");
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
     VenueService::getInstance().loadVenue (venueId,
-        [safe] (bool ok, VenueItem v, juce::String error)
+        [safe, requestInitialScan] (bool ok, VenueItem v, juce::String error)
         {
             if (safe == nullptr)
                 return;
@@ -1386,5 +1341,36 @@ void MainComponent::setVenueId (const juce::String& venueId)
                     if (auto* d = safe->lyricWindow_->getDisplay())
                         d->setVenueLogo (img);
             }
+
+            // Venue switch path: if this load was triggered by the user
+            // picking a different venue than the one configured on this PC,
+            // navigate to the Library page and kick off the full song scan.
+            if (requestInitialScan && safe->mainArea != nullptr)
+                safe->mainArea->triggerInitialSongLoad();
+
+            // Load the live queue for this venue from Firestore and push it
+            // into the QueueBar (replaces the placeholder/empty state).
+            const juce::String vid (v.id);
+            QueueService::getInstance().loadQueue (vid,
+                [safe] (bool qok, QueueService::Snapshot snap, juce::String qerr)
+                {
+                    if (safe == nullptr || safe->queueBar == nullptr)
+                        return;
+
+                    if (! qok)
+                    {
+                        DBG ("[Queue] load failed: " << qerr);
+                        safe->queueBar->clearNowPlaying();
+                        safe->queueBar->setSingers ({});
+                        return;
+                    }
+
+                    if (snap.hasNowPlaying)
+                        safe->queueBar->setNowPlaying (snap.nowPlaying);
+                    else
+                        safe->queueBar->clearNowPlaying();
+
+                    safe->queueBar->setSingers (snap.singers);
+                });
         });
 }

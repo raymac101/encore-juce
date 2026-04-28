@@ -384,18 +384,18 @@ private:
     //==============================================================================
     void showLoginWindow()
     {
-        loginWindow_.reset (new LoginWindow ([this](juce::String venueId)
+        loginWindow_.reset (new LoginWindow ([this](juce::String venueId, bool requestInitialScan)
         {
             // Defer so the login window can finish closing on the message thread.
-            juce::MessageManager::callAsync ([this, venueId]
+            juce::MessageManager::callAsync ([this, venueId, requestInitialScan]
             {
                 loginWindow_ = nullptr;
-                createMainWindow (venueId);
+                createMainWindow (venueId, requestInitialScan);
             });
         }));
     }
 
-    void createMainWindow (const juce::String& venueId)
+    void createMainWindow (const juce::String& venueId, bool requestInitialScan = false)
     {
         if (mainWindow != nullptr)
             return;
@@ -403,7 +403,7 @@ private:
         mainWindow.reset (new MainWindow (getApplicationName()));
 
         if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
-            content->setVenueId (venueId);
+            content->setVenueId (venueId, requestInitialScan);
 
        #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (this);

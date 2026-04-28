@@ -92,6 +92,14 @@ public:
         if (settingsPage) settingsPage->setVenueData(venue);
     }
 
+    /** Switch to the Library page and kick off the full initial song-load
+        flow (file-chooser + scan). Used after a venue switch. */
+    void triggerInitialSongLoad()
+    {
+        setCurrentPage(NavPage::Library);
+        if (libraryPage) libraryPage->startInitialSongLoad();
+    }
+
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;
 

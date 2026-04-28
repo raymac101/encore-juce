@@ -305,7 +305,7 @@ public:
 
         createVenueButton_.onClick = [this]
         {
-            if (onComplete_) onComplete_({});
+            if (onComplete_) onComplete_({}, false);
         };
 
         requestAccessButton_.onClick = [this] { handleRequestAccess(); };
@@ -318,22 +318,55 @@ public:
 
         venueListModelOnSelected_ = [this](const juce::String& venueId)
         {
-            setBusy(true, "Loading venue…");
-            // Optional: persist or clear remember-on-this-PC choice.
-            if (rememberVenueToggle_.getToggleState())
-                UserPreferences::getInstance().setVenueId(venueId);
-            LoginFlowController::selectVenue(venueId, [this, venueId]
+            const auto configuredId = flowResult_.configuredVenueId;
+            const bool isSwitch = configuredId.isNotEmpty() && configuredId != venueId;
+
+            auto proceed = [this, venueId](bool initialScan)
             {
-                setBusy(false, {});
-                if (onComplete_) onComplete_(venueId);
-            });
+                setBusy(true, "Loading venue...");
+                // Persist as the new "configured on this PC" venue if the
+                // host opted in, OR if they're explicitly switching venues
+                // (the new one then becomes the configured one).
+                if (rememberVenueToggle_.getToggleState() || initialScan)
+                    UserPreferences::getInstance().setVenueId(venueId);
+
+                LoginFlowController::selectVenue(venueId, [this, venueId, initialScan]
+                {
+                    setBusy(false, {});
+                    if (onComplete_) onComplete_(venueId, initialScan);
+                });
+            };
+
+            if (isSwitch)
+            {
+                juce::AlertWindow::showOkCancelBox(
+                    juce::AlertWindow::WarningIcon,
+                    "Switch venue?",
+                    "You are switching from the venue configured to this PC. "
+                    "To do this you need to re-scan the music and generate a "
+                    "new songbook. Do you want to continue?",
+                    "Yes",
+                    "Cancel",
+                    nullptr,
+                    juce::ModalCallbackFunction::create(
+                        [proceed](int result)
+                        {
+                            // result == 1 → "Yes", 0 → "Cancel".
+                            if (result == 1)
+                                proceed(true);
+                            // Cancel: stay on the picker, do nothing.
+                        }));
+                return;
+            }
+
+            proceed(false);
         };
 
         invitationsListModel_.onAccept = [this](int row)
         {
             juce::ignoreUnused(row);
             statusLabel_.setText(
-                "Accepting invitations from JUCE isn't wired up yet — coming next.",
+                "Accepting invitations from JUCE isn't wired up yet - coming next.",
                 juce::dontSendNotification);
         };
 
@@ -709,7 +742,7 @@ private:
         }
 
         const bool signUp = ! isLoginMode_;
-        setBusy(true, signUp ? "Creating your account…" : "Signing in…");
+        setBusy(true, signUp ? "Creating your account..." : "Signing in...");
 
         juce::Thread::launch([this, email, password, signUp]
         {
@@ -733,7 +766,7 @@ private:
 
     void handleOAuth(const juce::String& providerId)
     {
-        setBusy(true, "Opening browser…");
+        setBusy(true, "Opening browser...");
         juce::Thread::launch([this, providerId]
         {
             auto& fc = FirestoreClient::getInstance();
@@ -770,7 +803,7 @@ private:
     // Scenario flow
     void runFlow()
     {
-        setBusy(true, "Loading your profile…");
+        setBusy(true, "Loading your profile...");
         LoginFlowController::runPostAuthFlow(
             [this](LoginFlowController::Result result)
             {
@@ -781,7 +814,7 @@ private:
                 switch (flowResult_.outcome)
                 {
                     case O::VenueLoaded:
-                        if (onComplete_) onComplete_(flowResult_.venueId);
+                        if (onComplete_) onComplete_(flowResult_.venueId, false);
                         return;
                     case O::PickVenue:
                         page_ = Page::SelectVenue;
@@ -807,7 +840,7 @@ private:
         if (flowResult_.venueId.isEmpty())
             return;
 
-        setBusy(true, "Sending request…");
+        setBusy(true, "Sending request...");
 
         // Look up venue name (best effort) for the request payload.
         juce::Thread::launch([this, venueId = flowResult_.venueId, msg = messageEditor_.getText()]()
@@ -1077,7 +1110,7 @@ private:
 
 //==============================================================================
 LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
-    : DocumentWindow("Encore — Sign In",
+    : DocumentWindow("Encore - Sign In",
                      juce::Desktop::getInstance().getDefaultLookAndFeel()
                          .findColour(juce::ResizableWindow::backgroundColourId),
                      DocumentWindow::closeButton)
@@ -1086,11 +1119,11 @@ LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
     setUsingNativeTitleBar(true);
     setResizable(false, false);
 
-    auto* c = new LoginContent([this](juce::String venueId)
+    auto* c = new LoginContent([this](juce::String venueId, bool requestInitialScan)
     {
         auto cb = std::move(onComplete_);
         onComplete_ = nullptr;
-        if (cb) cb(venueId);
+        if (cb) cb(venueId, requestInitialScan);
     });
     setContentOwned(c, true);
     centreWithSize(720, 820);

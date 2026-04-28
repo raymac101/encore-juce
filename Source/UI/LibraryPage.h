@@ -60,6 +60,12 @@ public:
     // Read-only access to the currently loaded songs
     const std::vector<CdgSong>& getSongs() const { return songs_; }
 
+    //==========================================================================
+    // Public action: open the folder chooser and run a full ("initial")
+    // library scan. Used by the venue-switch flow in LoginWindow → MainComponent
+    // when the host picks a venue that wasn't previously configured on this PC.
+    void startInitialSongLoad() { onInitialSongLoad(); }
+
 private:
     //==========================================================================
     // juce::Timer — polls scan progress ~10 Hz

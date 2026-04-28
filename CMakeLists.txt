@@ -43,6 +43,7 @@ target_sources(EncoreJUCE
         Source/Services/WaveformGenerator.cpp
         Source/Services/FirestoreClient.cpp
         Source/Services/VenueService.cpp
+        Source/Services/QueueService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
