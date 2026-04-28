@@ -3,13 +3,19 @@
 
     QueueService.cpp
 
+    Each Firestore doc under venues/{venueId}/queue is a Singers record
+    (matches src/app/models/singers.model.ts) with top-level fields
+    `id, profileId, deviceId, foxId, name, avatar, status, order,
+    rotationOrder, time, reason, songs[], strikes, songsPerformed`.
+    The `songs` field is an arrayValue of mapValues — each map is a
+    QueueItem (matches src/app/models/queueItem.model.ts).
+
   ==============================================================================
 */
 
 #include "QueueService.h"
 #include "FirestoreClient.h"
 #include <algorithm>
-#include <unordered_map>
 
 QueueService& QueueService::getInstance()
 {
@@ -19,20 +25,21 @@ QueueService& QueueService::getInstance()
 
 namespace
 {
-    // Read a typed field directly from a Firestore document var (which still
-    // has the { fields: { ... } } wrapper). Mirrors the helpers on
-    // FirestoreClient but adds double + helper-by-name conveniences for the
-    // queue schema where some numeric fields may have been written as
-    // strings.
-    juce::String readStr(const juce::var& doc, const juce::String& field)
+    //--- Firestore typed-value readers (work on a `valueObj` which is the
+    //    inner { stringValue: ..., integerValue: ..., ... } wrapper). ----
+
+    juce::String valueAsString(const juce::var& v)
     {
-        return FirestoreClient::readString(doc, field);
+        if (v.hasProperty("stringValue"))    return v.getProperty("stringValue", "").toString();
+        if (v.hasProperty("integerValue"))   return v.getProperty("integerValue", "").toString();
+        if (v.hasProperty("doubleValue"))    return juce::String((double) v.getProperty("doubleValue", 0.0));
+        if (v.hasProperty("booleanValue"))   return ((bool) v.getProperty("booleanValue", false)) ? "true" : "false";
+        if (v.hasProperty("timestampValue")) return v.getProperty("timestampValue", "").toString();
+        return {};
     }
 
-    int readInt(const juce::var& doc, const juce::String& field, int dflt = 0)
+    int valueAsInt(const juce::var& v, int dflt = 0)
     {
-        auto fields = doc.getProperty("fields", juce::var());
-        auto v = fields.getProperty(juce::Identifier(field), juce::var());
         if (v.hasProperty("integerValue"))
             return (int) v.getProperty("integerValue", "").toString().getLargeIntValue();
         if (v.hasProperty("doubleValue"))
@@ -42,10 +49,8 @@ namespace
         return dflt;
     }
 
-    double readDouble(const juce::var& doc, const juce::String& field, double dflt = 0.0)
+    double valueAsDouble(const juce::var& v, double dflt = 0.0)
     {
-        auto fields = doc.getProperty("fields", juce::var());
-        auto v = fields.getProperty(juce::Identifier(field), juce::var());
         if (v.hasProperty("doubleValue"))
             return (double) v.getProperty("doubleValue", dflt);
         if (v.hasProperty("integerValue"))
@@ -55,157 +60,140 @@ namespace
         return dflt;
     }
 
-    QueueItem itemFromDoc(const juce::var& doc)
+    bool valueAsBool(const juce::var& v, bool dflt = false)
     {
-        // Angular schema field names — see src/app/models/queueItem.model.ts.
+        if (v.hasProperty("booleanValue"))
+            return (bool) v.getProperty("booleanValue", dflt);
+        if (v.hasProperty("stringValue"))
+        {
+            auto s = v.getProperty("stringValue", "").toString().toLowerCase();
+            return s == "true" || s == "1" || s == "yes";
+        }
+        return dflt;
+    }
+
+    juce::var fieldByName(const juce::var& fields, const juce::String& name)
+    {
+        return fields.getProperty(juce::Identifier(name), juce::var());
+    }
+
+    // Convert a mapValue (which has its own .fields wrapper) into a QueueItem.
+    QueueItem itemFromMap(const juce::var& mapValue)
+    {
+        auto fields = mapValue.getProperty("fields", juce::var());
+
         QueueItem q;
-        q.id           = readStr(doc, "id").toStdString();
-        q.deviceId     = readStr(doc, "deviceId").toStdString();
-        q.singerName   = readStr(doc, "singerName").toStdString();
-        q.singerAvatar = readStr(doc, "avatar").toStdString();
-        q.songId       = readStr(doc, "songId").toStdString();
-        q.songName     = readStr(doc, "song").toStdString();
-        q.songArtist   = readStr(doc, "artist").toStdString();
-        q.songVersion  = readStr(doc, "songVersion").toStdString();
-        q.duration     = readInt(doc, "duration");
-        q.order        = readInt(doc, "order");
-        q.songOrder    = readInt(doc, "songOrder");
-        q.pitch        = (float) readDouble(doc, "pitch", 1.0);
-        q.status       = readStr(doc, "status").toStdString();
-        q.time         = readStr(doc, "time").toStdString();
+        q.id           = valueAsString(fieldByName(fields, "id")).toStdString();
+        q.deviceId     = valueAsString(fieldByName(fields, "deviceId")).toStdString();
+        q.singerName   = valueAsString(fieldByName(fields, "singerName")).toStdString();
+        q.singerAvatar = valueAsString(fieldByName(fields, "avatar")).toStdString();
+        q.songId       = valueAsString(fieldByName(fields, "songId")).toStdString();
+        q.songName     = valueAsString(fieldByName(fields, "song")).toStdString();
+        q.songArtist   = valueAsString(fieldByName(fields, "artist")).toStdString();
+        q.songVersion  = valueAsString(fieldByName(fields, "songVersion")).toStdString();
+        q.duration     = valueAsInt   (fieldByName(fields, "duration"));
+        q.order        = valueAsInt   (fieldByName(fields, "order"));
+        q.songOrder    = valueAsInt   (fieldByName(fields, "songOrder"));
+        q.pitch        = (float) valueAsDouble(fieldByName(fields, "pitch"), 1.0);
+        q.status       = valueAsString(fieldByName(fields, "status")).toStdString();
+        q.time         = valueAsString(fieldByName(fields, "time")).toStdString();
+        q.alerts       = valueAsBool  (fieldByName(fields, "addedAlert"))
+                       || valueAsBool (fieldByName(fields, "singingAlert"))
+                       || valueAsBool (fieldByName(fields, "nextAlert"));
         return q;
     }
 
-    // Group queue items into singer rows. Grouping key is profileId where
-    // present (Angular's foxId/profileId), else singerName. Songs inside a
-    // singer are ordered by `songOrder`; singers are ordered by
-    // `rotationOrder` (falling back to the lowest `order` of their songs).
+    // Convert one Firestore queue document into a Singers.
+    Singers singerFromDoc(const juce::var& doc)
+    {
+        auto fields = doc.getProperty("fields", juce::var());
+
+        Singers s;
+        s.id            = valueAsString(fieldByName(fields, "id")).toStdString();
+        s.name          = valueAsString(fieldByName(fields, "name")).toStdString();
+        s.avatar        = valueAsString(fieldByName(fields, "avatar")).toStdString();
+        s.deviceId      = valueAsString(fieldByName(fields, "deviceId")).toStdString();
+        s.order         = valueAsInt   (fieldByName(fields, "order"));
+        s.rotationOrder = valueAsInt   (fieldByName(fields, "rotationOrder"));
+        s.strikes       = valueAsInt   (fieldByName(fields, "strikes"));
+        s.songsPerformed= valueAsInt   (fieldByName(fields, "songsPerformed"));
+
+        // songs: arrayValue → values[] → each is a mapValue.
+        auto songsField = fieldByName(fields, "songs");
+        auto arr = songsField.getProperty("arrayValue", juce::var())
+                             .getProperty("values", juce::var());
+        if (auto* a = arr.getArray())
+        {
+            s.songs.reserve((size_t) a->size());
+            for (auto& v : *a)
+            {
+                if (v.hasProperty("mapValue"))
+                    s.songs.push_back(itemFromMap(v.getProperty("mapValue", juce::var())));
+            }
+        }
+
+        // Sort the singer's songs by songOrder.
+        std::sort(s.songs.begin(), s.songs.end(),
+                  [](const QueueItem& a, const QueueItem& b) {
+                      return a.songOrder < b.songOrder;
+                  });
+
+        // Detect now-playing — either status on the singer doc itself or on
+        // any of its songs.
+        const auto singerStatus = valueAsString(fieldByName(fields, "status")).toLowerCase();
+        s.currentlyUp = (singerStatus == "playing");
+        if (! s.currentlyUp)
+        {
+            for (auto& q : s.songs)
+            {
+                if (juce::String(q.status).toLowerCase() == "playing")
+                {
+                    s.currentlyUp = true;
+                    break;
+                }
+            }
+        }
+
+        return s;
+    }
+
     QueueService::Snapshot buildSnapshot(const juce::Array<juce::var>& docs)
     {
         QueueService::Snapshot snap;
 
-        // First pass: parse + figure out grouping keys.
-        struct Row
-        {
-            QueueItem    item;
-            juce::String key;
-            juce::String foxId;
-            juce::String profileId;
-            int          rotationOrder = 0;
-        };
-
-        std::vector<Row> rows;
-        rows.reserve((size_t) docs.size());
-
+        std::vector<Singers> all;
+        all.reserve((size_t) docs.size());
         for (auto& d : docs)
         {
-            Row r;
-            r.item          = itemFromDoc(d);
-            r.foxId         = readStr(d, "foxId");
-            r.profileId     = readStr(d, "profileId");
-            r.rotationOrder = readInt(d, "rotationOrder");
-
-            r.key = r.foxId.isNotEmpty() ? r.foxId
-                  : r.profileId.isNotEmpty() ? r.profileId
-                  : juce::String(r.item.singerName);
-
-            if (r.key.isEmpty())
+            auto s = singerFromDoc(d);
+            // Skip empty skeleton docs.
+            if (s.name.empty() && s.songs.empty())
                 continue;
-
-            rows.push_back(std::move(r));
+            all.push_back(std::move(s));
         }
 
-        // Second pass: bucket by key, preserving first-seen order so we can
-        // give each bucket a deterministic insertion index for tie-breaks.
-        std::unordered_map<std::string, size_t> indexByKey;
-        std::vector<Singers> buckets;
-        std::vector<int>     bucketRotation;
-        std::vector<int>     bucketLowestOrder;
+        // Sort by `order` (Angular's sortQueueByOrder).
+        std::sort(all.begin(), all.end(),
+                  [](const Singers& a, const Singers& b) { return a.order < b.order; });
 
-        for (auto& r : rows)
+        int nowIdx = -1;
+        for (size_t i = 0; i < all.size(); ++i)
         {
-            auto k = r.key.toStdString();
-            auto it = indexByKey.find(k);
-            if (it == indexByKey.end())
-            {
-                Singers s;
-                s.id            = r.profileId.isNotEmpty() ? r.profileId.toStdString() : k;
-                s.name          = r.item.singerName;
-                s.avatar        = r.item.singerAvatar;
-                s.deviceId      = r.item.deviceId;
-                s.rotationOrder = r.rotationOrder;
-                s.order         = r.item.order;
+            if (all[i].currentlyUp) { nowIdx = (int) i; break; }
+        }
 
-                indexByKey[k] = buckets.size();
-                buckets.push_back(std::move(s));
-                bucketRotation.push_back(r.rotationOrder);
-                bucketLowestOrder.push_back(r.item.order);
+        snap.singers.reserve(all.size());
+        for (size_t i = 0; i < all.size(); ++i)
+        {
+            if ((int) i == nowIdx)
+            {
+                snap.nowPlaying    = all[i];
+                snap.hasNowPlaying = true;
             }
             else
             {
-                bucketLowestOrder[it->second] =
-                    juce::jmin(bucketLowestOrder[it->second], r.item.order);
+                snap.singers.push_back(std::move(all[i]));
             }
-
-            buckets[indexByKey[k]].songs.push_back(r.item);
-        }
-
-        // Sort each singer's songs by songOrder.
-        for (auto& s : buckets)
-        {
-            std::sort(s.songs.begin(), s.songs.end(),
-                      [](const QueueItem& a, const QueueItem& b)
-                      {
-                          return a.songOrder < b.songOrder;
-                      });
-        }
-
-        // Identify "now playing" — singer with any song whose status is
-        // "playing", or fall back to the singer with the lowest order if
-        // none is explicitly playing.
-        int nowPlayingBucket = -1;
-        for (size_t i = 0; i < buckets.size(); ++i)
-        {
-            for (auto& q : buckets[i].songs)
-            {
-                if (q.status == "playing")
-                {
-                    nowPlayingBucket = (int) i;
-                    break;
-                }
-            }
-            if (nowPlayingBucket >= 0) break;
-        }
-
-        // Build sort indices for the upcoming list, excluding now-playing.
-        std::vector<size_t> upcomingIdx;
-        upcomingIdx.reserve(buckets.size());
-        for (size_t i = 0; i < buckets.size(); ++i)
-            if ((int) i != nowPlayingBucket)
-                upcomingIdx.push_back(i);
-
-        std::sort(upcomingIdx.begin(), upcomingIdx.end(),
-                  [&](size_t a, size_t b)
-                  {
-                      // Sort by rotationOrder, then by lowest item order.
-                      if (bucketRotation[a] != bucketRotation[b])
-                          return bucketRotation[a] < bucketRotation[b];
-                      return bucketLowestOrder[a] < bucketLowestOrder[b];
-                  });
-
-        snap.singers.reserve(upcomingIdx.size());
-        int newOrder = 0;
-        for (auto idx : upcomingIdx)
-        {
-            auto s = std::move(buckets[idx]);
-            s.order = newOrder++;
-            snap.singers.push_back(std::move(s));
-        }
-
-        if (nowPlayingBucket >= 0)
-        {
-            snap.nowPlaying    = std::move(buckets[(size_t) nowPlayingBucket]);
-            snap.hasNowPlaying = true;
         }
 
         return snap;
@@ -226,7 +214,12 @@ void QueueService::loadQueue(const juce::String& venueId, LoadCallback onDone)
         const auto path = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(path, 200);
 
+        DBG ("[Queue] loaded " << docs.size() << " docs from " << path);
+
         auto snap = buildSnapshot(docs);
+
+        DBG ("[Queue] parsed singers=" << (int) snap.singers.size()
+             << " nowPlaying=" << (snap.hasNowPlaying ? "yes" : "no"));
 
         if (onDone)
         {

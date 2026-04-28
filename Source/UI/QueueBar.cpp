@@ -24,6 +24,40 @@ static juce::String getMicIcons(int count)
 }
 
 //==============================================================================
+// Resolve a Singers/QueueItem.avatar string (typically something like
+// "assets/icons/1064391.png" from the Angular client) to a concrete file in
+// the JUCE app bundle's assets folder. Tries `assets/icon/<basename>` first
+// (this repo uses singular "icon"), then the literal relative path.
+static juce::Image loadAvatarFromAssets(const juce::String& avatarPath)
+{
+    if (avatarPath.isEmpty())
+        return {};
+
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                      .getParentDirectory();
+
+    // 1) Try assets/icon/<basename>
+    auto baseName = avatarPath.fromLastOccurrenceOf("/", false, false);
+    if (baseName.isEmpty())
+        baseName = avatarPath;
+    auto candidate1 = appDir.getChildFile("assets/icon/" + baseName);
+    if (candidate1.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate1);
+
+    // 2) Try the literal relative path (in case it already begins with assets/)
+    auto candidate2 = appDir.getChildFile(avatarPath);
+    if (candidate2.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate2);
+
+    // 3) Try assets/<avatarPath> if the path was given without the "assets/"
+    auto candidate3 = appDir.getChildFile("assets/" + avatarPath);
+    if (candidate3.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate3);
+
+    return {};
+}
+
+//==============================================================================
 //  NowPlayingCard
 //==============================================================================
 QueueBar::NowPlayingCard::NowPlayingCard() {}
@@ -45,12 +79,26 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
     int avatarSize = bounds.getHeight() - 8;
     auto avatarRect = bounds.removeFromLeft(avatarSize + 8).reduced(4);
 
-    // Avatar placeholder circle
-    g.setColour(juce::Colours::white.withAlpha(0.3f));
-    g.fillEllipse(avatarRect.toFloat());
-    g.setColour(juce::Colours::black);
-    g.drawText(juce::String(singer.name.substr(0, 1)),
-               avatarRect, juce::Justification::centred);
+    // Avatar — clip to a circle and draw the loaded image, falling back to
+    // a translucent circle with the singer's first initial.
+    juce::Path circle;
+    circle.addEllipse(avatarRect.toFloat());
+    g.saveState();
+    g.reduceClipRegion(circle);
+    if (avatarImage.isValid())
+    {
+        g.drawImage(avatarImage, avatarRect.toFloat(),
+                    juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
+    }
+    else
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.3f));
+        g.fillRect(avatarRect);
+        g.setColour(juce::Colours::black);
+        g.drawText(juce::String(singer.name.substr(0, 1)),
+                   avatarRect, juce::Justification::centred);
+    }
+    g.restoreState();
 
     // If hovering, draw play/pause overlay on avatar
     if (hovering)
@@ -156,13 +204,26 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     int avatarSize = 40;
     auto avatarRect = bounds.removeFromLeft(avatarSize + 12).reduced(6).withSizeKeepingCentre(avatarSize, avatarSize);
 
-    // Avatar circle
-    g.setColour(juce::Colours::grey);
-    g.fillEllipse(avatarRect.toFloat());
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(14.f));
-    g.drawText(juce::String(singer.name.substr(0, 1)),
-               avatarRect, juce::Justification::centred);
+    // Avatar — circle clip, real image if we loaded one, else first-initial.
+    juce::Path circle;
+    circle.addEllipse(avatarRect.toFloat());
+    g.saveState();
+    g.reduceClipRegion(circle);
+    if (avatarImage.isValid())
+    {
+        g.drawImage(avatarImage, avatarRect.toFloat(),
+                    juce::RectanglePlacement::centred | juce::RectanglePlacement::fillDestination);
+    }
+    else
+    {
+        g.setColour(juce::Colours::grey);
+        g.fillRect(avatarRect);
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::Font(14.f));
+        g.drawText(juce::String(singer.name.substr(0, 1)),
+                   avatarRect, juce::Justification::centred);
+    }
+    g.restoreState();
 
     // Play overlay on hover
     if (hovering)
@@ -483,6 +544,7 @@ void QueueBar::setNowPlaying(const Singers& singer)
     currentSinger = singer;
     nowPlayingCard->hasSinger = true;
     nowPlayingCard->singer = singer;
+    nowPlayingCard->avatarImage = loadAvatarFromAssets(juce::String(singer.avatar));
     nowPlayingCard->repaint();
     if (nowSingingLabel != nullptr)
         nowSingingLabel->setVisible(true);
@@ -492,6 +554,7 @@ void QueueBar::clearNowPlaying()
 {
     hasCurrentSinger = false;
     nowPlayingCard->hasSinger = false;
+    nowPlayingCard->avatarImage = {};
     nowPlayingCard->repaint();
     if (nowSingingLabel != nullptr)
         nowSingingLabel->setVisible(false);
@@ -616,6 +679,7 @@ void QueueBar::rebuildSingerRows()
                      && (singers[(size_t)i].rotationOrder == firstRotation);
         row->isLast  = (! row->isHost) && nonHostCount > 1
                      && (singers[(size_t)i].rotationOrder == lastRotation);
+        row->avatarImage = loadAvatarFromAssets(juce::String(singers[(size_t)i].avatar));
 
         row->onPlayClicked = [this](int idx)
         {

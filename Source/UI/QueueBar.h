@@ -98,6 +98,7 @@ private:
         bool    isLast  = false;   // red border (round tail)
         bool    isHost  = false;   // red border (host pin) — wins over isFirst
         bool    hovering = false;
+        juce::Image avatarImage;   // lazily loaded from `singer.avatar`
 
         std::function<void(int)> onPlayClicked;
         std::function<void(int, int)> onSongChipClicked;
@@ -118,6 +119,7 @@ private:
         bool    isPlaying = false;
         bool    hovering = false;
         bool    hasSinger = false;
+        juce::Image avatarImage;
 
         std::function<void()> onPlayClicked;
         std::function<void()> onPauseClicked;
