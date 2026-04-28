@@ -14,6 +14,7 @@
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
+#include "../Services/HostService.h"
 #include "../Services/ImageCache.h"
 #include <cmath>
 
@@ -1370,7 +1371,33 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     else
                         safe->queueBar->clearNowPlaying();
 
-                    safe->queueBar->setSingers (snap.singers);
+                    // Prepend the signed-in host as a permanent first entry
+                    // in the queue. The host has no songs of their own — the
+                    // card just shows their avatar / stage name and is
+                    // rendered with a red border so it's visually distinct
+                    // as the round leader.
+                    std::vector<Singers> singersWithHost;
+                    if (HostService::getInstance().hasCurrent())
+                    {
+                        const auto h = HostService::getInstance().getCurrent();
+                        Singers hostSinger;
+                        hostSinger.id            = h.userId.empty() ? h.profileId : h.userId;
+                        hostSinger.name          = ! h.stageName.empty() ? h.stageName
+                                                 : ! h.fullName.empty()  ? h.fullName
+                                                 : "Host";
+                        hostSinger.avatar        = h.avatarUrl;
+                        hostSinger.isHost        = true;
+                        hostSinger.order         = -1;          // pinned to top
+                        hostSinger.rotationOrder = -1;
+                        // No songs.
+                        singersWithHost.push_back(std::move(hostSinger));
+                    }
+
+                    singersWithHost.insert(singersWithHost.end(),
+                                           snap.singers.begin(),
+                                           snap.singers.end());
+
+                    safe->queueBar->setSingers (singersWithHost);
                 });
         });
 }

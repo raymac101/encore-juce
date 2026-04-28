@@ -96,6 +96,7 @@ private:
         int     index = 0;
         bool    isFirst = false;   // blue border (round leader)
         bool    isLast  = false;   // red border (round tail)
+        bool    isHost  = false;   // red border (host pin) — wins over isFirst
         bool    hovering = false;
 
         std::function<void(int)> onPlayClicked;

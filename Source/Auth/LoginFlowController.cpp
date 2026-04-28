@@ -8,6 +8,7 @@
 
 #include "LoginFlowController.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/HostService.h"
 
 namespace
 {
@@ -237,6 +238,7 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             // 1) Host bootstrap
             Host host = loadOrCreateHost(uid, email);
+            HostService::getInstance().setCurrent(host);
 
             // 2) Read stored venueId from prefs
             const auto storedVenueId = UserPreferences::getInstance().getVenueId();

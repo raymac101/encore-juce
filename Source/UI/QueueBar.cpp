@@ -32,16 +32,15 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().reduced(4);
 
+    // Nothing to draw until someone is actually up to sing — leave the
+    // space blank so the bar reads as "no current singer" rather than an
+    // empty blue card.
+    if (!hasSinger)
+        return;
+
     // Primary colour background (like Angular .card-top)
     g.setColour(juce::Colour(0xff30daff));
     g.fillRoundedRectangle(bounds.toFloat(), 6.f);
-
-    if (!hasSinger)
-    {
-        g.setColour(juce::Colours::black.withAlpha(0.5f));
-        g.drawText("--", bounds, juce::Justification::centred);
-        return;
-    }
 
     int avatarSize = bounds.getHeight() - 8;
     auto avatarRect = bounds.removeFromLeft(avatarSize + 8).reduced(4);
@@ -133,8 +132,13 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff262626));
     g.fillRect(bounds);
 
-    // Round border: blue for first, red for last
-    if (isFirst)
+    // Round border: green for host (always wins), blue for first, red for last
+    if (isHost)
+    {
+        g.setColour(juce::Colour(0xff10b981));
+        g.drawRect(bounds, 3);
+    }
+    else if (isFirst)
     {
         g.setColour(juce::Colour(0xff30daff));
         g.drawRect(bounds, 3);
@@ -480,6 +484,8 @@ void QueueBar::setNowPlaying(const Singers& singer)
     nowPlayingCard->hasSinger = true;
     nowPlayingCard->singer = singer;
     nowPlayingCard->repaint();
+    if (nowSingingLabel != nullptr)
+        nowSingingLabel->setVisible(true);
 }
 
 void QueueBar::clearNowPlaying()
@@ -487,6 +493,8 @@ void QueueBar::clearNowPlaying()
     hasCurrentSinger = false;
     nowPlayingCard->hasSinger = false;
     nowPlayingCard->repaint();
+    if (nowSingingLabel != nullptr)
+        nowSingingLabel->setVisible(false);
 }
 
 void QueueBar::setSingers(const std::vector<Singers>& newSingers)
@@ -509,6 +517,10 @@ void QueueBar::removeSinger(int index)
 {
     if (index >= 0 && index < (int)singers.size())
     {
+        // Host is pinned to the queue and cannot be removed.
+        if (singers[(size_t)index].isHost)
+            return;
+
         singers.erase(singers.begin() + index);
         rebuildSingerRows();
         updateStatusLabels();
@@ -521,6 +533,11 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     if (fromIndex < 0 || fromIndex >= (int)singers.size()) return;
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
+
+    // Host is pinned to position 0 — refuse to move the host or to displace
+    // the host out of the first slot.
+    if (singers[(size_t)fromIndex].isHost) return;
+    if (! singers.empty() && singers.front().isHost && toIndex == 0) return;
 
     auto singer = singers[(size_t)fromIndex];
     singers.erase(singers.begin() + fromIndex);
@@ -573,11 +590,18 @@ void QueueBar::rebuildSingerRows()
         listContent.removeChildComponent(row);
     singerRows.clear();
 
-    // Determine first/last in round
+    // Determine first/last in round across NON-HOST singers only. The host
+    // is the round leader (green border) and isn't part of the
+    // first/last-of-round colouring. If there are no non-host singers in
+    // the queue (i.e. nobody has submitted a song yet) then no row gets
+    // the red "last in round" border.
     int firstRotation = INT_MAX;
     int lastRotation  = INT_MIN;
+    int nonHostCount  = 0;
     for (auto& s : singers)
     {
+        if (s.isHost) continue;
+        ++nonHostCount;
         if (s.rotationOrder < firstRotation) firstRotation = s.rotationOrder;
         if (s.rotationOrder > lastRotation)  lastRotation  = s.rotationOrder;
     }
@@ -587,8 +611,11 @@ void QueueBar::rebuildSingerRows()
         auto* row = new SingerRow();
         row->singer  = singers[(size_t)i];
         row->index   = i;
-        row->isFirst = (singers[(size_t)i].rotationOrder == firstRotation);
-        row->isLast  = (singers[(size_t)i].rotationOrder == lastRotation) && singers.size() > 1;
+        row->isHost  = singers[(size_t)i].isHost;
+        row->isFirst = (! row->isHost) && nonHostCount > 0
+                     && (singers[(size_t)i].rotationOrder == firstRotation);
+        row->isLast  = (! row->isHost) && nonHostCount > 1
+                     && (singers[(size_t)i].rotationOrder == lastRotation);
 
         row->onPlayClicked = [this](int idx)
         {

@@ -39,6 +39,11 @@ struct Singers
     // Display properties
     juce::Colour nameColour = juce::Colours::white;
     bool isHighlighted = false;
+
+    // Host flag — when true this row represents the signed-in host (KJ).
+    // The host is always the first entry in the queue, can never be removed,
+    // and is rendered with a red border in the QueueBar.
+    bool isHost = false;
     
     // Personal preferences
     std::string preferredLanguage = "en_US";
