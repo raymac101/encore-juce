@@ -70,6 +70,10 @@ public:
                              const juce::var& fields,
                              const juce::String& documentId = {});
 
+    /** DELETE projects/.../documents/<path>. Returns true on 2xx (also true
+        on 404 — the doc is gone either way). */
+    bool deleteDocument(const juce::String& path);
+
     /** POST :runQuery on the parent path. `structuredQuery` is the Firestore
         StructuredQuery JSON object. Returns the array of documents. */
     juce::Array<juce::var> runQuery(const juce::String& parentPath,

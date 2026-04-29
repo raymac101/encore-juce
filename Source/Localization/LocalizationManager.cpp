@@ -642,6 +642,7 @@ void LocalizationManager::loadFallbackTranslations()
     // Session buttons
     translations["settings.btn_clear_recent"]     = "CLEAR RECENTLY PLAYED";
     translations["settings.btn_end_session"]      = "END SESSION & ARCHIVE";
+    translations["settings.lbl_cleanup_time"]     = "Nightly Cleanup Time:";
 
     // Shared option strings
     translations["settings.opt_zero"]             = "Zero";

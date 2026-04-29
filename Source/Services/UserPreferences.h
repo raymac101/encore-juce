@@ -56,6 +56,12 @@ public:
     bool getSetupCompleted() const;
     void setSetupCompleted(bool completed);
 
+    //--- Nightly cleanup hour --------------------------------------------------
+    // The hour-of-day (0-23) at which the automatic end-of-night archive +
+    // queue clear should run. Default is 4 (4:00 AM).
+    int  getNightlyCleanupHour() const;
+    void setNightlyCleanupHour(int hour);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

@@ -24,6 +24,8 @@ struct QueueItem
 {
     std::string id;                     // Unique identifier
     std::string deviceId;               // Device that submitted the request
+    std::string profileId;              // Firestore profileId (mobile users)
+    std::string foxId;                  // Internal fox id
     std::string singerName;             // Name of the singer
     std::string singerAvatar;           // Avatar/image URL for singer
     std::string songId;                 // Unique song identifier
@@ -34,7 +36,9 @@ struct QueueItem
     int order = 0;                      // Position in overall queue
     int songOrder = 0;                  // Position within singer's songs
     float pitch = 1.0f;                 // Pitch adjustment (1.0 = normal)
-    std::string status = "queued";      // Status: "queued", "playing", "completed"
+    std::string status = "queued";      // Status: "queued", "playing", "completed", "new", "approved", "approvedpending", "rejected"
+    std::string action;                 // Optional action verb on /requested ("delete", "next", "now", ...)
+    std::string reason;                 // Rejection reason (when status == "rejected")
     std::string time;                   // Estimated time to play (formatted)
     bool alerts = false;                // Whether song has special alerts
     int64_t dateAdded = 0;              // Timestamp when added to queue

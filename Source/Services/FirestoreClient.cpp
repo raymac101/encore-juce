@@ -221,6 +221,14 @@ juce::var FirestoreClient::createDocument(const juce::String& collectionPath,
     return httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
 }
 
+bool FirestoreClient::deleteDocument(const juce::String& path)
+{
+    juce::URL url(FirebaseConfig::firestoreBaseUrl() + "/" + path);
+    int status = 0;
+    httpJson(url, "DELETE", {}, &status);
+    return (status >= 200 && status < 300) || status == 404;
+}
+
 juce::Array<juce::var> FirestoreClient::runQuery(const juce::String& parentPath,
                                                  const juce::var& structuredQuery)
 {

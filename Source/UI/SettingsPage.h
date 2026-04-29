@@ -112,6 +112,12 @@ public:
     /** User wants to reset to the default logo. */
     std::function<void()> onResetLogo;
 
+    /** User clicked "End Session & Archive". The caller is responsible for
+        running the archive + clear, then calling back into the settings
+        page (e.g. via setSessionStats) to refresh stats. The bool callback
+        is invoked when the work completes (true = success). */
+    std::function<void(std::function<void(bool ok)>)> onEndSession;
+
     //==========================================================================
     // Session stats (push live values from FirebaseManager)
 

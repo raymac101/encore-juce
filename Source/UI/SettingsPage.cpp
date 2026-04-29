@@ -9,6 +9,7 @@
 */
 
 #include "SettingsPage.h"
+#include "../Services/UserPreferences.h"
 
 //==============================================================================
 // Layout constants
@@ -405,6 +406,24 @@ public:
         makeStatRow(lblSingersQueue_,  valSingersQueue_,  lm.getText("settings.lbl_singers_queue"));
         makeStatRow(lblReqSongs_,      valReqSongs_,      lm.getText("settings.lbl_req_songs"));
 
+        // Nightly cleanup time selector. Persisted to UserPreferences so it
+        // survives restarts; the actual scheduled task reads the value from
+        // there. 24 entries, one per hour-of-day; ComboBox IDs are 1-based so
+        // we use (hour + 1).
+        initFieldLabel(lblCleanupHour_, lm.getText("settings.lbl_cleanup_time"));
+        initCombo(cbCleanupHour_);
+        for (int h = 0; h < 24; ++h)
+        {
+            const int    hour12 = ((h + 11) % 12) + 1;
+            const char*  ampm   = (h < 12) ? "AM" : "PM";
+            cbCleanupHour_.addItem(juce::String(hour12) + ":00 " + ampm, h + 1);
+        }
+        cbCleanupHour_.setSelectedId(UserPreferences::getInstance().getNightlyCleanupHour() + 1,
+                                     juce::dontSendNotification);
+        cbCleanupHour_.onChange = [this]() {
+            UserPreferences::getInstance().setNightlyCleanupHour(cbCleanupHour_.getSelectedId() - 1);
+        };
+
         initButton(btnClearRecent_, lm.getText("settings.btn_clear_recent"), kBtnNormal);
         initButton(btnEndSession_,  lm.getText("settings.btn_end_session"),  kBtnDanger);
         initButton(btnViewArchive_, lm.getText("settings.btn_view_archive"), kBtnNormal);
@@ -616,6 +635,7 @@ public:
         statRow(lblSingersQueue_,  valSingersQueue_);
         statRow(lblReqSongs_,      valReqSongs_);
         y += kFieldGap;
+        comboRow(lblCleanupHour_, cbCleanupHour_);
         btnClearRecent_.setBounds(kPadX,       y, 200, kRowH);
         btnEndSession_.setBounds(kPadX + 208,  y, 200, kRowH);
         btnViewArchive_.setBounds(kPadX + 416, y, 200, kRowH);
@@ -683,6 +703,7 @@ public:
         lblActiveMembers_.setText(lm.getText("settings.lbl_active_members"), juce::dontSendNotification);
         lblSingersQueue_.setText(lm.getText("settings.lbl_singers_queue"),   juce::dontSendNotification);
         lblReqSongs_.setText(lm.getText("settings.lbl_req_songs"),           juce::dontSendNotification);
+        lblCleanupHour_.setText(lm.getText("settings.lbl_cleanup_time"),     juce::dontSendNotification);
         btnClearRecent_.setButtonText(lm.getText("settings.btn_clear_recent"));
         btnEndSession_.setButtonText(lm.getText("settings.btn_end_session"));
         btnViewArchive_.setButtonText(lm.getText("settings.btn_view_archive"));
@@ -845,6 +866,8 @@ private:
     juce::Label      lblActiveMembers_, valActiveMembers_;
     juce::Label      lblSingersQueue_,  valSingersQueue_;
     juce::Label      lblReqSongs_,      valReqSongs_;
+    juce::Label      lblCleanupHour_;
+    juce::ComboBox   cbCleanupHour_;
     juce::TextButton btnClearRecent_, btnEndSession_, btnViewArchive_;
 
     // Computed in resized() and drawn in paint() — one rect per section card.
@@ -987,13 +1010,28 @@ private:
         juce::AlertWindow::showOkCancelBox(
             juce::MessageBoxIconType::WarningIcon,
             "End Session & Archive",
-            "This will archive all session data and reset the queue.\n\nAre you sure?",
+            "This will archive all session data and clear the queue, "
+            "requested songs, audit and members audit collections.\n\n"
+            "Are you sure?",
             "End Session", "Cancel", nullptr,
-            juce::ModalCallbackFunction::create([](int result) {
-                if (result == 1)
+            juce::ModalCallbackFunction::create([this](int result) {
+                if (result != 1) return;
+                if (! owner_.onEndSession)
+                {
                     juce::AlertWindow::showMessageBoxAsync(
-                        juce::MessageBoxIconType::InfoIcon,
-                        "Session Ended", "Session archived successfully.");
+                        juce::MessageBoxIconType::WarningIcon,
+                        "End Session",
+                        "Archive handler not wired up.");
+                    return;
+                }
+                owner_.onEndSession([](bool ok) {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        ok ? juce::MessageBoxIconType::InfoIcon
+                           : juce::MessageBoxIconType::WarningIcon,
+                        "Session Ended",
+                        ok ? "Session archived successfully."
+                           : "Session archive failed. See log for details.");
+                });
             }));
     }
 

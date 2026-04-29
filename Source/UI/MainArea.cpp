@@ -150,6 +150,12 @@ void MainArea::setCurrentPage(NavPage page)
         comp->setVisible(key == static_cast<int>(page));
 }
 
+const std::vector<CdgSong>& MainArea::getLibrarySongs() const
+{
+    static const std::vector<CdgSong> empty;
+    return libraryPage != nullptr ? libraryPage->getSongs() : empty;
+}
+
 //==============================================================================
 void MainArea::updateAllText()
 {

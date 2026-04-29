@@ -247,6 +247,22 @@ void UserPreferences::setSetupCompleted(bool completed)
 }
 
 //==============================================================================
+int UserPreferences::getNightlyCleanupHour() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: 4:00 AM. Clamp on read so a corrupted value can't escape.
+    int h = (int) root_.getProperty("nightlyCleanupHour", juce::var(4));
+    return juce::jlimit(0, 23, h);
+}
+
+void UserPreferences::setNightlyCleanupHour(int hour)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("nightlyCleanupHour", juce::jlimit(0, 23, hour));
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);

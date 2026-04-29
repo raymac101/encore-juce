@@ -18,6 +18,7 @@
 #include "../Audio/AudioEngine.h"
 #include "../Services/ImageCache.h"
 #include "../Models/CdgSong.h"
+#include "../Models/QueueItem.h"
 #include "TopBar.h"
 #include "BottomBar.h"
 #include "NavBar.h"
@@ -127,6 +128,19 @@ private:
     /** Show / hide a full-window "Loading song..." overlay. */
     void showLoadingOverlay(const juce::String& message);
     void hideLoadingOverlay();
+
+    //==============================================================================
+    // /requested pipeline — start RequestService for the active venue and
+    // run incoming requests through the auto-approve checks (queue closed,
+    // max songs per singer, repeats). Mirrors Angular's processNewRequest /
+    // processApprovedRequest / processRejectedRequest / processDeleteRequest
+    // in queue-bar.component.ts.
+    void startRequestPipelineFor (const juce::String& venueId);
+    void onIncomingNewRequest      (const ::QueueItem& item);
+    void onIncomingApprovedRequest (const ::QueueItem& item);
+    void onIncomingRejectedRequest (const ::QueueItem& item);
+    void onIncomingDeleteRequest   (const ::QueueItem& item);
+    void reloadQueueFromFirestore  (const juce::String& venueId);
 
     class LoadingOverlay;
     std::unique_ptr<LoadingOverlay> loadingOverlay_;

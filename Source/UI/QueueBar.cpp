@@ -172,29 +172,72 @@ void QueueBar::NowPlayingCard::mouseUp(const juce::MouseEvent&)
 //==============================================================================
 QueueBar::SingerRow::SingerRow() {}
 
+juce::Rectangle<int> QueueBar::SingerRow::getAvatarRect() const
+{
+    auto bounds = getLocalBounds();
+    const int avatarSize = 40;
+    return bounds.removeFromLeft(avatarSize + 12).reduced(6)
+                 .withSizeKeepingCentre(avatarSize, avatarSize);
+}
+
+bool QueueBar::SingerRow::isOverAvatar(juce::Point<int> p) const
+{
+    auto a = getAvatarRect().toFloat();
+    auto cx = a.getCentreX();
+    auto cy = a.getCentreY();
+    auto r  = juce::jmin(a.getWidth(), a.getHeight()) * 0.5f;
+    auto dx = (float) p.x - cx;
+    auto dy = (float) p.y - cy;
+    return (dx * dx + dy * dy) <= (r * r);
+}
+
+int QueueBar::SingerRow::songChipIndexAt(juce::Point<int> p) const
+{
+    if (singer.songs.empty())
+        return -1;
+
+    // Match the layout used in paint(): chips fill the bottom half of the
+    // area to the right of the avatar.
+    const int songAreaStart = 52 + 4;        // avatar width + padding
+    const int songAreaWidth = getWidth() - songAreaStart - 8;
+    if (p.x < songAreaStart || songAreaWidth <= 0)
+        return -1;
+
+    // Vertical: only the bottom half of the row counts as "over a song"
+    if (p.y < getHeight() / 2)
+        return -1;
+
+    const int chipCount = juce::jmin((int) singer.songs.size(), 5);
+    if (chipCount <= 0) return -1;
+    const int chipWidth = juce::jmin(songAreaWidth / chipCount, 120);
+    if (chipWidth <= 0) return -1;
+    const int relX = p.x - songAreaStart;
+    const int idx  = relX / chipWidth;
+    if (idx < 0 || idx >= chipCount) return -1;
+    if (relX > chipCount * chipWidth) return -1;
+    return idx;
+}
+
 void QueueBar::SingerRow::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
 
     // Card background
     g.setColour(juce::Colour(0xff262626));
-    g.fillRect(bounds);
+    g.fillRoundedRectangle(bounds.toFloat(), 8.f);
 
-    // Round border: green for host (always wins), blue for first, red for last
+    // Round border: green for host, red for the singer at the tail of the
+    // current round. The "first in round" highlight is intentionally not
+    // drawn — the host already represents the round leader.
     if (isHost)
     {
         g.setColour(juce::Colour(0xff10b981));
-        g.drawRect(bounds, 3);
-    }
-    else if (isFirst)
-    {
-        g.setColour(juce::Colour(0xff30daff));
-        g.drawRect(bounds, 3);
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
     }
     else if (isLast)
     {
         g.setColour(juce::Colour(0xffdb3d40));
-        g.drawRect(bounds, 3);
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
     }
 
     // Bottom separator
@@ -225,16 +268,21 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     }
     g.restoreState();
 
-    // Play overlay on hover
-    if (hovering)
+    // Play overlay only when the cursor is over the avatar specifically
+    // (not the rest of the row).
+    if (hoverAvatar)
     {
-        g.setColour(juce::Colours::black.withAlpha(0.6f));
-        g.fillEllipse(avatarRect.toFloat());
+        g.saveState();
+        g.reduceClipRegion(circle);
+        g.setColour(juce::Colours::black.withAlpha(0.55f));
+        g.fillRect(avatarRect);
+        g.restoreState();
+
         g.setColour(juce::Colours::white);
         juce::Path tri;
-        float cx = (float)avatarRect.getCentreX();
-        float cy = (float)avatarRect.getCentreY();
-        float sz = 8.f;
+        const float cx = (float) avatarRect.getCentreX();
+        const float cy = (float) avatarRect.getCentreY();
+        const float sz = 9.f;
         tri.addTriangle(cx - sz * 0.5f, cy - sz,
                         cx - sz * 0.5f, cy + sz,
                         cx + sz,        cy);
@@ -269,12 +317,18 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     if (chipCount > 0)
     {
         int chipWidth = juce::jmin(songArea.getWidth() / chipCount, 120);
-        g.setFont(juce::Font(10.f));
         for (int i = 0; i < chipCount; ++i)
         {
             auto chipRect = songArea.removeFromLeft(chipWidth).reduced(1);
-            // First song highlighted
-            if (i == 0)
+
+            // First song highlighted; hovered song gets a slightly lifted
+            // background.
+            if (i == hoverSongIdx)
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.22f));
+                g.fillRoundedRectangle(chipRect.toFloat(), 3.f);
+            }
+            else if (i == 0)
             {
                 g.setColour(juce::Colours::white.withAlpha(0.15f));
                 g.fillRoundedRectangle(chipRect.toFloat(), 3.f);
@@ -291,29 +345,96 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     }
 }
 
+void QueueBar::SingerRow::mouseExit(const juce::MouseEvent&)
+{
+    hovering     = false;
+    hoverAvatar  = false;
+    hoverSongIdx = -1;
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void QueueBar::SingerRow::mouseMove(const juce::MouseEvent& e)
+{
+    const bool overAvatar = isOverAvatar(e.getPosition());
+    const int  songIdx    = overAvatar ? -1 : songChipIndexAt(e.getPosition());
+
+    bool changed = false;
+    if (overAvatar != hoverAvatar)   { hoverAvatar  = overAvatar; changed = true; }
+    if (songIdx   != hoverSongIdx)   { hoverSongIdx = songIdx;   changed = true; }
+
+    juce::MouseCursor cursor (juce::MouseCursor::NormalCursor);
+    if (overAvatar)
+        cursor = juce::MouseCursor::PointingHandCursor;
+    else if (songIdx >= 0)
+        cursor = juce::MouseCursor::PointingHandCursor;
+    else if (! isHost)
+        cursor = juce::MouseCursor::DraggingHandCursor;
+    setMouseCursor(cursor);
+
+    if (changed) repaint();
+}
+
+void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& /*e*/)
+{
+    // Nothing to do — the actual click is handled in mouseUp, and any drag
+    // is initiated from mouseDrag through the DragAndDropContainer.
+}
+
+void QueueBar::SingerRow::mouseDrag(const juce::MouseEvent& e)
+{
+    // Host can never be reordered.
+    if (isHost) return;
+
+    // Drags only start from the "body" of the row — not from the avatar
+    // (which is a play-click target) and not from a song chip (which opens
+    // the edit-singer modal).
+    const auto start = e.getMouseDownPosition();
+    const bool startedOnAvatar = isOverAvatar(start);
+    const bool startedOnSong   = ! startedOnAvatar && songChipIndexAt(start) >= 0;
+    if (startedOnAvatar || startedOnSong)
+        return;
+
+    // Defer to JUCE's drag-and-drop framework. The container will paint a
+    // ghost of this row that follows the cursor and route drop events to
+    // the matching DragAndDropTarget (ListContent in our case).
+    if (auto* dnd = juce::DragAndDropContainer::findParentDragContainerFor(this))
+    {
+        if (! dnd->isDragAndDropActive())
+        {
+            // Encode the source row index in the drag description so the
+            // target knows which singer to move.
+            juce::var description (index);
+
+            // Build a snapshot image of the row to use as the drag ghost.
+            // 70% opacity makes it feel "lifted" without obscuring the list.
+            auto img = createComponentSnapshot (getLocalBounds(), true);
+            dnd->startDragging (description, this, juce::ScaledImage (img),
+                                /*allowDraggingToOtherWindows*/ false);
+        }
+    }
+}
+
 void QueueBar::SingerRow::mouseUp(const juce::MouseEvent& e)
 {
-    // Click on the left 52px = play; elsewhere = song chip detection
-    if (e.x < 52)
+    // If the user dragged this row (handled by DragAndDropContainer), the
+    // matching mouseUp is not a click — don't open the play screen or the
+    // edit-singer modal.
+    if (e.mouseWasDraggedSinceMouseDown())
+        return;
+
+    const auto p = e.getPosition();
+    if (isOverAvatar(p))
     {
         if (onPlayClicked) onPlayClicked(index);
+        return;
     }
-    else if (!singer.songs.empty())
+
+    const int songIdx = songChipIndexAt(p);
+    if (songIdx >= 0 && onSongChipClicked)
     {
-        // Determine which song chip was clicked based on x position
-        int songAreaStart = 52 + 4; // avatar width + padding
-        int songAreaWidth = getWidth() - songAreaStart - 8;
-        int chipCount = juce::jmin((int)singer.songs.size(), 5);
-        if (chipCount > 0)
-        {
-            int chipWidth = juce::jmin(songAreaWidth / chipCount, 120);
-            int relX = e.x - songAreaStart;
-            int chipIdx = relX / chipWidth;
-            if (chipIdx >= 0 && chipIdx < chipCount)
-            {
-                if (onSongChipClicked) onSongChipClicked(index, chipIdx);
-            }
-        }
+        onSongChipClicked(index, songIdx);
+        return;
     }
 }
 
@@ -346,7 +467,7 @@ QueueBar::QueueBar()
 
     nowSingingLabel = std::make_unique<juce::Label>("nowSinging", "Now Singing:");
     nowSingingLabel->setColour(juce::Label::textColourId, textColour);
-    nowSingingLabel->setFont(juce::Font(12.f));
+    nowSingingLabel->setFont(juce::Font(12.f).boldened());
     addAndMakeVisible(*nowSingingLabel);
 
     // Bottom status bar
@@ -425,6 +546,11 @@ void QueueBar::paint(juce::Graphics& g)
     g.setColour(headerBgColour);
     g.fillRect(bounds.removeFromTop(venueHeaderHeight));
 
+    // Now-playing area + 5px separator below it (#474747).
+    bounds.removeFromTop(nowPlayingHeight);
+    g.setColour(juce::Colour(0xff474747));
+    g.fillRect(bounds.removeFromTop(5));
+
     // Resize handle visual (left 5px)
     auto handleArea = getLocalBounds().removeFromLeft(resizeHandleWidth);
     if (draggingResize)
@@ -452,6 +578,9 @@ void QueueBar::resized()
     auto npArea = bounds.removeFromTop(nowPlayingHeight);
     nowSingingLabel->setBounds(npArea.removeFromTop(18).reduced(8, 0));
     nowPlayingCard->setBounds(npArea.reduced(4));
+
+    // 5 px separator between now-playing and the queue list.
+    bounds.removeFromTop(5);
 
     //--- Status bar at bottom ---
     auto statusArea = bounds.removeFromBottom(statusBarHeight);
@@ -546,8 +675,6 @@ void QueueBar::setNowPlaying(const Singers& singer)
     nowPlayingCard->singer = singer;
     nowPlayingCard->avatarImage = loadAvatarFromAssets(juce::String(singer.avatar));
     nowPlayingCard->repaint();
-    if (nowSingingLabel != nullptr)
-        nowSingingLabel->setVisible(true);
 }
 
 void QueueBar::clearNowPlaying()
@@ -556,8 +683,8 @@ void QueueBar::clearNowPlaying()
     nowPlayingCard->hasSinger = false;
     nowPlayingCard->avatarImage = {};
     nowPlayingCard->repaint();
-    if (nowSingingLabel != nullptr)
-        nowSingingLabel->setVisible(false);
+    // The "Now Singing:" label always remains visible above the card,
+    // even when there is no active singer.
 }
 
 void QueueBar::setSingers(const std::vector<Singers>& newSingers)
@@ -606,11 +733,18 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     singers.erase(singers.begin() + fromIndex);
     singers.insert(singers.begin() + toIndex, singer);
 
-    // Reindex order
+    // Reindex `order` for every singer, and `rotationOrder` for the
+    // non-host singers (the host stays at -1 / unchanged). The first/last
+    // round borders are computed from rotationOrder, so this is what makes
+    // the red "last in round" border follow a manual reorder.
+    int rot = 0;
     for (int i = 0; i < (int)singers.size(); ++i)
+    {
         singers[(size_t)i].order = i;
+        if (! singers[(size_t)i].isHost)
+            singers[(size_t)i].rotationOrder = rot++;
+    }
 
-    if (onReorder) onReorder(fromIndex, toIndex);
     rebuildSingerRows();
     resized();
 }
@@ -735,4 +869,99 @@ void QueueBar::updateAllText()
     autoPlayToggle->setButtonText(lm.getText("queue.auto_play"));
     delayLabel->setText(lm.getText("queue.delay_label"), juce::dontSendNotification);
     updateStatusLabels();
+}
+
+//==============================================================================
+//  ListContent — DragAndDropTarget implementation for singer-row reorder.
+//==============================================================================
+bool QueueBar::ListContent::isInterestedInDragSource (const SourceDetails& d)
+{
+    // Only accept drags coming from one of our SingerRow children.
+    return dynamic_cast<SingerRow*> (d.sourceComponent.get()) != nullptr;
+}
+
+void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
+{
+    // Compute the Y coordinate of the slot the drop will land in and use
+    // it to draw a horizontal "insertion line" indicator across the list.
+    const int targetY = d.localPosition.y;
+    const int fromIndex = (int) d.description;
+
+    int toIndex = 0;
+    for (int i = 0; i < owner.singerRows.size(); ++i)
+    {
+        if (i == fromIndex) continue;
+        auto* r = owner.singerRows[i];
+        const int rowCentreY = r->getY() + r->getHeight() / 2;
+        if (rowCentreY < targetY)
+            ++toIndex;
+    }
+
+    const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
+    if (hasHost) toIndex = juce::jmax (toIndex, 1);
+    toIndex = juce::jlimit (0, (int) owner.singers.size(), toIndex);
+
+    // Convert the slot index into a Y coordinate. Insertion line is drawn
+    // at the top of the row currently at `toIndex` (or below the last row
+    // if dropping at the end).
+    int newY;
+    if (toIndex >= owner.singerRows.size())
+    {
+        auto* last = owner.singerRows.getLast();
+        newY = last != nullptr ? last->getBottom() : 0;
+    }
+    else
+    {
+        newY = owner.singerRows[toIndex]->getY();
+    }
+
+    if (newY != dropIndicatorY)
+    {
+        dropIndicatorY = newY;
+        repaint();
+    }
+}
+
+void QueueBar::ListContent::itemDragExit (const SourceDetails&)
+{
+    if (dropIndicatorY != -1)
+    {
+        dropIndicatorY = -1;
+        repaint();
+    }
+}
+
+void QueueBar::ListContent::itemDropped (const SourceDetails& d)
+{
+    const int fromIndex = (int) d.description;
+    const int targetY   = d.localPosition.y;
+
+    int toIndex = 0;
+    for (int i = 0; i < owner.singerRows.size(); ++i)
+    {
+        if (i == fromIndex) continue;
+        auto* r = owner.singerRows[i];
+        const int rowCentreY = r->getY() + r->getHeight() / 2;
+        if (rowCentreY < targetY)
+            ++toIndex;
+    }
+
+    const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
+    if (hasHost) toIndex = juce::jmax (toIndex, 1);
+    toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
+
+    dropIndicatorY = -1;
+
+    if (fromIndex < 0 || fromIndex >= (int) owner.singers.size()) return;
+    if (toIndex == fromIndex) { repaint(); return; }
+
+    owner.moveSinger (fromIndex, toIndex);
+    if (owner.onReorder) owner.onReorder (fromIndex, toIndex);
+}
+
+void QueueBar::ListContent::paintOverChildren (juce::Graphics& g)
+{
+    if (dropIndicatorY < 0) return;
+    g.setColour (juce::Colour (0xff30daff));
+    g.fillRect (juce::Rectangle<int> (0, dropIndicatorY - 1, getWidth(), 3));
 }

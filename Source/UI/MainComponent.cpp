@@ -14,8 +14,12 @@
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
+#include "../Services/RequestService.h"
 #include "../Services/HostService.h"
 #include "../Services/ImageCache.h"
+#include "../Services/FirestoreClient.h"
+#include "../Services/ArchiveService.h"
+#include "EditSingerModal.h"
 #include <cmath>
 
 //==============================================================================
@@ -287,6 +291,34 @@ void MainComponent::setupUI()
             });
     };
 
+    // Wire the "End Session & Archive" button to ArchiveService. The button
+    // also runs as part of the nightly cleanup timer started in setVenueId.
+    if (auto* sp = mainArea->getSettingsPage())
+    {
+        sp->onEndSession = [this](std::function<void(bool)> done)
+        {
+            if (activeVenueId_.isEmpty())
+            {
+                if (done) done(false);
+                return;
+            }
+            const auto venueId   = activeVenueId_;
+            const auto venueName = mainArea ? juce::String(mainArea->getSettingsPage()
+                                              ? mainArea->getSettingsPage()->getVenueData().name
+                                              : std::string())
+                                            : juce::String();
+
+            juce::Component::SafePointer<MainComponent> safe (this);
+            ArchiveService::getInstance().archiveAndClearSession(venueId, venueName,
+                [safe, done = std::move(done)] (bool ok, juce::String /*sessionId*/, juce::String /*error*/)
+                {
+                    if (safe != nullptr && ok)
+                        safe->reloadQueueFromFirestore(safe->activeVenueId_);
+                    if (done) done(ok);
+                });
+        };
+    }
+
     // When NavBar width changes via drag, re-layout
     navBar->onWidthChanged = [this](int /*newWidth*/) {
         resized();
@@ -308,6 +340,64 @@ void MainComponent::setupUI()
 
     queueBar->onPlaySinger = [this](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
+        if (queueBar == nullptr) return;
+        const auto& list = queueBar->getSingers();
+        if (singerIndex < 0 || singerIndex >= (int) list.size()) return;
+
+        const auto singer = list[(size_t) singerIndex];
+        if (singer.songs.empty())
+        {
+            DBG("Play singer: no songs in queue");
+            return;
+        }
+        const auto& first = singer.songs.front();
+
+        // Set the now-singing card and move the singer to the top of the
+        // queue list (just below the host). The visual list moves; rotation
+        // bookkeeping inside QueueBar::moveSinger renumbers `rotationOrder`
+        // so the round borders follow.
+        queueBar->setNowPlaying(singer);
+
+        const bool hasHost = ! list.empty() && list.front().isHost;
+        const int targetIndex = hasHost ? 1 : 0;
+        if (singerIndex != targetIndex)
+        {
+            queueBar->moveSinger(singerIndex, targetIndex);
+            if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
+        }
+
+        // Look the song up in the loaded library by id, then fall back to
+        // a name+artist match. If the library hasn't loaded yet we just
+        // can't play it — the now-singing card is still updated.
+        if (mainArea == nullptr) return;
+        const auto& library = mainArea->getLibrarySongs();
+        const juce::String wantId     = juce::String(first.songId);
+        const juce::String wantName   = juce::String(first.songName)  .toLowerCase();
+        const juce::String wantArtist = juce::String(first.songArtist).toLowerCase();
+
+        const CdgSong* match = nullptr;
+        for (const auto& s : library)
+        {
+            if (! wantId.isEmpty() && juce::String(s.id) == wantId) { match = &s; break; }
+        }
+        if (match == nullptr)
+        {
+            for (const auto& s : library)
+            {
+                if (juce::String(s.songName)  .toLowerCase() == wantName &&
+                    juce::String(s.artistName).toLowerCase() == wantArtist)
+                { match = &s; break; }
+            }
+        }
+        if (match == nullptr)
+        {
+            DBG("Play singer: no library match for '" << juce::String(first.songName)
+                << "' by '" << juce::String(first.songArtist) << "'");
+            return;
+        }
+
+        const int pitchSemis = juce::roundToInt(first.pitch);
+        loadAndPlaySong(*match, /*versionIndex*/ 0, pitchSemis);
     };
 
     queueBar->onPlayCurrent = [this]() {
@@ -324,6 +414,67 @@ void MainComponent::setupUI()
 
     queueBar->onReorder = [this](int from, int to) {
         DBG("QueueBar: Reorder singer from " + juce::String(from) + " to " + juce::String(to));
+
+        // Persist new ordering by PATCHing each affected singer's `order`
+        // field. Snapshot the current singer list (already mutated locally
+        // by QueueBar::moveSinger) and write the new positions to Firestore.
+        const auto venueId = activeVenueId_;
+        if (venueId.isEmpty() || queueBar == nullptr) return;
+
+        const auto& singers = queueBar->getSingers();
+        struct Update { juce::String docId; int order; int rotationOrder; bool isHost; };
+        std::vector<Update> updates;
+        updates.reserve(singers.size());
+        for (size_t i = 0; i < singers.size(); ++i)
+        {
+            updates.push_back({ juce::String(singers[i].id),
+                                (int) i,
+                                singers[i].rotationOrder,
+                                singers[i].isHost });
+        }
+
+        juce::Thread::launch([venueId, updates]()
+        {
+            for (const auto& u : updates)
+            {
+                if (u.docId.isEmpty()) continue;
+                juce::String path = "venues/" + venueId + "/queue/" + u.docId
+                                  + "?updateMask.fieldPaths=order";
+                juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+                fields->setProperty("order", FirestoreClient::integerValue(u.order));
+                if (! u.isHost)
+                {
+                    path += "&updateMask.fieldPaths=rotationOrder";
+                    fields->setProperty("rotationOrder",
+                                        FirestoreClient::integerValue(u.rotationOrder));
+                }
+                FirestoreClient::getInstance().patchDocument(path, juce::var(fields.get()));
+            }
+        });
+    };
+
+    queueBar->onSongClicked = [this](int singerIdx, int /*songIdx*/) {
+        if (queueBar == nullptr) return;
+        const auto& singers = queueBar->getSingers();
+        if (singerIdx < 0 || singerIdx >= (int) singers.size()) return;
+
+        const auto& singer = singers[(size_t) singerIdx];
+        const juce::String singerName = juce::String(singer.name);
+        const auto songsCopy = singer.songs;
+        const auto venueId = activeVenueId_;
+
+        EditSingerModal::show(this, singerName, songsCopy,
+            [this, venueId, singerName](const std::vector<QueueItem>& updated)
+            {
+                if (venueId.isEmpty()) return;
+                QueueService::getInstance().patchSingerSongs(
+                    venueId, singerName, updated,
+                    [](bool ok, const juce::String& err)
+                    {
+                        DBG("[Queue] patchSingerSongs ok=" << (ok ? 1 : 0)
+                            << " err=" << err);
+                    });
+            });
     };
 
     // Populate with sample data so the queue is visible on launch
@@ -1283,6 +1434,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
         if (lyricWindow_ != nullptr)
             if (auto* d = lyricWindow_->getDisplay())
                 d->setVenueCode ({});
+        ArchiveService::getInstance().stopNightlyCleanup();
         return;
     }
 
@@ -1323,6 +1475,12 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             if (safe->mainArea != nullptr)
                 safe->mainArea->setVenueData (v);
 
+            // Start the nightly archive + clear timer for this venue. The
+            // service reads the configured cleanup hour from UserPreferences
+            // each minute, so a settings change takes effect immediately.
+            ArchiveService::getInstance().startNightlyCleanup(
+                juce::String(v.id), juce::String(v.name));
+
             // Fetch the venue logo asynchronously and push it into the lyric
             // display once it arrives. ArtworkCache invokes the callback on
             // the message thread.
@@ -1353,7 +1511,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             // into the QueueBar (replaces the placeholder/empty state).
             const juce::String vid (v.id);
             QueueService::getInstance().loadQueue (vid,
-                [safe] (bool qok, QueueService::Snapshot snap, juce::String qerr)
+                [safe, vid] (bool qok, QueueService::Snapshot snap, juce::String qerr)
                 {
                     if (safe == nullptr || safe->queueBar == nullptr)
                         return;
@@ -1398,6 +1556,227 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                                            snap.singers.end());
 
                     safe->queueBar->setSingers (singersWithHost);
+
+                    // Start (or restart) the /requested polling pipeline so
+                    // we route TAGG requests through autoApprove and into
+                    // /queue.
+                    safe->startRequestPipelineFor (vid);
                 });
+        });
+}
+
+//==============================================================================
+// /requested pipeline
+void MainComponent::startRequestPipelineFor (const juce::String& venueId)
+{
+    activeVenueId_ = venueId;
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    auto& rs = RequestService::getInstance();
+    rs.onNewRequest      = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingNewRequest(item); };
+    rs.onApprovedRequest = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingApprovedRequest(item); };
+    rs.onRejectedRequest = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingRejectedRequest(item); };
+    rs.onDeleteRequest   = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingDeleteRequest(item); };
+    rs.start (venueId);
+
+    // Watch /queue itself for changes pushed by other clients (e.g. TAGG
+    // mobile app reordering songs, marking a song as playing, etc.). The
+    // watcher uses a fingerprint to repaint only when something actually
+    // changed.
+    QueueService::getInstance().startWatching (venueId,
+        [safe] (QueueService::Snapshot snap)
+        {
+            if (safe == nullptr || safe->queueBar == nullptr)
+                return;
+
+            if (snap.hasNowPlaying) safe->queueBar->setNowPlaying (snap.nowPlaying);
+            else                    safe->queueBar->clearNowPlaying();
+
+            std::vector<Singers> withHost;
+            if (HostService::getInstance().hasCurrent())
+            {
+                const auto h = HostService::getInstance().getCurrent();
+                Singers hostSinger;
+                hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
+                hostSinger.name   = ! h.stageName.empty() ? h.stageName
+                                  : ! h.fullName.empty()  ? h.fullName
+                                  : "Host";
+                hostSinger.avatar = h.avatarUrl;
+                hostSinger.isHost = true;
+                hostSinger.order  = -1;
+                hostSinger.rotationOrder = -1;
+                withHost.push_back (std::move (hostSinger));
+            }
+            withHost.insert (withHost.end(), snap.singers.begin(), snap.singers.end());
+            safe->queueBar->setSingers (withHost);
+        });
+}
+
+void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
+{
+    if (venueId.isEmpty() || queueBar == nullptr)
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    QueueService::getInstance().loadQueue (venueId,
+        [safe] (bool ok, QueueService::Snapshot snap, juce::String /*err*/)
+        {
+            if (safe == nullptr || safe->queueBar == nullptr || ! ok)
+                return;
+
+            if (snap.hasNowPlaying) safe->queueBar->setNowPlaying (snap.nowPlaying);
+            else                    safe->queueBar->clearNowPlaying();
+
+            std::vector<Singers> withHost;
+            if (HostService::getInstance().hasCurrent())
+            {
+                const auto h = HostService::getInstance().getCurrent();
+                Singers hostSinger;
+                hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
+                hostSinger.name   = ! h.stageName.empty() ? h.stageName
+                                  : ! h.fullName.empty()  ? h.fullName
+                                  : "Host";
+                hostSinger.avatar = h.avatarUrl;
+                hostSinger.isHost = true;
+                hostSinger.order  = -1;
+                hostSinger.rotationOrder = -1;
+                withHost.push_back (std::move (hostSinger));
+            }
+            withHost.insert (withHost.end(), snap.singers.begin(), snap.singers.end());
+            safe->queueBar->setSingers (withHost);
+        });
+}
+
+void MainComponent::onIncomingNewRequest (const QueueItem& item)
+{
+    // Mirrors autoApproveSong() in queue-bar.component.ts.
+    const auto venue = VenueService::getInstance().getCurrent();
+    const juce::String venueId = activeVenueId_;
+    if (venueId.isEmpty())
+        return;
+
+    // Local desktop request — bypass checks and add straight to queue.
+    if (juce::String(item.deviceId).equalsIgnoreCase("local"))
+    {
+        DBG ("[Pipeline] new(local) -> approve & enqueue: " << juce::String(item.songName));
+        QueueItem approved = item;
+        approved.status = "approved";
+        juce::Component::SafePointer<MainComponent> safe (this);
+        QueueService::getInstance().appendSong (venueId, approved,
+            [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
+            {
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr && ok)
+                    safe->reloadQueueFromFirestore (venueId);
+            });
+        return;
+    }
+
+    // Queue closed?
+    if (queueBar != nullptr && queueBar->isQueueClosed())
+    {
+        DBG ("[Pipeline] new -> reject (queue closed): " << juce::String(item.songName));
+        RequestService::getInstance().patchStatus (venueId, juce::String(item.id),
+            "rejected", "No longer accepting song requests.  Please come back next time!");
+        return;
+    }
+
+    // Max songs per singer.
+    const int  maxSongs    = juce::jmax (1, venue.numSongs);
+    const bool allowRepeat = venue.repeatSongs;
+
+    if (queueBar != nullptr)
+    {
+        const auto& singers = queueBar->getSingers();
+        const auto wantSinger = juce::String(item.singerName).toLowerCase();
+        const auto wantSong   = juce::String(item.songName).toLowerCase();
+        const auto wantArtist = juce::String(item.songArtist).toLowerCase();
+
+        for (auto& s : singers)
+        {
+            if (juce::String(s.name).toLowerCase() != wantSinger)
+                continue;
+            if ((int) s.songs.size() >= maxSongs)
+            {
+                DBG ("[Pipeline] new -> reject (too many songs): " << juce::String(item.songName));
+                RequestService::getInstance().patchStatus (venueId, juce::String(item.id),
+                    "rejected", "You have too many songs in the queue.  Sing or delete one before adding more");
+                return;
+            }
+            break;
+        }
+
+        if (! allowRepeat)
+        {
+            for (auto& s : singers)
+            {
+                for (auto& q : s.songs)
+                {
+                    if (juce::String(q.songName).toLowerCase()   == wantSong
+                     && juce::String(q.songArtist).toLowerCase() == wantArtist)
+                    {
+                        DBG ("[Pipeline] new -> reject (duplicate in queue): " << juce::String(item.songName));
+                        RequestService::getInstance().patchStatus (venueId, juce::String(item.id),
+                            "rejected", "This song is already in the queue.  Please choose another song");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Approved — desktop test devices flip straight to "approved", real
+    // mobile clients get "approvedpending" so the phone can confirm before
+    // we move it into the queue.
+    const bool isMobileTest = juce::String(item.deviceId).equalsIgnoreCase("mobiletest");
+    const juce::String newStatus = isMobileTest ? "approved" : "approvedpending";
+    DBG ("[Pipeline] new -> " << newStatus << ": " << juce::String(item.songName));
+    RequestService::getInstance().patchStatus (venueId, juce::String(item.id), newStatus);
+}
+
+void MainComponent::onIncomingApprovedRequest (const QueueItem& item)
+{
+    const juce::String venueId = activeVenueId_;
+    if (venueId.isEmpty())
+        return;
+
+    DBG ("[Pipeline] approved -> enqueue: " << juce::String(item.songName)
+         << " (singer=" << juce::String(item.singerName) << ")");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    QueueService::getInstance().appendSong (venueId, item,
+        [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
+        {
+            RequestService::getInstance().deleteRequested (venueId, id);
+            if (safe != nullptr && ok)
+                safe->reloadQueueFromFirestore (venueId);
+        });
+}
+
+void MainComponent::onIncomingRejectedRequest (const QueueItem& item)
+{
+    const juce::String venueId = activeVenueId_;
+    if (venueId.isEmpty())
+        return;
+
+    DBG ("[Pipeline] rejected -> remove from /requested: " << juce::String(item.songName));
+    RequestService::getInstance().deleteRequested (venueId, juce::String(item.id));
+}
+
+void MainComponent::onIncomingDeleteRequest (const QueueItem& item)
+{
+    const juce::String venueId = activeVenueId_;
+    if (venueId.isEmpty())
+        return;
+
+    DBG ("[Pipeline] delete -> remove from /queue + /requested: " << juce::String(item.songName));
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    QueueService::getInstance().removeSong (venueId, item,
+        [safe, id = juce::String(item.id), venueId](bool /*ok*/, juce::String /*err*/)
+        {
+            RequestService::getInstance().deleteRequested (venueId, id);
+            if (safe != nullptr)
+                safe->reloadQueueFromFirestore (venueId);
         });
 }

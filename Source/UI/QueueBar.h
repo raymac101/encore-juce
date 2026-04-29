@@ -30,7 +30,8 @@
 /**
     Right-hand queue bar displaying the karaoke singer rotation.
 */
-class QueueBar : public juce::Component
+class QueueBar : public juce::Component,
+                 public juce::DragAndDropContainer
 {
 public:
     QueueBar();
@@ -59,6 +60,16 @@ public:
     void setQueueRunning(bool running);
     void setAutoPlay(bool enabled);
     void setDelaySec(int seconds);
+
+    // When true, all incoming requests from mobile (TAGG) are auto-rejected
+    // with a "no longer accepting song requests" reason. Defaults to false.
+    void setQueueClosed (bool closed) { queueClosed = closed; }
+    bool isQueueClosed() const noexcept { return queueClosed; }
+
+    // Read-only access to the live queue state — needed for the
+    // request-pipeline checks in MainComponent (max songs per singer,
+    // duplicate detection, etc.).
+    const std::vector<Singers>& getSingers() const noexcept { return singers; }
 
     // Width
     int getBarWidth() const { return barWidth; }
@@ -89,8 +100,16 @@ private:
         SingerRow();
         void paint(juce::Graphics& g) override;
         void mouseEnter(const juce::MouseEvent&) override { hovering = true;  repaint(); }
-        void mouseExit(const juce::MouseEvent&) override  { hovering = false; repaint(); }
-        void mouseUp(const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent&) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp   (const juce::MouseEvent& e) override;
+
+        // Hit-testing helpers (also used by paint to highlight hover zones).
+        juce::Rectangle<int> getAvatarRect() const;
+        int  songChipIndexAt (juce::Point<int> p) const;   // -1 if none
+        bool isOverAvatar    (juce::Point<int> p) const;
 
         Singers singer;
         int     index = 0;
@@ -98,9 +117,11 @@ private:
         bool    isLast  = false;   // red border (round tail)
         bool    isHost  = false;   // red border (host pin) — wins over isFirst
         bool    hovering = false;
+        bool    hoverAvatar = false;
+        int     hoverSongIdx = -1;
         juce::Image avatarImage;   // lazily loaded from `singer.avatar`
 
-        std::function<void(int)> onPlayClicked;
+        std::function<void(int)>      onPlayClicked;
         std::function<void(int, int)> onSongChipClicked;
     };
 
@@ -126,11 +147,31 @@ private:
     };
 
     //==============================================================================
+    // List container — accepts the singer-row drag and computes the new
+    // index from the drop position. Owned by `listViewport`.
+    class ListContent : public juce::Component,
+                        public juce::DragAndDropTarget
+    {
+    public:
+        ListContent (QueueBar& o) : owner (o) {}
+
+        bool isInterestedInDragSource (const SourceDetails& d) override;
+        void itemDragMove (const SourceDetails& d) override;
+        void itemDragExit (const SourceDetails&) override;
+        void itemDropped (const SourceDetails& d) override;
+        void paintOverChildren (juce::Graphics& g) override;
+
+    private:
+        QueueBar& owner;
+        int      dropIndicatorY = -1;     // -1 when no drag in progress
+    };
+
+    //==============================================================================
     // Sub-components
     std::unique_ptr<NowPlayingCard>         nowPlayingCard;
     juce::OwnedArray<SingerRow>             singerRows;
     juce::Viewport                          listViewport;
-    juce::Component                         listContent;
+    ListContent                             listContent { *this };
 
     // Venue header labels
     std::unique_ptr<juce::Label> venueNameLabel;
@@ -156,6 +197,7 @@ private:
     bool                 queueRunning = false;
     bool                 autoPlayEnabled = false;
     int                  delaySec = 0;
+    bool                 queueClosed = false;
 
     // Sizing
     int  barWidth = 280;

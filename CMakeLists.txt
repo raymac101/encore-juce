@@ -11,7 +11,9 @@ add_subdirectory(/Users/raymac/JUCE JUCE)
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
     PRODUCT_NAME "Encore Karaoke"
-    BUNDLE_ID "com.viracicom.encore")
+    BUNDLE_ID "com.viracicom.encore"
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png")
 
 # Generate JuceHeader.h
 juce_generate_juce_header(EncoreJUCE)
@@ -28,6 +30,7 @@ target_sources(EncoreJUCE
         Source/UI/NavBar.cpp
         Source/UI/MainArea.cpp
         Source/UI/QueueBar.cpp
+        Source/UI/EditSingerModal.cpp
         Source/UI/HomePage.cpp
         Source/UI/SearchPage.cpp
         Source/UI/LibraryPage.cpp
@@ -44,6 +47,8 @@ target_sources(EncoreJUCE
         Source/Services/FirestoreClient.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
+        Source/Services/RequestService.cpp
+        Source/Services/ArchiveService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp

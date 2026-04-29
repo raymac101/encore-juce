@@ -70,6 +70,15 @@ public:
     void setCurrentPage(NavPage page);
     NavPage getCurrentPage() const { return currentPage; }
 
+    /** Read-only access to the loaded song library. Returns an empty list
+        if the library hasn't finished loading yet. */
+    const std::vector<CdgSong>& getLibrarySongs() const;
+
+    /** Direct access to the embedded SettingsPage (may be null briefly
+        during construction). Used by MainComponent to wire callbacks
+        such as onEndSession. */
+    SettingsPage* getSettingsPage() noexcept { return settingsPage; }
+
     /** Re-read all translatable strings from LocalizationManager. */
     void updateAllText();
 
