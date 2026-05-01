@@ -62,6 +62,16 @@ static juce::Image loadAvatarFromAssets(const juce::String& avatarPath)
 //==============================================================================
 QueueBar::NowPlayingCard::NowPlayingCard() {}
 
+juce::Rectangle<int> QueueBar::NowPlayingCard::getMenuButtonRect() const
+{
+    return getLocalBounds().removeFromRight(28);
+}
+
+bool QueueBar::NowPlayingCard::isOverMenuButton(juce::Point<int> p) const
+{
+    return getMenuButtonRect().contains(p);
+}
+
 void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().reduced(4);
@@ -130,6 +140,24 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
         }
     }
 
+    // ── 3-dot menu button (right edge) ──────────────────────────────────────
+    {
+        auto menuRect = bounds.removeFromRight(28);
+        if (hoverMenu)
+        {
+            g.setColour(juce::Colours::black.withAlpha(0.12f));
+            g.fillRoundedRectangle(menuRect.reduced(2, 4).toFloat(), 4.f);
+        }
+        const float dotR = 2.5f;
+        const float cx   = (float) menuRect.getCentreX();
+        const float midY = (float) menuRect.getCentreY();
+        const float gap  = 7.f;
+        g.setColour(juce::Colour(0xff262626).withAlpha(0.55f));
+        g.fillEllipse(cx - dotR, midY - gap - dotR, dotR * 2.f, dotR * 2.f);
+        g.fillEllipse(cx - dotR, midY       - dotR, dotR * 2.f, dotR * 2.f);
+        g.fillEllipse(cx - dotR, midY + gap - dotR, dotR * 2.f, dotR * 2.f);
+    }
+
     // Name row (top half of remaining area)
     auto textArea = bounds.reduced(4, 0);
     auto nameArea = textArea.removeFromTop(textArea.getHeight() / 2);
@@ -154,9 +182,54 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
     }
 }
 
-void QueueBar::NowPlayingCard::mouseUp(const juce::MouseEvent&)
+void QueueBar::NowPlayingCard::mouseDown(const juce::MouseEvent& e)
+{
+    if (!hasSinger || !isOverMenuButton(e.getPosition())) return;
+
+    juce::PopupMenu menu;
+    menu.addItem(1, isPlaying ? "Pause" : "Play", true);
+    menu.addSeparator();
+    menu.addItem(2, "Return to Queue \xe2\x80\x94 Next", true);
+    menu.addItem(3, "Return to Queue \xe2\x80\x94 End",  true);
+    menu.addSeparator();
+    menu.addItem(4, "Skip & Clear", true);
+
+    menu.showMenuAsync(
+        juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withTargetScreenArea(getMenuButtonRect()
+                                      .translated(getScreenX(), getScreenY())),
+        [this](int result)
+        {
+            switch (result)
+            {
+                case 1: if (isPlaying) { if (onPauseClicked)    onPauseClicked();    }
+                        else           { if (onPlayClicked)      onPlayClicked();     } break;
+                case 2: if (onReturnToQueueNext) onReturnToQueueNext(); break;
+                case 3: if (onReturnToQueueEnd)  onReturnToQueueEnd();  break;
+                case 4: if (onSkipAndRemove)     onSkipAndRemove();     break;
+                default: break;
+            }
+        });
+}
+
+void QueueBar::NowPlayingCard::mouseMove(const juce::MouseEvent& e)
+{
+    const bool over = isOverMenuButton(e.getPosition());
+    if (over != hoverMenu)
+    {
+        hoverMenu = over;
+        setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
+                            : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void QueueBar::NowPlayingCard::mouseUp(const juce::MouseEvent& e)
 {
     if (!hasSinger) return;
+    // Menu button fires on mouseDown — swallow the up event for that zone.
+    if (isOverMenuButton(e.getPosition())) return;
     if (isPlaying)
     {
         if (onPauseClicked) onPauseClicked();
@@ -191,15 +264,30 @@ bool QueueBar::SingerRow::isOverAvatar(juce::Point<int> p) const
     return (dx * dx + dy * dy) <= (r * r);
 }
 
+juce::Rectangle<int> QueueBar::SingerRow::getMenuButtonRect() const
+{
+    // 28-px-wide touch target flush to the right edge, full row height.
+    return getLocalBounds().removeFromRight(28);
+}
+
+bool QueueBar::SingerRow::isOverMenuButton(juce::Point<int> p) const
+{
+    return getMenuButtonRect().contains(p);
+}
+
 int QueueBar::SingerRow::songChipIndexAt(juce::Point<int> p) const
 {
     if (singer.songs.empty())
         return -1;
 
+    // Don't register song chips if the tap is on the 3-dot menu button.
+    if (isOverMenuButton(p))
+        return -1;
+
     // Match the layout used in paint(): chips fill the bottom half of the
-    // area to the right of the avatar.
+    // area to the right of the avatar, leaving 28px for the menu button.
     const int songAreaStart = 52 + 4;        // avatar width + padding
-    const int songAreaWidth = getWidth() - songAreaStart - 8;
+    const int songAreaWidth = getWidth() - songAreaStart - 28 - 8;
     if (p.x < songAreaStart || songAreaWidth <= 0)
         return -1;
 
@@ -226,13 +314,24 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff262626));
     g.fillRoundedRectangle(bounds.toFloat(), 8.f);
 
-    // Round border: green for host, red for the singer at the tail of the
-    // current round. The "first in round" highlight is intentionally not
-    // drawn — the host already represents the round leader.
+    // Newly-added highlight — subtle green tint on the card background
+    if (isNewlyAdded)
+    {
+        g.setColour(juce::Colour(0xff10b981).withAlpha(0.18f));
+        g.fillRoundedRectangle(bounds.toFloat(), 8.f);
+    }
+
+    // Round border: green for host, yellow-green for newly added,
+    // red for the singer at the tail of the current round.
     if (isHost)
     {
         g.setColour(juce::Colour(0xff10b981));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
+    }
+    else if (isNewlyAdded)
+    {
+        g.setColour(juce::Colour(0xff84cc16));
+        g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 2.f);
     }
     else if (isLast)
     {
@@ -289,6 +388,26 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         g.fillPath(tri);
     }
 
+    // ── 3-dot menu button (right edge, full height) ──────────────────────────
+    auto menuRect = bounds.removeFromRight(28);
+    {
+        // Hover / press highlight
+        if (hoverMenu)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.12f));
+            g.fillRoundedRectangle(menuRect.reduced(2, 4).toFloat(), 4.f);
+        }
+        // Draw three vertically-stacked dots
+        const float dotR  = 2.5f;
+        const float cx    = (float) menuRect.getCentreX();
+        const float midY  = (float) menuRect.getCentreY();
+        const float gap   = 7.f;
+        g.setColour(juce::Colour(0xffa3a6a8));
+        g.fillEllipse(cx - dotR, midY - gap - dotR, dotR * 2.f, dotR * 2.f);
+        g.fillEllipse(cx - dotR, midY       - dotR, dotR * 2.f, dotR * 2.f);
+        g.fillEllipse(cx - dotR, midY + gap - dotR, dotR * 2.f, dotR * 2.f);
+    }
+
     // Strikes (if no songs)
     if (singer.songs.empty() && singer.strikes > 0)
     {
@@ -302,7 +421,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         return;
     }
 
-    // Name area – top half
+    // Name area – top half (bounds already has menu column removed)
     auto nameArea = bounds.removeFromTop(bounds.getHeight() / 2).reduced(4, 0);
     g.setColour(juce::Colour(0xffe4e4e4));
     g.setFont(juce::Font(13.f).boldened());
@@ -321,8 +440,6 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         {
             auto chipRect = songArea.removeFromLeft(chipWidth).reduced(1);
 
-            // First song highlighted; hovered song gets a slightly lifted
-            // background.
             if (i == hoverSongIdx)
             {
                 g.setColour(juce::Colours::white.withAlpha(0.22f));
@@ -349,6 +466,7 @@ void QueueBar::SingerRow::mouseExit(const juce::MouseEvent&)
 {
     hovering     = false;
     hoverAvatar  = false;
+    hoverMenu    = false;
     hoverSongIdx = -1;
     setMouseCursor(juce::MouseCursor::NormalCursor);
     repaint();
@@ -356,29 +474,59 @@ void QueueBar::SingerRow::mouseExit(const juce::MouseEvent&)
 
 void QueueBar::SingerRow::mouseMove(const juce::MouseEvent& e)
 {
-    const bool overAvatar = isOverAvatar(e.getPosition());
-    const int  songIdx    = overAvatar ? -1 : songChipIndexAt(e.getPosition());
+    const auto   p          = e.getPosition();
+    const bool   overMenu   = isOverMenuButton(p);
+    const bool   overAvatar = !overMenu && isOverAvatar(p);
+    const int    songIdx    = (overMenu || overAvatar) ? -1 : songChipIndexAt(p);
 
     bool changed = false;
-    if (overAvatar != hoverAvatar)   { hoverAvatar  = overAvatar; changed = true; }
-    if (songIdx   != hoverSongIdx)   { hoverSongIdx = songIdx;   changed = true; }
+    if (overMenu   != hoverMenu)    { hoverMenu    = overMenu;   changed = true; }
+    if (overAvatar != hoverAvatar)  { hoverAvatar  = overAvatar; changed = true; }
+    if (songIdx    != hoverSongIdx) { hoverSongIdx = songIdx;    changed = true; }
 
     juce::MouseCursor cursor (juce::MouseCursor::NormalCursor);
-    if (overAvatar)
+    if (overMenu || overAvatar || songIdx >= 0)
         cursor = juce::MouseCursor::PointingHandCursor;
-    else if (songIdx >= 0)
-        cursor = juce::MouseCursor::PointingHandCursor;
-    else if (! isHost)
+    else if (!isHost)
         cursor = juce::MouseCursor::DraggingHandCursor;
     setMouseCursor(cursor);
 
     if (changed) repaint();
 }
 
-void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& /*e*/)
+void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& e)
 {
-    // Nothing to do — the actual click is handled in mouseUp, and any drag
-    // is initiated from mouseDrag through the DragAndDropContainer.
+    if (!isOverMenuButton(e.getPosition()))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addItem(1, "Play Next",  true);
+    menu.addSeparator();
+    menu.addItem(2, "Move Up",   !isHost);
+    menu.addItem(3, "Move Down", !isHost);
+    menu.addSeparator();
+    menu.addItem(4, "Edit Songs", true);
+    if (!isHost)
+        menu.addItem(5, "Remove Singer", true);
+
+    menu.showMenuAsync(
+        juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withTargetScreenArea(getMenuButtonRect()
+                                      .translated(getScreenX(), getScreenY())),
+        [this](int result)
+        {
+            switch (result)
+            {
+                case 1: if (onPlayClicked)     onPlayClicked(index);    break;
+                case 2: if (onMoveUpClicked)   onMoveUpClicked(index);  break;
+                case 3: if (onMoveDownClicked) onMoveDownClicked(index); break;
+                case 4: if (onSongChipClicked && !singer.songs.empty())
+                            onSongChipClicked(index, 0);                break;
+                case 5: if (onRemoveClicked)   onRemoveClicked(index);  break;
+                default: break;
+            }
+        });
 }
 
 void QueueBar::SingerRow::mouseDrag(const juce::MouseEvent& e)
@@ -386,13 +534,14 @@ void QueueBar::SingerRow::mouseDrag(const juce::MouseEvent& e)
     // Host can never be reordered.
     if (isHost) return;
 
-    // Drags only start from the "body" of the row — not from the avatar
-    // (which is a play-click target) and not from a song chip (which opens
-    // the edit-singer modal).
+    // Drags only start from the "body" of the row — not from the avatar,
+    // not from a song chip, and not from the 3-dot menu button.
     const auto start = e.getMouseDownPosition();
     const bool startedOnAvatar = isOverAvatar(start);
-    const bool startedOnSong   = ! startedOnAvatar && songChipIndexAt(start) >= 0;
-    if (startedOnAvatar || startedOnSong)
+    const bool startedOnMenu   = isOverMenuButton(start);
+    const bool startedOnSong   = !startedOnAvatar && !startedOnMenu
+                                 && songChipIndexAt(start) >= 0;
+    if (startedOnAvatar || startedOnMenu || startedOnSong)
         return;
 
     // Defer to JUCE's drag-and-drop framework. The container will paint a
@@ -417,13 +566,15 @@ void QueueBar::SingerRow::mouseDrag(const juce::MouseEvent& e)
 
 void QueueBar::SingerRow::mouseUp(const juce::MouseEvent& e)
 {
-    // If the user dragged this row (handled by DragAndDropContainer), the
-    // matching mouseUp is not a click — don't open the play screen or the
-    // edit-singer modal.
     if (e.mouseWasDraggedSinceMouseDown())
         return;
 
     const auto p = e.getPosition();
+
+    // Menu button is handled in mouseDown — don't double-fire here.
+    if (isOverMenuButton(p))
+        return;
+
     if (isOverAvatar(p))
     {
         if (onPlayClicked) onPlayClicked(index);
@@ -445,8 +596,11 @@ QueueBar::QueueBar()
 {
     // Now-playing card
     nowPlayingCard = std::make_unique<NowPlayingCard>();
-    nowPlayingCard->onPlayClicked  = [this]() { if (onPlayCurrent)  onPlayCurrent();  };
-    nowPlayingCard->onPauseClicked = [this]() { if (onPauseCurrent) onPauseCurrent(); };
+    nowPlayingCard->onPlayClicked        = [this]() { if (onPlayCurrent)              onPlayCurrent();              };
+    nowPlayingCard->onPauseClicked       = [this]() { if (onPauseCurrent)             onPauseCurrent();             };
+    nowPlayingCard->onReturnToQueueNext  = [this]() { if (onReturnCurrentToQueueNext) onReturnCurrentToQueueNext(); };
+    nowPlayingCard->onReturnToQueueEnd   = [this]() { if (onReturnCurrentToQueueEnd)  onReturnCurrentToQueueEnd();  };
+    nowPlayingCard->onSkipAndRemove      = [this]() { if (onSkipCurrentSinger)        onSkipCurrentSinger();        };
     addAndMakeVisible(*nowPlayingCard);
 
     // Viewport for singer list
@@ -531,6 +685,19 @@ QueueBar::QueueBar()
     delayLabel->setColour(juce::Label::textColourId, textColour);
     delayLabel->setFont(juce::Font(11.f));
     addAndMakeVisible(*delayLabel);
+
+    addSingerButton = std::make_unique<juce::TextButton>("+ Add Singer");
+    addSingerButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
+    addSingerButton->setColour(juce::TextButton::textColourOffId, accentColour);
+    addSingerButton->onClick = [this]() { if (onAddSinger) onAddSinger(); };
+    addAndMakeVisible(*addSingerButton);
+
+    countdownLabel = std::make_unique<juce::Label>("countdown", "");
+    countdownLabel->setColour(juce::Label::textColourId, accentColour);
+    countdownLabel->setFont(juce::Font(22.f).boldened());
+    countdownLabel->setJustificationType(juce::Justification::centred);
+    countdownLabel->setVisible(false);
+    addAndMakeVisible(*countdownLabel);
 }
 
 //==============================================================================
@@ -599,8 +766,15 @@ void QueueBar::resized()
         delayLabel->setBounds(row3.removeFromLeft(80));
         delaySlider->setBounds(row3);
 
-        auto row4 = statusArea.reduced(8, 2);
-        clearQueueButton->setBounds(row4.withHeight(juce::jmin(row4.getHeight(), 28)));
+        auto row4 = statusArea.removeFromTop(28).reduced(8, 2);
+        auto row4Left  = row4.removeFromLeft(row4.getWidth() / 2 - 2);
+        auto row4Right = row4.withTrimmedLeft(2);
+        clearQueueButton->setBounds(row4Left);
+        addSingerButton->setBounds(row4Right);
+
+        // Countdown label floats over the list area (set in resized, shown/hidden by state)
+        countdownLabel->setBounds(0, venueHeaderHeight + nowPlayingHeight + 5,
+                                   getWidth(), 40);
     }
 
     //--- Singer list fills the middle ---
@@ -815,6 +989,8 @@ void QueueBar::rebuildSingerRows()
                      && (singers[(size_t)i].rotationOrder == lastRotation);
         row->avatarImage = loadAvatarFromAssets(juce::String(singers[(size_t)i].avatar));
 
+        row->isNewlyAdded = singers[(size_t)i].isNewlyAdded;
+
         row->onPlayClicked = [this](int idx)
         {
             if (onPlaySinger) onPlaySinger(idx);
@@ -822,6 +998,18 @@ void QueueBar::rebuildSingerRows()
         row->onSongChipClicked = [this](int singerIdx, int songIdx)
         {
             if (onSongClicked) onSongClicked(singerIdx, songIdx);
+        };
+        row->onMoveUpClicked = [this](int idx)
+        {
+            if (onMoveSingerUp) onMoveSingerUp(idx);
+        };
+        row->onMoveDownClicked = [this](int idx)
+        {
+            if (onMoveSingerDown) onMoveSingerDown(idx);
+        };
+        row->onRemoveClicked = [this](int idx)
+        {
+            if (onRemoveSinger) onRemoveSinger(idx);
         };
 
         listContent.addAndMakeVisible(row);
@@ -857,6 +1045,45 @@ void QueueBar::updateStatusLabels()
     else
         timeStr = juce::String(mins) + " min";
     totalTimeLabel->setText("Time: " + timeStr, juce::dontSendNotification);
+}
+
+//==============================================================================
+// Countdown
+//==============================================================================
+void QueueBar::startCountdown(int seconds)
+{
+    countdownSecondsLeft = seconds;
+    if (seconds <= 0)
+    {
+        if (onCountdownFinished) onCountdownFinished();
+        return;
+    }
+    countdownLabel->setText("Next in " + juce::String(countdownSecondsLeft) + "...",
+                            juce::dontSendNotification);
+    countdownLabel->setVisible(true);
+    startTimer(1000);
+}
+
+void QueueBar::stopCountdown()
+{
+    stopTimer();
+    countdownSecondsLeft = 0;
+    countdownLabel->setVisible(false);
+}
+
+void QueueBar::timerCallback()
+{
+    --countdownSecondsLeft;
+    if (countdownSecondsLeft <= 0)
+    {
+        stopCountdown();
+        if (onCountdownFinished) onCountdownFinished();
+    }
+    else
+    {
+        countdownLabel->setText("Next in " + juce::String(countdownSecondsLeft) + "...",
+                                juce::dontSendNotification);
+    }
 }
 
 //==============================================================================

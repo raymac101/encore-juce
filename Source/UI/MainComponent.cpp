@@ -259,8 +259,141 @@ void MainComponent::setupUI()
     mainArea->onSongSelectionResult = [this](const SongSelectionResult& r)
     {
         if (r.action == SongSelectionResult::Action::PlayNow)
+        {
             loadAndPlaySong(r.song, r.versionIndex, r.pitchSemitones);
-        // Play Next / Add to Queue will be wired to the queue service later.
+            return;
+        }
+
+        if (r.action == SongSelectionResult::Action::Cancelled)
+            return;
+
+        // AddToQueue and PlayNext both create a QueueItem and call appendSong.
+        const juce::String venueId = activeVenueId_;
+        if (venueId.isEmpty())
+        {
+            DBG ("[SongSelect] cannot add to queue: no active venue");
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon,
+                "No Active Venue",
+                "Please select a venue from Settings before adding songs to the queue.");
+            return;
+        }
+
+        // Default singer name when the field is left blank.
+        const juce::String singerName = r.singerName.isNotEmpty()
+                                            ? r.singerName
+                                            : "Unknown";
+
+        // Pick the selected version label, falling back to the first version
+        // or an empty string if the song has no version info.
+        juce::String versionLabel;
+        if (r.versionIndex < (int) r.song.version.size())
+            versionLabel = juce::String(r.song.version[(size_t) r.versionIndex]);
+        else if (!r.song.version.empty())
+            versionLabel = juce::String(r.song.version[0]);
+
+        // Build the QueueItem from the dialog result.  For KJ-added singers
+        // we deliberately leave profileId empty — using the host's own UID
+        // would cause a 409 Conflict on the second add, since Firestore won't
+        // create two docs at the same path.  Mobile requests, in contrast,
+        // carry the singer's real auth UID in profileId.
+        QueueItem item;
+        item.id          = juce::Uuid().toString().toStdString();
+        item.deviceId    = "local";
+        item.profileId   = "";   // empty -> Firestore auto-generates doc ID
+        item.singerName  = singerName.toStdString();
+        item.songId      = r.song.id;
+        item.songName    = r.song.songName;
+        item.songArtist  = r.song.artistName;
+        item.songVersion = versionLabel.toStdString();
+        item.duration    = r.song.durationMS / 1000;
+        item.pitch       = 1.0f + (float) r.pitchSemitones / 12.0f;
+        item.key         = r.pitchSemitones;
+        item.status      = "queued";
+        item.dateAdded   = juce::Time::getCurrentTime().toMilliseconds();
+
+        const bool playNext = (r.action == SongSelectionResult::Action::PlayNext);
+
+        DBG ("[SongSelect] " << (playNext ? "PlayNext" : "AddToQueue")
+             << " singer='" << singerName << "'"
+             << " song='" << juce::String(item.songName) << "'");
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        QueueService::getInstance().appendSong (venueId, item,
+            [safe, venueId, singerName, playNext](bool ok, juce::String err)
+            {
+                if (!ok)
+                {
+                    DBG ("[SongSelect] appendSong FAILED: " << err);
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Could Not Add Song",
+                        "Failed to add the song to the queue: " + err);
+                    return;
+                }
+
+                DBG ("[SongSelect] appendSong OK for '" << singerName << "'");
+
+                if (playNext)
+                {
+                    // Move the newly-added singer to the front of the rotation
+                    // (position 1, right after the pinned host at 0).  We do
+                    // this by bumping every non-host singer's order up by 1,
+                    // then setting the new singer's order to 1.
+                    juce::Thread::launch([venueId, singerName, safe]()
+                    {
+                        const auto collPath = "venues/" + venueId + "/queue";
+                        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+
+                        for (auto& d : docs)
+                        {
+                            auto fields   = d.getProperty("fields", juce::var());
+                            auto nameVar  = fields.getProperty("name", juce::var());
+                            juce::String docName = d.getProperty("name", "").toString();
+                            juce::String rel = docName.fromLastOccurrenceOf("/documents/", false, false);
+                            if (rel.isEmpty()) continue;
+
+                            // Parse name and order
+                            auto nameVal = nameVar.hasProperty("stringValue")
+                                               ? nameVar.getProperty("stringValue", "").toString()
+                                               : juce::String();
+                            auto orderVar = fields.getProperty("order", juce::var());
+                            int currentOrder = orderVar.hasProperty("integerValue")
+                                                   ? (int) orderVar.getProperty("integerValue", "0")
+                                                         .toString().getLargeIntValue()
+                                                   : 0;
+
+                            // Skip the host (order 0 or isHost flag)
+                            auto isHostVar = fields.getProperty("isHost", juce::var());
+                            bool isHost = isHostVar.hasProperty("booleanValue")
+                                              && (bool) isHostVar.getProperty("booleanValue", false);
+                            if (isHost || currentOrder == 0)
+                                continue;
+
+                            int newOrder = (nameVal.equalsIgnoreCase(singerName)) ? 1
+                                                                                  : currentOrder + 1;
+
+                            juce::DynamicObject::Ptr f = new juce::DynamicObject();
+                            f->setProperty("order", FirestoreClient::integerValue(newOrder));
+                            FirestoreClient::getInstance()
+                                .patchDocument(rel + "?updateMask.fieldPaths=order",
+                                               juce::var(f.get()));
+                        }
+
+                        // Reload on the message thread once all patches are done.
+                        juce::MessageManager::callAsync([venueId, safe]() mutable
+                        {
+                            if (safe != nullptr)
+                                safe->reloadQueueFromFirestore(venueId);
+                        });
+                    });
+                }
+                else
+                {
+                    if (safe != nullptr)
+                        safe->reloadQueueFromFirestore(venueId);
+                }
+            });
     };
 
     // Push settings-page edits back to Firestore. On success the queue bar
@@ -350,30 +483,101 @@ void MainComponent::setupUI()
             DBG("Play singer: no songs in queue");
             return;
         }
-        const auto& first = singer.songs.front();
+        const auto firstSong = singer.songs.front();
 
-        // Set the now-singing card and move the singer to the top of the
-        // queue list (just below the host). The visual list moves; rotation
-        // bookkeeping inside QueueBar::moveSinger renumbers `rotationOrder`
-        // so the round borders follow.
+        // 1. Show the singer on the now-singing card. Also store a local
+        //    copy as the source of truth — Firestore has no concept of
+        //    "now playing" on this side, so the watcher poll would
+        //    otherwise clear the card on its next tick.
         queueBar->setNowPlaying(singer);
+        localNowPlaying_    = singer;
+        hasLocalNowPlaying_ = true;
 
-        const bool hasHost = ! list.empty() && list.front().isHost;
-        const int targetIndex = hasHost ? 1 : 0;
-        if (singerIndex != targetIndex)
+        // 2. Persist removal of this song from the singer's queue. Locally
+        //    we rebuild the singer list with the song stripped + the singer
+        //    moved to the bottom of the queue (advancing the round). Mirrors
+        //    Angular's `moveNextSingerToNowPlaying` -> `moveSingerToEnd`.
+        const auto venueId = activeVenueId_;
+        if (! venueId.isEmpty())
         {
-            queueBar->moveSinger(singerIndex, targetIndex);
-            if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
+            QueueService::getInstance().removeSong (venueId, firstSong, nullptr);
         }
 
-        // Look the song up in the loaded library by id, then fall back to
-        // a name+artist match. If the library hasn't loaded yet we just
-        // can't play it — the now-singing card is still updated.
+        // 3. Local rotation/strikes logic — see Angular `moveSingerToEnd`
+        //    in queue-bar.component.ts.
+        std::vector<Singers> updated = list;
+        const bool hasHost = ! updated.empty() && updated.front().isHost;
+        if (singerIndex < (int) updated.size())
+        {
+            // Pop the song that's now playing.
+            if (! updated[(size_t) singerIndex].songs.empty())
+            {
+                updated[(size_t) singerIndex].songs.erase(
+                    updated[(size_t) singerIndex].songs.begin());
+                updated[(size_t) singerIndex].songsPerformed += 1;
+            }
+
+            auto& s = updated[(size_t) singerIndex];
+
+            bool moveToEnd = true;
+            bool removeSinger = false;
+            if (s.songs.empty())
+            {
+                // No more songs — apply a strike if the venue allows them.
+                if (activeVenueNumStrikes_ > 0 && s.strikes < activeVenueNumStrikes_)
+                {
+                    s.strikes += 1;
+                    moveToEnd = true;
+                }
+                else
+                {
+                    // Out of strikes (or strikes disabled) — drop the singer.
+                    moveToEnd  = false;
+                    removeSinger = true;
+                }
+            }
+
+            if (removeSinger)
+            {
+                const juce::String singerNameToRemove (s.name);
+                updated.erase (updated.begin() + singerIndex);
+                if (! venueId.isEmpty())
+                    QueueService::getInstance().deleteSinger (venueId, singerNameToRemove, nullptr);
+            }
+            else if (moveToEnd)
+            {
+                auto moved = updated[(size_t) singerIndex];
+                updated.erase (updated.begin() + singerIndex);
+                updated.push_back (moved);
+            }
+
+            // Re-number `order` and (non-host) `rotationOrder` so the
+            // round-leader / round-tail borders track the new positions.
+            int rot = 0;
+            for (size_t i = 0; i < updated.size(); ++i)
+            {
+                updated[i].order = (int) i;
+                if (! updated[i].isHost)
+                    updated[i].rotationOrder = rot++;
+            }
+        }
+
+        queueBar->setSingers(updated);
+
+        // 4. Persist the new order/rotation positions to Firestore (skip the
+        //    pinned host). Re-uses the `onReorder` callback which already
+        //    knows how to PATCH the queue collection.
+        if (queueBar->onReorder)
+            queueBar->onReorder (singerIndex, hasHost ? 1 : 0);
+
+        // 5. Resolve the song in the local library and load it WITHOUT
+        //    auto-starting playback. The host presses play on the bottom
+        //    bar transport or the now-playing avatar to start the track.
         if (mainArea == nullptr) return;
         const auto& library = mainArea->getLibrarySongs();
-        const juce::String wantId     = juce::String(first.songId);
-        const juce::String wantName   = juce::String(first.songName)  .toLowerCase();
-        const juce::String wantArtist = juce::String(first.songArtist).toLowerCase();
+        const juce::String wantId     = juce::String(firstSong.songId);
+        const juce::String wantName   = juce::String(firstSong.songName)  .toLowerCase();
+        const juce::String wantArtist = juce::String(firstSong.songArtist).toLowerCase();
 
         const CdgSong* match = nullptr;
         for (const auto& s : library)
@@ -391,21 +595,27 @@ void MainComponent::setupUI()
         }
         if (match == nullptr)
         {
-            DBG("Play singer: no library match for '" << juce::String(first.songName)
-                << "' by '" << juce::String(first.songArtist) << "'");
+            DBG("Play singer: no library match for '" << juce::String(firstSong.songName)
+                << "' by '" << juce::String(firstSong.songArtist) << "'");
             return;
         }
 
-        const int pitchSemis = juce::roundToInt(first.pitch);
-        loadAndPlaySong(*match, /*versionIndex*/ 0, pitchSemis);
+        const int pitchSemis = juce::roundToInt(firstSong.pitch);
+        loadAndPlaySong(*match, /*versionIndex*/ 0, pitchSemis, /*autoStart*/ false);
     };
 
     queueBar->onPlayCurrent = [this]() {
         DBG("QueueBar: Play current singer");
+        if (audioEngine) audioEngine->play();
+        if (bottomBar)   bottomBar->setPlaying (true);
+        if (queueBar)    queueBar->setPlaying (true);
     };
 
     queueBar->onPauseCurrent = [this]() {
         DBG("QueueBar: Pause current singer");
+        if (audioEngine) audioEngine->pause();
+        if (bottomBar)   bottomBar->setPlaying (false);
+        if (queueBar)    queueBar->setPlaying (false);
     };
 
     queueBar->onClearQueue = [this]() {
@@ -477,14 +687,159 @@ void MainComponent::setupUI()
             });
     };
 
-    // Populate with sample data so the queue is visible on launch
+    // ── Remove singer ──────────────────────────────────────────────────────────
+    queueBar->onRemoveSinger = [this](int singerIndex)
     {
-        // Queue starts empty until a venue is loaded; setVenueId() fetches
-        // the live queue from Firestore at venues/<venueId>/queue and
-        // populates the bar via QueueService.
+        if (queueBar == nullptr) return;
+        const auto& singers = queueBar->getSingers();
+        if (singerIndex < 0 || singerIndex >= (int) singers.size()) return;
+        if (singers[(size_t) singerIndex].isHost) return;
+
+        const juce::String docId   = juce::String(singers[(size_t) singerIndex].id);
+        const juce::String venueId = activeVenueId_;
+
+        queueBar->removeSinger(singerIndex);
+
+        if (venueId.isEmpty() || docId.isEmpty()) return;
+        juce::Thread::launch([venueId, docId]()
+        {
+            QueueService::getInstance().deleteSinger(
+                venueId, docId, [](bool, const juce::String&) {});
+        });
+    };
+
+    // ── Move up / down (persist via existing onReorder logic) ─────────────────
+    queueBar->onMoveSingerUp = [this](int singerIndex)
+    {
+        if (queueBar == nullptr) return;
+        int targetIndex = singerIndex - 1;
+        // Don't displace a pinned host
+        if (!queueBar->getSingers().empty() && queueBar->getSingers().front().isHost)
+            targetIndex = juce::jmax(targetIndex, 1);
+        if (targetIndex < 0 || targetIndex >= singerIndex) return;
+        queueBar->moveSinger(singerIndex, targetIndex);
+        if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
+    };
+
+    queueBar->onMoveSingerDown = [this](int singerIndex)
+    {
+        if (queueBar == nullptr) return;
+        int targetIndex = singerIndex + 1;
+        if (targetIndex >= (int) queueBar->getSingers().size()) return;
+        queueBar->moveSinger(singerIndex, targetIndex);
+        if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
+    };
+
+    // ── Return now-playing to queue ────────────────────────────────────────────
+    // Shared helper: re-insert the current singer at the given position and
+    // clear the now-playing card, without stopping the audio (the host may
+    // want to fade out manually).
+    auto returnCurrentToQueue = [this](bool toFront)
+    {
+        if (queueBar == nullptr) return;
+        Singers cs = localNowPlaying_;
+
+        if (cs.id.empty()) return;
+
         queueBar->clearNowPlaying();
-        queueBar->setSingers({});
-    }
+        if (audioEngine) audioEngine->stop();
+
+        const auto venueId = activeVenueId_;
+        const juce::String docId = juce::String(cs.id);
+
+        // Re-insert locally at front or back
+        auto singers = queueBar->getSingers();
+        if (toFront)
+            singers.insert(singers.begin() + (singers.empty() || !singers.front().isHost ? 0 : 1), cs);
+        else
+            singers.push_back(cs);
+        queueBar->setSingers(singers);
+
+        // Persist new order
+        if (queueBar->onReorder)
+        {
+            for (int i = 0; i < (int) singers.size(); ++i)
+                if (singers[(size_t) i].id == cs.id)
+                    { queueBar->onReorder(0, i); break; }
+        }
+    };
+
+    queueBar->onReturnCurrentToQueueNext = [returnCurrentToQueue]()  { returnCurrentToQueue(true);  };
+    queueBar->onReturnCurrentToQueueEnd  = [returnCurrentToQueue]()  { returnCurrentToQueue(false); };
+
+    // ── Skip current singer ────────────────────────────────────────────────────
+    queueBar->onSkipCurrentSinger = [this]()
+    {
+        if (audioEngine) audioEngine->stop();
+        if (queueBar)    queueBar->clearNowPlaying();
+        if (queueBar)    queueBar->setPlaying(false);
+    };
+
+    // ── Add singer manually (KJ action) ───────────────────────────────────────
+    // Shows an alert to get the singer name, then adds a placeholder row
+    // locally with isNewlyAdded=true. The QueueService watcher will merge
+    // the real document once the KJ uses the search page to add a song for
+    // them (appendSong creates the singer doc automatically).
+    queueBar->onAddSinger = [this]()
+    {
+        auto* alertWindow = new juce::AlertWindow("Add Singer",
+                                                   "Enter the singer's name:",
+                                                   juce::MessageBoxIconType::QuestionIcon);
+        alertWindow->addTextEditor("singerName", "", "Name:");
+        alertWindow->addButton("Add",    1, juce::KeyPress(juce::KeyPress::returnKey));
+        alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+        alertWindow->enterModalState(true,
+            juce::ModalCallbackFunction::create(
+                [this, alertWindow](int result)
+                {
+                    if (result == 1)
+                    {
+                        juce::String name = alertWindow->getTextEditorContents("singerName").trim();
+                        if (name.isNotEmpty() && queueBar != nullptr)
+                        {
+                            Singers newSinger;
+                            newSinger.id           = ("local-" + juce::Uuid().toString()).toStdString();
+                            newSinger.name         = name.toStdString();
+                            newSinger.deviceId     = "local";
+                            newSinger.isNewlyAdded = true;
+                            newSinger.order        = (int) queueBar->getSingers().size();
+                            queueBar->addSinger(newSinger);
+                        }
+                    }
+                    delete alertWindow;
+                }),
+            true);
+    };
+
+    // ── Song-finished → auto-advance ──────────────────────────────────────────
+    audioEngine->onSongFinished = [this]()
+    {
+        if (queueBar == nullptr) return;
+        if (queueBar->isAutoPlayEnabled())
+        {
+            int delay = queueBar->getDelaySec();
+            if (delay > 0)
+                queueBar->startCountdown(delay);
+            else if (queueBar->onCountdownFinished)
+                queueBar->onCountdownFinished();
+        }
+    };
+
+    queueBar->onCountdownFinished = [this]()
+    {
+        if (queueBar == nullptr) return;
+        // Advance to the next singer in the rotation (index 0 after now-playing
+        // is cleared is the next-up singer pushed to front during setNowPlaying)
+        if (!queueBar->getSingers().empty())
+            if (queueBar->onPlaySinger) queueBar->onPlaySinger(0);
+    };
+
+    // Queue starts empty until a venue is loaded; setVenueId() fetches
+    // the live queue from Firestore at venues/<venueId>/queue and
+    // populates the bar via QueueService.
+    queueBar->clearNowPlaying();
+    queueBar->setSingers({});
 
     DBG("QueueBar created (waiting on venue queue load)");
 
@@ -1158,7 +1513,7 @@ void MainComponent::setLargeTextMode(bool enabled)
 //==============================================================================
 // Song playback
 //==============================================================================
-void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones)
+void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones, bool autoStart)
 {
     if (! audioEngine)
         return;
@@ -1171,7 +1526,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     // Defer the actual load work to the next message-loop tick so the overlay
     // has a chance to paint before we block the UI thread on file I/O.
     juce::Component::SafePointer<MainComponent> self(this);
-    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones]()
+    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart]()
     {
         if (! self || ! self->audioEngine)
             return;
@@ -1267,10 +1622,12 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         {
             self->bottomBar->setDurationSeconds (self->currentSongDuration);
             self->bottomBar->setProgress (0.0f);
-            self->bottomBar->setPlaying (true);
+            self->bottomBar->setPlaying (autoStart);
             self->bottomBar->setPitch (pitchSemitones);
             self->bottomBar->setWaveformSamples ({}); // No waveform for video.
         }
+
+        if (self->queueBar) self->queueBar->setPlaying (autoStart);
 
         self->hideLoadingOverlay();
         return;
@@ -1336,7 +1693,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     {
         self->bottomBar->setDurationSeconds(self->currentSongDuration);
         self->bottomBar->setProgress(0.0f);
-        self->bottomBar->setPlaying(true);
+        self->bottomBar->setPlaying(autoStart);
         self->bottomBar->setPitch(pitchSemitones);
 
         // Build a real waveform asynchronously.
@@ -1346,7 +1703,10 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         });
     }
 
-    self->audioEngine->play();
+    if (self->queueBar) self->queueBar->setPlaying (autoStart);
+
+    if (autoStart)
+        self->audioEngine->play();
     self->hideLoadingOverlay();
     });
 }
@@ -1462,6 +1822,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             const juce::String code (v.code);
             const juce::String logoUrl (v.logoUrl);
 
+            safe->activeVenueNumStrikes_ = v.numStrikes;
+
             if (safe->queueBar != nullptr)
                 safe->queueBar->setVenueInfo (name, code);
 
@@ -1525,9 +1887,19 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     }
 
                     if (snap.hasNowPlaying)
+                    {
                         safe->queueBar->setNowPlaying (snap.nowPlaying);
+                        safe->localNowPlaying_    = snap.nowPlaying;
+                        safe->hasLocalNowPlaying_ = true;
+                    }
+                    else if (safe->hasLocalNowPlaying_)
+                    {
+                        safe->queueBar->setNowPlaying (safe->localNowPlaying_);
+                    }
                     else
+                    {
                         safe->queueBar->clearNowPlaying();
+                    }
 
                     // Prepend the signed-in host as a permanent first entry
                     // in the queue. The host has no songs of their own — the
@@ -1589,8 +1961,20 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
             if (safe == nullptr || safe->queueBar == nullptr)
                 return;
 
-            if (snap.hasNowPlaying) safe->queueBar->setNowPlaying (snap.nowPlaying);
-            else                    safe->queueBar->clearNowPlaying();
+            if (snap.hasNowPlaying)
+            {
+                safe->queueBar->setNowPlaying (snap.nowPlaying);
+                safe->localNowPlaying_    = snap.nowPlaying;
+                safe->hasLocalNowPlaying_ = true;
+            }
+            else if (safe->hasLocalNowPlaying_)
+            {
+                safe->queueBar->setNowPlaying (safe->localNowPlaying_);
+            }
+            else
+            {
+                safe->queueBar->clearNowPlaying();
+            }
 
             std::vector<Singers> withHost;
             if (HostService::getInstance().hasCurrent())
@@ -1624,8 +2008,20 @@ void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
             if (safe == nullptr || safe->queueBar == nullptr || ! ok)
                 return;
 
-            if (snap.hasNowPlaying) safe->queueBar->setNowPlaying (snap.nowPlaying);
-            else                    safe->queueBar->clearNowPlaying();
+            if (snap.hasNowPlaying)
+            {
+                safe->queueBar->setNowPlaying (snap.nowPlaying);
+                safe->localNowPlaying_    = snap.nowPlaying;
+                safe->hasLocalNowPlaying_ = true;
+            }
+            else if (safe->hasLocalNowPlaying_)
+            {
+                safe->queueBar->setNowPlaying (safe->localNowPlaying_);
+            }
+            else
+            {
+                safe->queueBar->clearNowPlaying();
+            }
 
             std::vector<Singers> withHost;
             if (HostService::getInstance().hasCurrent())
@@ -1725,13 +2121,36 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
         }
     }
 
-    // Approved — desktop test devices flip straight to "approved", real
-    // mobile clients get "approvedpending" so the phone can confirm before
-    // we move it into the queue.
-    const bool isMobileTest = juce::String(item.deviceId).equalsIgnoreCase("mobiletest");
-    const juce::String newStatus = isMobileTest ? "approved" : "approvedpending";
-    DBG ("[Pipeline] new -> " << newStatus << ": " << juce::String(item.songName));
-    RequestService::getInstance().patchStatus (venueId, juce::String(item.id), newStatus);
+    // All checks passed — add to queue now and mark the /requested doc
+    // "approved" so the mobile app receives its confirmation notification.
+    QueueItem approved = item;
+    approved.status = "approved";
+
+    DBG ("[Pipeline] new -> approved -> enqueue: " << juce::String(item.songName)
+         << " (singer=" << juce::String(item.singerName) << ")");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    QueueService::getInstance().appendSong (venueId, approved,
+        [safe, id = juce::String(item.id), venueId](bool ok, juce::String err)
+        {
+            if (ok)
+            {
+                // Delete the /requested doc so the RequestService poll does NOT
+                // see it flip to "approved" and fire onApprovedRequest again
+                // (which would call appendSong a second time and create a
+                // duplicate).  The mobile app confirms approval by watching the
+                // queue collection directly.
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            }
+            else
+            {
+                DBG ("[Pipeline] appendSong failed: " << err);
+                RequestService::getInstance().patchStatus (venueId, id,
+                    "rejected", "Server error \xe2\x80\x94 please try again.");
+            }
+        });
 }
 
 void MainComponent::onIncomingApprovedRequest (const QueueItem& item)

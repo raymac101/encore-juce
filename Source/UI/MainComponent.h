@@ -19,6 +19,7 @@
 #include "../Services/ImageCache.h"
 #include "../Models/CdgSong.h"
 #include "../Models/QueueItem.h"
+#include "../Models/Singers.h"
 #include "TopBar.h"
 #include "BottomBar.h"
 #include "NavBar.h"
@@ -122,8 +123,12 @@ private:
         found. */
     juce::File resolveCdgFileFor (const juce::File& audioFile) const;
 
-    /** Begin playback of the chosen song (PlayNow action). */
-    void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones);
+    /** Load (and optionally start playing) the chosen song. When `autoStart`
+        is false the song is loaded into the audio engine and the top/bottom
+        bars are updated, but playback is left paused — used by the queue
+        flow where the host presses play on the now-singing avatar (or the
+        bottom-bar transport) to actually start the track. */
+    void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones, bool autoStart = true);
 
     /** Show / hide a full-window "Loading song..." overlay. */
     void showLoadingOverlay(const juce::String& message);
@@ -158,6 +163,20 @@ private:
     bool isConnectedToFirebase = false;
 
     juce::String activeVenueId_;
+
+    // Cached venue config — populated from VenueService::loadVenue and used
+    // by the rotation/strikes logic when a singer is moved to now-singing.
+    int activeVenueNumStrikes_ = 0;
+
+    // Local "now singing" override. We mirror the Angular behaviour where
+    // the now-playing card is purely UI state on the host machine — there
+    // is no Firestore field for it. The QueueService watcher polls
+    // /queue and, finding no singer with `currentlyUp`, would otherwise
+    // clear the card on every tick. We therefore retain the card we set
+    // when the host pressed Play and re-apply it inside the watcher /
+    // loadQueue callbacks until the host explicitly clears or replaces it.
+    Singers localNowPlaying_;
+    bool    hasLocalNowPlaying_ = false;
     
     //==============================================================================
     // UI Setup

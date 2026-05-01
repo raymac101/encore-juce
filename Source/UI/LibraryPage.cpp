@@ -130,6 +130,12 @@ LibraryPage::LibraryPage()
     makeStatLabel(statsGroupsLabel_);
 
     //--------------------------------------------------------------------------
+    // Open SQLite index and give the scanner a pointer to it so scan results
+    // are persisted to the database (and loaded from it on startup).
+    if (songDb_.open())
+        scanner_.setSongDatabase(&songDb_);
+
+    //--------------------------------------------------------------------------
     // Wire up scanner callbacks
     scanner_.onProgress = [this](int cur, int tot, juce::String song) {
         // Already on message thread (dispatched by LibraryScanner)
@@ -174,6 +180,8 @@ LibraryPage::~LibraryPage()
 {
     stopTimer();
     scanner_.stopScan();
+    scanner_.setSongDatabase(nullptr);
+    songDb_.close();
 }
 
 //==============================================================================

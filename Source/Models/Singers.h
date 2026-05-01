@@ -44,6 +44,11 @@ struct Singers
     // The host is always the first entry in the queue, can never be removed,
     // and is rendered with a red border in the QueueBar.
     bool isHost = false;
+
+    // Transient UI flag — set true when a singer is first added to the queue
+    // so the SingerRow can render a green "newly added" highlight. Cleared
+    // after the first repaint cycle (or after onSongbookChanged fires).
+    bool isNewlyAdded = false;
     
     // Personal preferences
     std::string preferredLanguage = "en_US";

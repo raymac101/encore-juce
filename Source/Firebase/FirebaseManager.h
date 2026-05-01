@@ -2,10 +2,25 @@
   ==============================================================================
 
     FirebaseManager.h
-    Created: 15 Apr 2026 7:18:45pm
-    Author:  GitHub Copilot
 
-    Firebase integration manager for real-time karaoke data synchronization
+    Central coordinator for all Firebase operations.
+
+    Architecture
+    ────────────
+    • FirestoreClient  — REST one-shots (login, venue load, queue writes).
+                         Already fully implemented; FirebaseManager does NOT
+                         duplicate those APIs.
+    • Firebase C++ SDK — real-time snapshot listeners for the queue and venue
+                         documents.  Requires:
+                           macOS:   ${FIREBASE_SDK_ROOT}/libs/darwin/
+                           Windows: ${FIREBASE_SDK_ROOT}/libs/windows/
+                         (see EncoreJUCE.jucer for link flags)
+
+    Thread model
+    ────────────
+    Firebase SDK callbacks arrive on an internal Firebase thread.
+    FirebaseManager marshals every callback onto the JUCE message thread before
+    notifying application code, so all callbacks are safe to use for UI updates.
 
   ==============================================================================
 */
@@ -17,202 +32,162 @@
 #include "../Models/QueueItem.h"
 #include "../Models/Singers.h"
 
+// Forward-declare SDK types so we don't drag the full headers into every TU.
+namespace firebase        { class App; }
+namespace firebase::auth  { class Auth; }
+namespace firebase::firestore {
+    class Firestore;
+    class ListenerRegistration;
+}
+
 //==============================================================================
-/**
-    Firebase manager for real-time synchronization of karaoke session data.
-    Handles authentication, Firestore operations, and real-time listeners.
-*/
-class FirebaseManager : public juce::Thread
+class FirebaseManager
 {
 public:
-    //==============================================================================
-    // Connection Status
-    enum class ConnectionStatus
-    {
-        Disconnected,
-        Connecting,
-        Connected,
-        Error,
-        Reconnecting
-    };
-    
-    //==============================================================================
-    // Callback Types
-    using ConnectionCallback = std::function<void(ConnectionStatus, const juce::String&)>;
-    using QueueUpdateCallback = std::function<void(const std::vector<QueueItem>&)>;
-    using SingerUpdateCallback = std::function<void(const std::vector<Singer>&)>;
-    using VenueUpdateCallback = std::function<void(const VenueItem&)>;
-    using ErrorCallback = std::function<void(const juce::String&, const juce::String&)>;
-    
-    //==============================================================================
-    FirebaseManager();
-    ~FirebaseManager() override;
-    
-    //==============================================================================
-    // Connection Management
-    void initialize(const juce::String& apiKey, const juce::String& projectId);
+    //==========================================================================
+    enum class ConnectionStatus { Disconnected, Connecting, Connected, Error };
+
+    //==========================================================================
+    // Callback types — all invoked on the JUCE message thread.
+    using ConnectionCallback  = std::function<void(ConnectionStatus, juce::String msg)>;
+    using QueueCallback       = std::function<void(std::vector<Singers>)>;
+    using VenueCallback       = std::function<void(VenueItem)>;
+    using ErrorCallback       = std::function<void(juce::String context, juce::String msg)>;
+
+    //==========================================================================
+    static FirebaseManager& getInstance();
+
+    //==========================================================================
+    // Lifecycle
+
+    /** Initialise the Firebase C++ SDK with the compile-time credentials from
+        FirebaseConfig.h.  Must be called once before any other method, on the
+        message thread. */
+    void initialise();
     void shutdown();
-    bool isConnected() const { return connectionStatus == ConnectionStatus::Connected; }
-    ConnectionStatus getConnectionStatus() const { return connectionStatus; }
-    
-    //==============================================================================
+
+    bool isInitialised()  const noexcept { return initialised_.load(); }
+    bool isAuthenticated() const noexcept { return authenticated_.load(); }
+
+    //==========================================================================
     // Authentication
-    void signInAnonymously();
-    void signInWithVenueCode(const juce::String& venueCode, const juce::String& password = {});
+
+    struct AuthResult
+    {
+        bool         ok           = false;
+        bool         isNewAccount = false;
+        juce::String userId;
+        juce::String email;
+        juce::String errorCode;
+        juce::String errorMessage;
+    };
+
+    using AuthCallback = std::function<void(AuthResult)>;
+
+    /** Sign in with email + password.  Runs on a background thread; callback
+        fires on the message thread. */
+    void signInWithEmail(const juce::String& email,
+                         const juce::String& password,
+                         AuthCallback onDone);
+
+    /** Sign up a new account.  Same thread model. */
+    void signUpWithEmail(const juce::String& email,
+                         const juce::String& password,
+                         AuthCallback onDone);
+
+    /** Opens the system browser for OAuth (Google).  The local redirect
+        listener is not yet wired; returns an error with a user-visible message
+        directing them to use email/password instead. */
+    void signInWithGoogle(AuthCallback onDone);
+
     void signOut();
-    bool isAuthenticated() const { return authenticated; }
-    juce::String getCurrentUserId() const { return currentUserId; }
-    
-    //==============================================================================
-    // Venue Management
-    void setActiveVenue(const juce::String& venueId);
-    void createVenue(const VenueItem& venue);
-    void updateVenue(const VenueItem& venue);
-    void deleteVenue(const juce::String& venueId);
-    
-    juce::String getActiveVenueId() const { return activeVenueId; }
-    VenueItem getCurrentVenue() const { return currentVenue; }
-    
-    //==============================================================================
-    // Queue Management
-    void addSongToQueue(const QueueItem& queueItem);
-    void removeSongFromQueue(const juce::String& queueItemId);
-    void updateQueueItem(const QueueItem& queueItem);
-    void moveSongInQueue(const juce::String& queueItemId, int newPosition);
-    void clearQueue();
-    
-    std::vector<QueueItem> getCurrentQueue() const;
-    
-    //==============================================================================
-    // Singer Management
-    void addSinger(const Singer& singer);
-    void updateSinger(const Singer& singer);
-    void removeSinger(const juce::String& singerId);
-    void setSingerActive(const juce::String& singerId, bool active);
-    
-    std::vector<Singer> getCurrentSingers() const;
-    
-    //==============================================================================
-    // Real-time Listeners
-    void enableQueueUpdates(bool enabled);
-    void enableSingerUpdates(bool enabled);
-    void enableVenueUpdates(bool enabled);
-    
-    //==============================================================================
-    // Callback Registration
-    void setConnectionCallback(ConnectionCallback callback);
-    void setQueueUpdateCallback(QueueUpdateCallback callback);
-    void setSingerUpdateCallback(SingerUpdateCallback callback);
-    void setVenueUpdateCallback(VenueUpdateCallback callback);
-    void setErrorCallback(ErrorCallback callback);
-    
-    //==============================================================================
-    // Offline Mode
-    void enableOfflineMode(bool enabled);
-    bool isOfflineModeEnabled() const { return offlineModeEnabled; }
-    void syncOfflineData(); // Sync when connection restored
-    
-    //==============================================================================
-    // Statistics and Analytics
-    void logEvent(const juce::String& eventName, const juce::var& parameters = {});
-    void trackSongPlay(const juce::String& songId, const juce::String& artist, 
-                      const juce::String& title);
-    void trackUserAction(const juce::String& action, const juce::var& data = {});
-    
-    //==============================================================================
-    // Data Caching
-    void setCacheEnabled(bool enabled);
-    void clearCache();
-    size_t getCacheSize() const;
-    
-    //==============================================================================
-    // Thread Interface
-    void run() override;
+
+    juce::String getCurrentUserId()   const;
+    juce::String getCurrentUserEmail() const;
+
+    //==========================================================================
+    // Venue
+
+    /** Load venues/<venueId> once (one-shot, not a listener).
+        Caches the result internally; call getCurrentVenue() afterwards. */
+    void loadVenue(const juce::String& venueId,
+                   std::function<void(bool ok, VenueItem, juce::String error)> onDone);
+
+    VenueItem    getCurrentVenue()   const;
+    juce::String getCurrentVenueId() const;
+
+    //==========================================================================
+    // Real-time listeners
+
+    /** Start a Firestore snapshot listener on
+        venues/<venueId>/queue.
+        The listener fires immediately with the current data, then again on
+        every server-side change.  Implicitly stops any previous listener. */
+    void startQueueListener(const juce::String& venueId, QueueCallback onChange);
+
+    /** Start a Firestore snapshot listener on venues/<venueId>.
+        Same semantics as startQueueListener. */
+    void startVenueListener(const juce::String& venueId, VenueCallback onChange);
+
+    /** Stop the queue listener (if running). */
+    void stopQueueListener();
+
+    /** Stop the venue listener (if running). */
+    void stopVenueListener();
+
+    //==========================================================================
+    // Queue writes  (async, callback on message thread)
+
+    using WriteCallback = std::function<void(bool ok, juce::String error)>;
+
+    void addSongToQueue    (const juce::String& venueId, const QueueItem& item,   WriteCallback = nullptr);
+    void removeSongFromQueue(const juce::String& venueId, const QueueItem& item,  WriteCallback = nullptr);
+    void updateQueueItem   (const juce::String& venueId, const QueueItem& item,   WriteCallback = nullptr);
+    void deleteSinger      (const juce::String& venueId, const juce::String& singerName, WriteCallback = nullptr);
+
+    //==========================================================================
+    // Callback registration
+
+    void setConnectionCallback(ConnectionCallback cb) { connectionCb_ = std::move(cb); }
+    void setErrorCallback(ErrorCallback cb)           { errorCb_       = std::move(cb); }
 
 private:
-    //==============================================================================
-    // Connection State
-    std::atomic<ConnectionStatus> connectionStatus { ConnectionStatus::Disconnected };
-    std::atomic<bool> authenticated { false };
-    std::atomic<bool> initialized { false };
-    
-    juce::String apiKey;
-    juce::String projectId;
-    juce::String currentUserId;
-    juce::String activeVenueId;
-    
-    //==============================================================================
-    // Current Data Cache
-    VenueItem currentVenue;
-    std::vector<QueueItem> currentQueue;
-    std::vector<Singer> currentSingers;
-    mutable juce::ReadWriteLock dataLock;
-    
-    //==============================================================================
-    // Callbacks
-    ConnectionCallback connectionCallback;
-    QueueUpdateCallback queueUpdateCallback;
-    SingerUpdateCallback singerUpdateCallback;
-    VenueUpdateCallback venueUpdateCallback;
-    ErrorCallback errorCallback;
-    
-    //==============================================================================
-    // Real-time Listener State
-    std::atomic<bool> queueListenerEnabled { false };
-    std::atomic<bool> singerListenerEnabled { false };
-    std::atomic<bool> venueListenerEnabled { false };
-    
-    //==============================================================================
-    // Offline Support
-    std::atomic<bool> offlineModeEnabled { false };
-    std::queue<juce::String> pendingOperations; // JSON queue of operations to sync
-    juce::File offlineCacheFile;
-    
-    //==============================================================================
-    // Network Management
-    juce::CriticalSection networkLock;
-    std::unique_ptr<juce::WebInputStream> activeConnection;
-    juce::Time lastHeartbeat;
-    int reconnectAttempts = 0;
-    static const int maxReconnectAttempts = 5;
-    
-    //==============================================================================
-    // Internal Methods
-    void updateConnectionStatus(ConnectionStatus status, const juce::String& message = {});
-    void handleConnectionError(const juce::String& error);
-    void attemptReconnection();
-    
-    // Data Operations
-    void fetchInitialData();
-    void setupRealtimeListeners();
-    void handleQueueSnapshot(const juce::var& data);
-    void handleSingerSnapshot(const juce::var& data);
-    void handleVenueSnapshot(const juce::var& data);
-    
-    // Network Requests
-    bool sendFirestoreRequest(const juce::String& method, const juce::String& path, 
-                             const juce::var& data = {});
-    juce::var performHttpRequest(const juce::URL& url, const juce::String& method,
-                                const juce::String& postData = {});
-    
-    // Offline Cache Management
-    void saveToOfflineCache();
-    void loadFromOfflineCache();
-    void queueOfflineOperation(const juce::String& operation);
-    void processOfflineQueue();
-    
-    // Authentication Helpers
-    void handleAuthenticationResponse(const juce::var& response);
-    juce::String generateAuthToken() const;
-    
-    // Data Validation
-    bool validateVenueData(const VenueItem& venue) const;
-    bool validateQueueItem(const QueueItem& item) const;
-    bool validateSinger(const Singer& singer) const;
-    
-    // Heartbeat and Connection Monitoring
-    void sendHeartbeat();
-    void checkConnectionHealth();
-    
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FirebaseManager)
+    FirebaseManager() = default;
+    ~FirebaseManager();
+
+    //==========================================================================
+    void notifyConnection(ConnectionStatus s, const juce::String& msg = {});
+    void notifyError(const juce::String& ctx, const juce::String& msg);
+
+    // Parse a Firestore collection snapshot into grouped Singers.
+    static std::vector<Singers> parseSingers(const void* querySnapshotPtr);
+
+    // Parse a Firestore document snapshot into a VenueItem.
+    static VenueItem parseVenue(const void* documentSnapshotPtr);
+
+    //==========================================================================
+    // SDK object ownership — raw pointers because the SDK manages lifetime
+    // through its own factory functions.
+    firebase::App*                         app_       = nullptr;
+    firebase::auth::Auth*                  auth_      = nullptr;
+    firebase::firestore::Firestore*        db_        = nullptr;
+
+    // Listener registrations — must be removed before db_ is destroyed.
+    std::unique_ptr<firebase::firestore::ListenerRegistration> queueReg_;
+    std::unique_ptr<firebase::firestore::ListenerRegistration> venueReg_;
+
+    //==========================================================================
+    std::atomic<bool> initialised_   { false };
+    std::atomic<bool> authenticated_ { false };
+
+    mutable juce::CriticalSection lock_;
+    VenueItem    currentVenue_;
+    juce::String currentVenueId_;
+    juce::String currentUserId_;
+    juce::String currentUserEmail_;
+
+    ConnectionCallback connectionCb_;
+    ErrorCallback      errorCb_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FirebaseManager)
 };

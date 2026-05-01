@@ -27,6 +27,7 @@
 #include <functional>
 #include <map>
 #include "../Models/CdgSong.h"
+#include "SongDatabase.h"
 
 //==============================================================================
 class LibraryScanner : public juce::Thread
@@ -62,6 +63,13 @@ public:
 
     /** Stop any running scan (waits up to 3 s for the thread to exit). */
     void stopScan();
+
+    //==========================================================================
+    // SQLite database (optional — set before first scan)
+    //
+    // When set, scan results are written to (and loaded from) the SQLite index
+    // instead of songbook.json.  The JSON file is kept as a migration fallback.
+    void setSongDatabase(SongDatabase* db) noexcept { songDb_ = db; }
 
     //==========================================================================
     // Songbook persistence
@@ -156,6 +164,7 @@ private:
     juce::File           scanRoot_;
     bool                 appendMode_   = false;
     std::vector<CdgSong> existing_;
+    SongDatabase*        songDb_       = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)
 };

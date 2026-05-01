@@ -383,11 +383,19 @@ void QueueService::appendSong(const juce::String& venueId,
 
         std::vector<QueueItem> initialSongs { first };
 
+        // Determine the document ID to use for this singer's queue doc.
+        // Use profileId (the singer's Auth UID, supplied by mobile requests)
+        // when available, otherwise let Firestore auto-generate.  Falling
+        // back to the host's own UID would 409-Conflict on the second
+        // KJ-added singer, so we deliberately don't do that.
+        const juce::String docId = juce::String(item.profileId).trim();
+
         juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+        fields->setProperty("id",             FirestoreClient::stringValue(docId));
         fields->setProperty("name",           FirestoreClient::stringValue(juce::String(item.singerName)));
         fields->setProperty("avatar",         FirestoreClient::stringValue(juce::String(item.singerAvatar)));
         fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String(item.deviceId)));
-        fields->setProperty("profileId",      FirestoreClient::stringValue(juce::String(item.profileId)));
+        fields->setProperty("profileId",      FirestoreClient::stringValue(docId));
         fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
         fields->setProperty("status",         FirestoreClient::stringValue("queued"));
         fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
@@ -397,7 +405,7 @@ void QueueService::appendSong(const juce::String& venueId,
         fields->setProperty("songs",          songsArrayValue(initialSongs));
 
         auto resp = FirestoreClient::getInstance()
-                        .createDocument(collPath, juce::var(fields.get()));
+                        .createDocument(collPath, juce::var(fields.get()), docId);
         const bool ok = resp.isObject();
 
         DBG ("[Queue] appendSong new singer '" << juce::String(item.singerName)
@@ -478,6 +486,42 @@ void QueueService::removeSong(const juce::String& venueId,
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]
                 { onDone(ok, ok ? juce::String() : juce::String("PATCH failed")); });
+    });
+}
+
+void QueueService::deleteSinger(const juce::String& venueId,
+                                const juce::String& singerName,
+                                WriteCallback onDone)
+{
+    if (venueId.isEmpty() || singerName.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "missing arg"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, singerName, onDone = std::move(onDone)]()
+    {
+        const auto collPath = "venues/" + venueId + "/queue";
+        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+
+        auto found = findSingerByName(docs, singerName);
+        if (found.docName.isEmpty())
+        {
+            DBG ("[Queue] deleteSinger: singer '" << singerName << "' not found");
+            if (onDone)
+                juce::MessageManager::callAsync([onDone] { onDone(false, "singer not found"); });
+            return;
+        }
+
+        const auto rel = relPathFromDocName(found.docName);
+        const bool ok = FirestoreClient::getInstance().deleteDocument(rel);
+
+        DBG ("[Queue] deleteSinger singer='" << singerName
+             << "' ok=" << (ok ? 1 : 0));
+
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok]
+                { onDone(ok, ok ? juce::String() : juce::String("DELETE failed")); });
     });
 }
 

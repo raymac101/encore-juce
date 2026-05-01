@@ -149,6 +149,7 @@ private:
 
     // Per-section CdgSong backing lists (populated by setSongsFromLibrary).
     // Used to look up the full song record when a card is clicked.
+    std::vector<CdgSong> recentSongsSongs_;
     std::vector<CdgSong> newSongsSongs_;
     std::vector<CdgSong> popularSongsSongs_;
     std::vector<CdgSong> recommendedSongsSongs_;

@@ -76,7 +76,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     styleField(singerFieldLabel_, "Singer's Name:");
     addAndMakeVisible(singerFieldLabel_);
 
-    singerEditor_.setTextToShowWhenEmpty("Singer", juce::Colour(kMutedColour));
+    singerEditor_.setTextToShowWhenEmpty("Unknown (default)", juce::Colour(kMutedColour));
     singerEditor_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(kPanelColour));
     singerEditor_.setColour(juce::TextEditor::textColourId,       juce::Colour(kTextColour));
     singerEditor_.setColour(juce::TextEditor::outlineColourId,    juce::Colour(kBorderColour));
@@ -196,13 +196,17 @@ void SongSelectionDialog::closeWithResult(SongSelectionResult::Action action)
     r.versionIndex   = juce::jmax(0, versionBox_.getSelectedId() - 1);
     r.pitchSemitones = pitchSemitones_;
 
-    // Copy the callback locally because closing the window deletes 'this'.
+    // Copy the callback locally — closing the window will delete `this`.
     auto cb = onResult;
 
     if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
         dw->exitModalState(0);
 
-    if (cb) cb(r);
+    // Defer the callback so it runs AFTER JUCE finishes tearing down the
+    // modal dialog. Otherwise any follow-up UI work (alert windows, queue
+    // refresh) can race with the dialog's destruction.
+    if (cb)
+        juce::MessageManager::callAsync([cb, r]() { cb(r); });
 }
 
 //==============================================================================

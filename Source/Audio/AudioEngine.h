@@ -2,10 +2,18 @@
   ==============================================================================
 
     AudioEngine.h
-    Created: 15 Apr 2026 7:10:32pm
-    Author:  GitHub Copilot
 
-    Professional audio engine for karaoke system with real-time processing
+    Multi-track karaoke audio engine.
+
+    Signal chain (per audio callback):
+        AudioFormatReaderSource
+          → AudioTransportSource  (play / pause / seek)
+          → ResamplingAudioSource (file SR → device SR)
+          → PitchShifter          (RubberBand — pitch + tempo)
+          → master gain
+          → juce::Reverb          (vocal reverb)
+          → echo delay buffer     (vocal echo / slap)
+          → output
 
   ==============================================================================
 */
@@ -13,180 +21,189 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "../Models/QueueItem.h"
+#include "PitchShifter.h"
 
 //==============================================================================
-/** 
-    Professional audio engine handling multi-track karaoke playback.
-    Supports real-time pitch shifting, tempo adjustment, and CDG synchronization.
-*/
 class AudioEngine : public juce::AudioSource,
-                   public juce::ChangeListener
+                    public juce::ChangeListener
 {
 public:
-    //==============================================================================
     AudioEngine();
     ~AudioEngine() override;
-    
-    //==============================================================================
-    // Audio Device Management
+
+    //==========================================================================
+    // Lifecycle
     void initialize();
     void shutdown();
-    bool isInitialized() const { return initialized; }
-    
-    //==============================================================================
-    // Playback Control
-    bool loadSong(const juce::File& audioFile, const juce::File& cdgFile = juce::File{});
+    bool isInitialized() const noexcept { return initialized; }
+
+    //==========================================================================
+    // Playback
+    bool loadSong(const juce::File& audioFile,
+                  const juce::File& cdgFile = juce::File{});
     void play();
     void pause();
     void stop();
     void seekToPosition(double positionInSeconds);
-    
-    bool isPlaying() const { return playing; }
-    bool isPaused() const { return paused; }
-    double getCurrentPosition() const { return currentPosition; }
-    double getTotalLength() const { return totalLength; }
-    
-    //==============================================================================
-    // Real-time Audio Processing
-    void setPitchShift(float semitones); // -12 to +12 semitones
-    void setTempoAdjustment(float ratio); // 0.5 to 2.0 (50% to 200% speed)
-    void setKeyChange(int semitones); // Musical key adjustment
-    
-    float getPitchShift() const { return pitchShiftSemitones; }
-    float getTempoRatio() const { return tempoRatio; }
-    int getKeyChange() const { return keyChangeSemitones; }
-    
-    //==============================================================================
-    // Audio Levels and Mixing
-    void setMasterVolume(float volume); // 0.0 to 1.0
-    void setMusicVolume(float volume);  // Background music level
-    void setVocalVolume(float volume);  // Microphone level
-    void setVocalEffectsLevel(float level); // Reverb, echo, etc.
-    
-    float getMasterVolume() const { return masterVolume; }
-    float getMusicVolume() const { return musicVolume; }
-    float getVocalVolume() const { return vocalVolume; }
-    float getVocalEffectsLevel() const { return vocalEffectsLevel; }
-    
-    //==============================================================================
-    // Vocal Effects
+
+    bool   isPlaying()           const noexcept { return playing.load(); }
+    bool   isPaused()            const noexcept { return paused.load(); }
+    double getCurrentPosition()  const noexcept { return currentPosition.load(); }
+    double getTotalLength()      const noexcept { return totalLength.load(); }
+
+    //==========================================================================
+    // Pitch and tempo  (thread-safe — may be called from any thread)
+    void setPitchShift(float semitones);  // -12 to +12
+    void setTempoAdjustment(float ratio); // 0.5 to 2.0
+    void setKeyChange(int semitones);     // convenience: calls setPitchShift
+
+    float getPitchShift()  const noexcept { return pitchShifter.getPitchSemitones(); }
+    float getTempoRatio()  const noexcept { return pitchShifter.getTimeRatio(); }
+    int   getKeyChange()   const noexcept { return keyChangeSemitones.load(); }
+
+    //==========================================================================
+    // Volume
+    void setMasterVolume(float volume);  // 0.0 – 1.0
+    void setMusicVolume(float volume);
+    void setVocalVolume(float volume);
+    void setVocalEffectsLevel(float level);
+
+    float getMasterVolume()      const noexcept { return masterVolume.load(); }
+    float getMusicVolume()       const noexcept { return musicVolume.load(); }
+    float getVocalVolume()       const noexcept { return vocalVolume.load(); }
+    float getVocalEffectsLevel() const noexcept { return vocalEffectsLevel.load(); }
+
+    //==========================================================================
+    // Reverb
     void setReverbEnabled(bool enabled);
-    void setReverbLevel(float level); // 0.0 to 1.0
+    void setReverbRoomSize(float size);   // 0.0 – 1.0
+    void setReverbLevel(float level);     // 0.0 – 1.0 wet mix
+
+    //==========================================================================
+    // Echo / delay
     void setEchoEnabled(bool enabled);
-    void setEchoLevel(float level); // 0.0 to 1.0
-    void setEchoDelay(float delayMs); // Echo delay in milliseconds
-    
-    //==============================================================================
-    // Audio Analysis (for visualizations)
+    void setEchoLevel(float level);      // 0.0 – 1.0 feedback level
+    void setEchoDelay(float delayMs);    // 50 – 2000 ms
+
+    //==========================================================================
+    // Frequency analysis (for waveform/VU meters)
     void enableFrequencyAnalysis(bool enabled);
     const std::vector<float>& getFrequencySpectrum() const { return frequencyData; }
-    float getCurrentLevel() const { return currentAudioLevel; }
-    
-    //==============================================================================
-    // CDG/Lyric Synchronization
-    void setCDGSyncCallback(std::function<void(double, const juce::String&)> callback);
-    bool hasCDGData() const { return cdgLoaded; }
-    
-    //==============================================================================
-    // Audio Device Selection
-    void setAudioDevice(const juce::String& deviceName);
-    juce::StringArray getAvailableAudioDevices() const;
-    juce::String getCurrentAudioDevice() const;
-    
-    //==============================================================================
-    // Performance Monitoring
-    double getCpuUsage() const;
-    int getCurrentBufferSize() const;
+    float getCurrentLevel() const noexcept { return currentAudioLevel.load(); }
+
+    //==========================================================================
+    // Song-end callback — fired on the message thread when playback reaches
+    // the end of the file. Wire this in MainComponent to advance the queue
+    // (optionally after the countdown delay). Never called on stop()/pause().
+    std::function<void()> onSongFinished;
+
+    //==========================================================================
+    // CDG synchronisation callback — fired on the audio thread each block.
+    // Signature: void(double positionSeconds, const juce::String& lyricHint)
+    void setCDGSyncCallback(std::function<void(double, const juce::String&)> cb);
+    bool hasCDGData() const noexcept { return cdgLoaded; }
+
+    //==========================================================================
+    // Audio device selection
+    void                setAudioDevice(const juce::String& deviceName);
+    juce::StringArray   getAvailableAudioDevices() const;
+    juce::String        getCurrentAudioDevice()    const;
+
+    //==========================================================================
+    // Performance monitoring
+    double getCpuUsage()          const noexcept { return cpuUsagePercent.load(); }
+    int    getCurrentBufferSize() const;
     double getCurrentSampleRate() const;
-    
-    //==============================================================================
-    // AudioSource Interface
+
+    //==========================================================================
+    // juce::AudioSource
     void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
     void releaseResources() override;
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
-    
-    //==============================================================================
-    // ChangeListener Interface (for device changes)
+
+    // juce::ChangeListener (audio device changes)
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
 private:
-    //==============================================================================
-    // Audio Device and Setup
-    juce::AudioDeviceManager deviceManager;
+    //==========================================================================
+    // Audio device
+    juce::AudioDeviceManager              deviceManager;
     std::unique_ptr<juce::AudioSourcePlayer> audioSourcePlayer;
+    juce::AudioFormatManager              formatManager;
     bool initialized = false;
-    
-    //==============================================================================
-    // Audio Sources
+
+    //==========================================================================
+    // Source chain
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
-    std::unique_ptr<juce::AudioTransportSource> transportSource;
-    std::unique_ptr<juce::ResamplingAudioSource> resamplingSource;
-    
-    // Audio format manager for loading files
-    juce::AudioFormatManager formatManager;
-    
-    //==============================================================================
-    // Real-time Processing Chain (Commented out for initial build)
-    // std::unique_ptr<juce::dsp::ProcessorChain<
-    //     juce::dsp::Gain<float>,          // Master gain
-    //     juce::dsp::Reverb,              // Reverb effect
-    //     juce::dsp::DelayLine<float>     // Echo effect
-    // >> processingChain;
-    
-    //==============================================================================
-    // Audio Parameters
-    std::atomic<float> masterVolume { 0.8f };
-    std::atomic<float> musicVolume { 0.7f };
-    std::atomic<float> vocalVolume { 0.8f };
-    std::atomic<float> vocalEffectsLevel { 0.3f };
-    
-    std::atomic<float> pitchShiftSemitones { 0.0f };
-    std::atomic<float> tempoRatio { 1.0f };
-    std::atomic<int> keyChangeSemitones { 0 };
-    
-    //==============================================================================
-    // Effect Parameters
-    std::atomic<bool> reverbEnabled { false };
-    std::atomic<float> reverbLevel { 0.3f };
-    std::atomic<bool> echoEnabled { false };
-    std::atomic<float> echoLevel { 0.2f };
-    std::atomic<float> echoDelayMs { 250.0f };
-    
-    //==============================================================================
-    // Playback State
-    std::atomic<bool> playing { false };
-    std::atomic<bool> paused { false };
+    std::unique_ptr<juce::AudioTransportSource>    transportSource;
+    std::unique_ptr<juce::ResamplingAudioSource>   resamplingSource;
+
+    //==========================================================================
+    // DSP — pitch / tempo
+    PitchShifter pitchShifter;
+
+    //==========================================================================
+    // DSP — reverb (juce::Reverb lives in juce_audio_basics, no juce_dsp needed)
+    juce::Reverb reverb;
+
+    struct ReverbDirtyFlag
+    {
+        std::atomic<bool> dirty { true };
+        std::atomic<float> roomSize  { 0.5f };
+        std::atomic<float> wetLevel  { 0.0f };
+    } reverbState;
+
+    std::atomic<bool>  reverbEnabled { false };
+
+    //==========================================================================
+    // DSP — echo / delay (circular buffer, max 2 s)
+    juce::AudioBuffer<float> echoBuffer;
+    int   echoWritePos       = 0;
+    int   maxEchoDelaySamples = 0;
+    double echoSampleRate    = 44100.0;
+
+    std::atomic<bool>  echoEnabled  { false };
+    std::atomic<float> echoLevel    { 0.25f };
+    std::atomic<float> echoDelayMs  { 250.0f };
+
+    //==========================================================================
+    // Playback parameters
+    std::atomic<float>  masterVolume       { 0.8f };
+    std::atomic<float>  musicVolume        { 0.7f };
+    std::atomic<float>  vocalVolume        { 0.8f };
+    std::atomic<float>  vocalEffectsLevel  { 0.3f };
+    std::atomic<int>    keyChangeSemitones { 0 };
+
+    //==========================================================================
+    // Playback state
+    std::atomic<bool>   playing         { false };
+    std::atomic<bool>   paused          { false };
     std::atomic<double> currentPosition { 0.0 };
-    std::atomic<double> totalLength { 0.0 };
-    
-    //==============================================================================
-    // Analysis and Monitoring
-    bool frequencyAnalysisEnabled = false;
+    std::atomic<double> totalLength     { 0.0 };
+
+    //==========================================================================
+    // Analysis
+    bool               frequencyAnalysisEnabled = false;
     std::vector<float> frequencyData;
     std::atomic<float> currentAudioLevel { 0.0f };
-    // juce::dsp::FFT fftProcessor { 10 }; // 1024 point FFT - Commented out for initial build
-    
-    //==============================================================================
-    // CDG Data
+
+    //==========================================================================
+    // CDG
     bool cdgLoaded = false;
     std::function<void(double, const juce::String&)> cdgSyncCallback;
-    
-    //==============================================================================
-    // Performance Monitoring
+
+    //==========================================================================
+    // Performance
     mutable std::atomic<double> cpuUsagePercent { 0.0 };
-    
-    //==============================================================================
-    // Internal Methods
-    void updatePlaybackPosition();
-    void processAudioEffects(juce::AudioBuffer<float>& buffer);
-    void performFrequencyAnalysis(const juce::AudioBuffer<float>& buffer);
-    void updateCDGSync();
-    void calculateCpuUsage();
-    
-    // Audio device setup
+
+    //==========================================================================
+    // Internal
     void setupAudioDevice();
-    void handleAudioDeviceError(const juce::String& errorMessage);
-    
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
+    void handleAudioDeviceError(const juce::String& message);
+    void applyReverb(juce::AudioBuffer<float>& buffer);
+    void applyEcho(juce::AudioBuffer<float>& buffer);
+    void updatePlaybackPosition();
+    void performFrequencyAnalysis(const juce::AudioBuffer<float>& buffer);
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

@@ -498,6 +498,10 @@ void LibraryScanner::run()
     ScanStats stats = computeStats(songs);
     stats.numGroups = groupCount;
 
+    // Persist to SQLite (primary) and JSON (fallback / legacy).
+    // Both calls are synchronous here on the scan thread — cheap vs. the scan.
+    saveSongbook(songs);
+
     isScanning.store(false);
 
     // Fire completion on message thread
@@ -736,24 +740,35 @@ juce::File LibraryScanner::getSongbookFile() const
 
 bool LibraryScanner::saveSongbook(const std::vector<CdgSong>& songs)
 {
-    juce::File file = getSongbookFile();
-    file.getParentDirectory().createDirectory();
-
-    // Persist the scan root so the UI can restore it on next launch
+    // Persist the scan root for next-launch restoration.
     if (scanRoot_.isDirectory())
     {
-        juce::File rootFile = file.getSiblingFile("scanRoot.txt");
+        juce::File rootFile = getSongbookFile().getSiblingFile("scanRoot.txt");
+        rootFile.getParentDirectory().createDirectory();
         rootFile.replaceWithText(scanRoot_.getFullPathName());
     }
+
+    // ── Primary path: SQLite ─────────────────────────────────────────────────
+    if (songDb_ != nullptr && songDb_->isOpen())
+    {
+        bool ok = songDb_->replaceAll(songs);
+        if (!ok)
+            DBG("LibraryScanner::saveSongbook: SQLite write failed");
+        // Fall through to JSON backup regardless of SQLite result.
+    }
+
+    // ── Fallback / backup: JSON ──────────────────────────────────────────────
+    juce::File file = getSongbookFile();
+    file.getParentDirectory().createDirectory();
 
     juce::Array<juce::var> arr;
     for (auto& s : songs)
     {
         juce::DynamicObject* obj = new juce::DynamicObject();
-        obj->setProperty("id",         juce::String(s.id));
-        obj->setProperty("songName",   juce::String(s.songName));
-        obj->setProperty("artistName", juce::String(s.artistName));
-        obj->setProperty("imageUrl",   juce::String(s.imageUrl));
+        obj->setProperty("id",           juce::String(s.id));
+        obj->setProperty("songName",     juce::String(s.songName));
+        obj->setProperty("artistName",   juce::String(s.artistName));
+        obj->setProperty("imageUrl",     juce::String(s.imageUrl));
         obj->setProperty("keySignature", juce::String(s.keySignature));
         obj->setProperty("releaseDate",  juce::String(s.releaseDate));
         obj->setProperty("durationMS",   s.durationMS);
@@ -766,15 +781,14 @@ bool LibraryScanner::saveSongbook(const std::vector<CdgSong>& songs)
             for (auto& x : v) a.add(juce::String(x));
             return a;
         };
-        obj->setProperty("fullPath",  toArray(s.fullPath));
-        obj->setProperty("fileName",  toArray(s.fileName));
-        obj->setProperty("filePath",  toArray(s.filePath));
-        obj->setProperty("fileType",  toArray(s.fileType));
-        obj->setProperty("genres",    toArray(s.genres));
-        obj->setProperty("version",   toArray(s.version));
-        obj->setProperty("code",      toArray(s.code));
+        obj->setProperty("fullPath", toArray(s.fullPath));
+        obj->setProperty("fileName", toArray(s.fileName));
+        obj->setProperty("filePath", toArray(s.filePath));
+        obj->setProperty("fileType", toArray(s.fileType));
+        obj->setProperty("genres",   toArray(s.genres));
+        obj->setProperty("version",  toArray(s.version));
+        obj->setProperty("code",     toArray(s.code));
 
-        // Persist per-version quality ratings
         juce::Array<juce::var> ratingArr;
         for (auto r : s.rating) ratingArr.add(r);
         obj->setProperty("rating", ratingArr);
@@ -782,13 +796,16 @@ bool LibraryScanner::saveSongbook(const std::vector<CdgSong>& songs)
         arr.add(juce::var(obj));
     }
 
-    juce::var root = arr;
-    juce::String json = juce::JSON::toString(root, false);
-    return file.replaceWithText(json);
+    return file.replaceWithText(juce::JSON::toString(juce::var(arr), false));
 }
 
 std::vector<CdgSong> LibraryScanner::loadSongbook()
 {
+    // ── Primary path: SQLite ─────────────────────────────────────────────────
+    if (songDb_ != nullptr && songDb_->isOpen() && songDb_->count() > 0)
+        return songDb_->getAll();
+
+    // ── Fallback: JSON (used on first run or when SQLite is not configured) ──
     std::vector<CdgSong> songs;
     juce::File file = getSongbookFile();
     if (! file.existsAsFile()) return songs;
@@ -798,11 +815,18 @@ std::vector<CdgSong> LibraryScanner::loadSongbook()
     {
         songs.reserve((size_t)arr->size());
         for (auto& item : *arr)
-        {
             if (auto* obj = item.getDynamicObject())
                 songs.push_back(CdgSong::fromJsonObject(obj));
-        }
     }
+
+    // Migrate JSON → SQLite so subsequent loads use the fast path.
+    if (songDb_ != nullptr && songDb_->isOpen() && !songs.empty())
+    {
+        songDb_->replaceAll(songs);
+        DBG("LibraryScanner::loadSongbook: migrated " + juce::String((int)songs.size())
+            + " songs from JSON to SQLite");
+    }
+
     return songs;
 }
 

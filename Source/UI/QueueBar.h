@@ -31,11 +31,12 @@
     Right-hand queue bar displaying the karaoke singer rotation.
 */
 class QueueBar : public juce::Component,
-                 public juce::DragAndDropContainer
+                 public juce::DragAndDropContainer,
+                 public juce::Timer
 {
 public:
     QueueBar();
-    ~QueueBar() override = default;
+    ~QueueBar() override { stopTimer(); }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -44,6 +45,9 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseMove(const juce::MouseEvent& e) override;
+
+    // juce::Timer — drives countdown between songs
+    void timerCallback() override;
 
     //==============================================================================
     // Data
@@ -60,6 +64,14 @@ public:
     void setQueueRunning(bool running);
     void setAutoPlay(bool enabled);
     void setDelaySec(int seconds);
+
+    // Countdown (shown between songs when autoplay + delay > 0)
+    void startCountdown(int seconds);
+    void stopCountdown();
+
+    // Read-only accessors used by MainComponent
+    bool isAutoPlayEnabled() const noexcept { return autoPlayEnabled; }
+    int  getDelaySec()       const noexcept { return delaySec; }
 
     // When true, all incoming requests from mobile (TAGG) are auto-rejected
     // with a "no longer accepting song requests" reason. Defaults to false.
@@ -91,6 +103,16 @@ public:
     std::function<void(int singerIdx, int songIdx)>   onSongClicked;
     std::function<void(int)>                          onWidthChanged;
 
+    // Context-menu actions — wired by MainComponent
+    std::function<void(int singerIndex)>  onRemoveSinger;     // remove singer from queue
+    std::function<void(int singerIndex)>  onMoveSingerUp;     // move up in order
+    std::function<void(int singerIndex)>  onMoveSingerDown;   // move down in order
+    std::function<void()>                 onReturnCurrentToQueueNext; // now-playing → front
+    std::function<void()>                 onReturnCurrentToQueueEnd;  // now-playing → back
+    std::function<void()>                 onSkipCurrentSinger;        // skip + clear now-playing
+    std::function<void()>                 onCountdownFinished;        // delay countdown elapsed
+    std::function<void()>                 onAddSinger;        // KJ manually adds a singer
+
 private:
     //==============================================================================
     // Internal component: a single singer row in the queue list
@@ -107,22 +129,29 @@ private:
         void mouseUp   (const juce::MouseEvent& e) override;
 
         // Hit-testing helpers (also used by paint to highlight hover zones).
-        juce::Rectangle<int> getAvatarRect() const;
+        juce::Rectangle<int> getAvatarRect()      const;
+        juce::Rectangle<int> getMenuButtonRect()  const;   // 3-dot tap zone
         int  songChipIndexAt (juce::Point<int> p) const;   // -1 if none
         bool isOverAvatar    (juce::Point<int> p) const;
+        bool isOverMenuButton(juce::Point<int> p) const;
 
         Singers singer;
         int     index = 0;
-        bool    isFirst = false;   // blue border (round leader)
-        bool    isLast  = false;   // red border (round tail)
-        bool    isHost  = false;   // red border (host pin) — wins over isFirst
-        bool    hovering = false;
+        bool    isFirst      = false;  // blue border (round leader)
+        bool    isLast       = false;  // red border (round tail)
+        bool    isHost       = false;  // green border (host pin)
+        bool    isNewlyAdded = false;  // yellow-green glow on first appearance
+        bool    hovering    = false;
         bool    hoverAvatar = false;
+        bool    hoverMenu   = false;   // cursor/touch over 3-dot button
         int     hoverSongIdx = -1;
-        juce::Image avatarImage;   // lazily loaded from `singer.avatar`
+        juce::Image avatarImage;
 
         std::function<void(int)>      onPlayClicked;
         std::function<void(int, int)> onSongChipClicked;
+        std::function<void(int)>      onMoveUpClicked;
+        std::function<void(int)>      onMoveDownClicked;
+        std::function<void(int)>      onRemoveClicked;
     };
 
     //==============================================================================
@@ -133,17 +162,26 @@ private:
         NowPlayingCard();
         void paint(juce::Graphics& g) override;
         void mouseEnter(const juce::MouseEvent&) override { hovering = true;  repaint(); }
-        void mouseExit(const juce::MouseEvent&) override  { hovering = false; repaint(); }
-        void mouseUp(const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent&) override { hovering = false; hoverMenu = false; repaint(); }
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseUp   (const juce::MouseEvent& e) override;
 
         Singers singer;
         bool    isPlaying = false;
         bool    hovering = false;
+        bool    hoverMenu = false;   // cursor/touch over 3-dot button
         bool    hasSinger = false;
         juce::Image avatarImage;
 
+        juce::Rectangle<int> getMenuButtonRect() const;
+        bool isOverMenuButton(juce::Point<int> p) const;
+
         std::function<void()> onPlayClicked;
         std::function<void()> onPauseClicked;
+        std::function<void()> onReturnToQueueNext;
+        std::function<void()> onReturnToQueueEnd;
+        std::function<void()> onSkipAndRemove;
     };
 
     //==============================================================================
@@ -183,10 +221,12 @@ private:
     std::unique_ptr<juce::Label>      songCountLabel;
     std::unique_ptr<juce::Label>      totalTimeLabel;
     std::unique_ptr<juce::TextButton> clearQueueButton;
+    std::unique_ptr<juce::TextButton> addSingerButton;
     std::unique_ptr<juce::ToggleButton> queueToggle;
     std::unique_ptr<juce::ToggleButton> autoPlayToggle;
     std::unique_ptr<juce::Slider>     delaySlider;
     std::unique_ptr<juce::Label>      delayLabel;
+    std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 
     //==============================================================================
     // State
@@ -198,6 +238,7 @@ private:
     bool                 autoPlayEnabled = false;
     int                  delaySec = 0;
     bool                 queueClosed = false;
+    int                  countdownSecondsLeft = 0;
 
     // Sizing
     int  barWidth = 280;

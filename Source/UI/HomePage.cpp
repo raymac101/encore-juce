@@ -117,8 +117,14 @@ void SongCard::paint(juce::Graphics& g)
     }
 }
 
-void SongCard::mouseUp(const juce::MouseEvent&)
+void SongCard::mouseUp(const juce::MouseEvent& e)
 {
+    // Suppress the click if the user dragged — the parent Viewport's
+    // ScrollOnDragMode::all interpreted this as a swipe gesture, so the card
+    // shouldn't open the Song Selection dialog under the released finger/cursor.
+    if (e.mouseWasDraggedSinceMouseDown())
+        return;
+
     if (onClick) onClick();
 }
 
@@ -128,7 +134,15 @@ void SongCard::mouseUp(const juce::MouseEvent&)
 SongRow::SongRow()
 {
     viewport.setViewedComponent(&strip, false);
-    viewport.setScrollBarsShown(false, true); // horizontal scrollbar
+    // Hide scrollbars — touch users swipe, mouse users get the wheel-to-horizontal
+    // hook below.  A thin scrollbar still appears on macOS only while scrolling.
+    viewport.setScrollBarsShown(false, false);
+
+    // Drag-to-scroll for touchscreens (and trackpads / mice that hold and drag).
+    // ScrollOnDragMode::all means *any* drag inside the viewport scrolls; child
+    // components only receive the click if the user releases without moving.
+    viewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
+
     addAndMakeVisible(viewport);
 }
 
@@ -246,11 +260,12 @@ HomePage::HomePage()
     popularRow->setTitle(lm.getText("home.popular_songs"));
     recommendedRow->setTitle(lm.getText("home.recommended_songs"));
 
-    // Wire click callbacks
-    recentRow->onSongClicked = [this](int /*idx*/)
+    // Wire click callbacks — every row resolves to a real CdgSong via its
+    // backing list populated by setSongsFromLibrary().
+    recentRow->onSongClicked = [this](int idx)
     {
-        // Recent row is sourced from Track records without a CdgSong counterpart.
-        if (onSongClicked) onSongClicked(CdgSong{});
+        if (onSongClicked && idx >= 0 && idx < (int)recentSongsSongs_.size())
+            onSongClicked(recentSongsSongs_[(size_t)idx]);
     };
     newSongsRow->onSongClicked = [this](int idx)
     {
@@ -276,23 +291,14 @@ HomePage::HomePage()
 
     pageViewport.setViewedComponent(&pageContent, false);
     pageViewport.setScrollBarsShown(true, false);
+    // Vertical swipe gesture for touchscreens.  Inner SongRows have their own
+    // ScrollOnDragMode set so horizontal drags stay inside them and only
+    // vertical drags propagate up to scroll the page.
+    pageViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
     addAndMakeVisible(pageViewport);
 
-    // Populate with sample data for demo
-    {
-        std::vector<Track> sampleRecent;
-        auto makeTrack = [](const char* name, const char* artist) {
-            Track t;
-            t.name = name;
-            t.artists = artist;
-            return t;
-        };
-        sampleRecent.push_back(makeTrack("Bohemian Rhapsody", "Queen"));
-        sampleRecent.push_back(makeTrack("Don't Stop Believin'", "Journey"));
-        sampleRecent.push_back(makeTrack("Sweet Caroline", "Neil Diamond"));
-        // Recently played is populated at runtime when actual play history is available.
-        // New / Popular / Recommended are populated via setSongsFromLibrary().
-    }
+    // All four rows are populated by setSongsFromLibrary() once the
+    // LibraryPage finishes scanning the venue's songbook.
 }
 
 //==============================================================================
@@ -376,81 +382,86 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
         return p;
     };
 
-    // --- Popular: highest total rating across all versions ---
+    // Restrict every home-page row to songs that have album artwork — the
+    // cards look broken without an image, and the venue's full library is
+    // already available on the Search page if the user wants more.
+    std::vector<const CdgSong*> withArt;
+    withArt.reserve(songs.size());
+    for (auto& s : songs)
+        if (! s.imageUrl.empty())
+            withArt.push_back(&s);
+
+    if (withArt.empty()) return;
+
+    // Helper: take up to maxCards songs from `pool`, write them into the
+    // SongRow + backing list, and refresh the row.
+    auto fillRow = [&](SongRow& row,
+                       const std::vector<const CdgSong*>& pool,
+                       std::vector<CdgSong>& outBacking)
     {
-        std::vector<const CdgSong*> sorted;
-        sorted.reserve(songs.size());
-        for (auto& s : songs)
-            sorted.push_back(&s);
+        std::vector<Playlist> cards;
+        outBacking.clear();
+        cards.reserve((size_t) maxCards);
+        outBacking.reserve((size_t) maxCards);
 
-        std::stable_sort(sorted.begin(), sorted.end(), [](const CdgSong* a, const CdgSong* b) {
-            double rA = 0.0, rB = 0.0;
-            for (auto r : a->rating) rA += r;
-            for (auto r : b->rating) rB += r;
-            return rA > rB;
-        });
-
-        // Only include songs that actually have a rating
-        std::vector<Playlist> popular;
-        popularSongsSongs_.clear();
-        for (auto* sp : sorted)
+        for (auto* sp : pool)
         {
-            double total = 0.0;
-            for (auto r : sp->rating) total += r;
-            if (total <= 0.0) break;
-            popular.push_back(toPlaylist(*sp));
-            popularSongsSongs_.push_back(*sp);
-            if ((int)popular.size() >= maxCards) break;
+            cards.push_back(toPlaylist(*sp));
+            outBacking.push_back(*sp);
+            if ((int) cards.size() >= maxCards) break;
         }
-        if (! popular.empty())
-            popularRow->setPlaylists(popular);
+        if (! cards.empty())
+            row.setPlaylists(cards);
+    };
+
+    // --- Popular: highest total rating, drawn from the art-only pool ---
+    {
+        std::vector<const CdgSong*> sorted = withArt;
+        std::stable_sort(sorted.begin(), sorted.end(),
+            [](const CdgSong* a, const CdgSong* b) {
+                double rA = 0.0, rB = 0.0;
+                for (auto r : a->rating) rA += r;
+                for (auto r : b->rating) rB += r;
+                return rA > rB;
+            });
+        fillRow(*popularRow, sorted, popularSongsSongs_);
     }
 
-    // --- New songs: most recent release date (non-empty) ---
+    // --- New songs: most recent release date (empty dates sort last) ---
     {
-        std::vector<const CdgSong*> dated;
-        for (auto& s : songs)
-            if (! s.releaseDate.empty()) dated.push_back(&s);
-
-        std::stable_sort(dated.begin(), dated.end(), [](const CdgSong* a, const CdgSong* b) {
-            return a->releaseDate > b->releaseDate; // lexicographic desc (ISO date strings)
-        });
-
-        std::vector<Playlist> newest;
-        newSongsSongs_.clear();
-        for (auto* sp : dated)
-        {
-            newest.push_back(toPlaylist(*sp));
-            newSongsSongs_.push_back(*sp);
-            if ((int)newest.size() >= maxCards) break;
-        }
-        if (! newest.empty())
-            newSongsRow->setPlaylists(newest);
+        std::vector<const CdgSong*> dated = withArt;
+        std::stable_sort(dated.begin(), dated.end(),
+            [](const CdgSong* a, const CdgSong* b) {
+                if (a->releaseDate.empty() && b->releaseDate.empty()) return false;
+                if (a->releaseDate.empty()) return false;
+                if (b->releaseDate.empty()) return true;
+                return a->releaseDate > b->releaseDate;
+            });
+        fillRow(*newSongsRow, dated, newSongsSongs_);
     }
 
-    // --- Recommended: random subset of songs with artwork ---
+    // --- Recommended: random shuffle (fresh seed each app launch) ---
     {
-        std::vector<const CdgSong*> withArt;
-        for (auto& s : songs)
-            if (! s.imageUrl.empty()) withArt.push_back(&s);
-
-        // Deterministic shuffle using a fixed seed so it changes each scan but is stable within a session
-        juce::Random rng(42);
-        for (int i = (int)withArt.size() - 1; i > 0; --i)
+        std::vector<const CdgSong*> rec = withArt;
+        juce::Random rng((int) juce::Time::getMillisecondCounter());
+        for (int i = (int) rec.size() - 1; i > 0; --i)
         {
             int j = rng.nextInt(i + 1);
-            std::swap(withArt[(size_t)i], withArt[(size_t)j]);
+            std::swap(rec[(size_t) i], rec[(size_t) j]);
         }
+        fillRow(*recommendedRow, rec, recommendedSongsSongs_);
+    }
 
-        std::vector<Playlist> rec;
-        recommendedSongsSongs_.clear();
-        for (auto* sp : withArt)
+    // --- Recently Played: separate random shuffle until real play history
+    //     is wired up.  Different seed so it doesn't mirror Recommended. ---
+    {
+        std::vector<const CdgSong*> recent = withArt;
+        juce::Random rng((int) juce::Time::getMillisecondCounter() ^ 0x5a5a5a5a);
+        for (int i = (int) recent.size() - 1; i > 0; --i)
         {
-            rec.push_back(toPlaylist(*sp));
-            recommendedSongsSongs_.push_back(*sp);
-            if ((int)rec.size() >= maxCards) break;
+            int j = rng.nextInt(i + 1);
+            std::swap(recent[(size_t) i], recent[(size_t) j]);
         }
-        if (! rec.empty())
-            recommendedRow->setPlaylists(rec);
+        fillRow(*recentRow, recent, recentSongsSongs_);
     }
 }

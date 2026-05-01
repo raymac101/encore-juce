@@ -1,82 +1,246 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="EncoreJUCE" name="Encore Karaoke" projectType="guiapp" useAppConfig="0"
-              addUsingNamespaceToJuceHeader="0" displaySplashScreen="1" jucerFormatVersion="1"
+              addUsingNamespaceToJuceHeader="0" displaySplashScreen="0" jucerFormatVersion="1"
               version="1.0.0" bundleIdentifier="com.viracicom.encore" includeBinaryInAppConfig="1"
               cppLanguageStandard="17" companyName="Viracicom" companyWebsite="https://viracicom.com"
               companyEmail="raymac@viracicom.com">
   <MAINGROUP id="EncoreJUCE" name="Encore Karaoke">
-    <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E5E}" name="Source">
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E5F}" name="Audio">
-        <FILE id="AudioEngine.cpp" name="AudioEngine.cpp" compile="1" resource="0" file="Source/Audio/AudioEngine.cpp"/>
-        <FILE id="AudioEngine.h" name="AudioEngine.h" compile="0" resource="0" file="Source/Audio/AudioEngine.h"/>
-        <FILE id="PitchShifter.cpp" name="PitchShifter.cpp" compile="1" resource="0" file="Source/Audio/PitchShifter.cpp"/>
-        <FILE id="PitchShifter.h" name="PitchShifter.h" compile="0" resource="0" file="Source/Audio/PitchShifter.h"/>
+    <GROUP id="GRP_Source" name="Source">
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Audio" name="Audio">
+        <FILE id="F_AudioEngine_cpp" name="AudioEngine.cpp" compile="1" resource="0" file="Source/Audio/AudioEngine.cpp"/>
+        <FILE id="F_AudioEngine_h"   name="AudioEngine.h"   compile="0" resource="0" file="Source/Audio/AudioEngine.h"/>
+        <FILE id="F_PitchShifter_cpp" name="PitchShifter.cpp" compile="1" resource="0" file="Source/Audio/PitchShifter.cpp"/>
+        <FILE id="F_PitchShifter_h"   name="PitchShifter.h"   compile="0" resource="0" file="Source/Audio/PitchShifter.h"/>
       </GROUP>
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E60}" name="Queue">
-        <FILE id="QueueManager.cpp" name="QueueManager.cpp" compile="1" resource="0" file="Source/Queue/QueueManager.cpp"/>
-        <FILE id="QueueManager.h" name="QueueManager.h" compile="0" resource="0" file="Source/Queue/QueueManager.h"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Auth" name="Auth">
+        <FILE id="F_LoginFlowController_cpp" name="LoginFlowController.cpp" compile="1" resource="0" file="Source/Auth/LoginFlowController.cpp"/>
+        <FILE id="F_LoginFlowController_h"   name="LoginFlowController.h"   compile="0" resource="0" file="Source/Auth/LoginFlowController.h"/>
       </GROUP>
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E61}" name="Firebase">
-        <FILE id="FirebaseManager.cpp" name="FirebaseManager.cpp" compile="1" resource="0" file="Source/Firebase/FirebaseManager.cpp"/>
-        <FILE id="FirebaseManager.h" name="FirebaseManager.h" compile="0" resource="0" file="Source/Firebase/FirebaseManager.h"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_CDG" name="CDG">
+        <FILE id="F_CDGDecoder_cpp" name="CDGDecoder.cpp" compile="1" resource="0" file="Source/CDG/CDGDecoder.cpp"/>
+        <FILE id="F_CDGDecoder_h"   name="CDGDecoder.h"   compile="0" resource="0" file="Source/CDG/CDGDecoder.h"/>
       </GROUP>
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E62}" name="UI">
-        <FILE id="MainComponent.cpp" name="MainComponent.cpp" compile="1" resource="0" file="Source/UI/MainComponent.cpp"/>
-        <FILE id="MainComponent.h" name="MainComponent.h" compile="0" resource="0" file="Source/UI/MainComponent.h"/>
-        <FILE id="ResponsiveLayout.cpp" name="ResponsiveLayout.cpp" compile="1" resource="0" file="Source/UI/ResponsiveLayout.cpp"/>
-        <FILE id="ResponsiveLayout.h" name="ResponsiveLayout.h" compile="0" resource="0" file="Source/UI/ResponsiveLayout.h"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Firebase" name="Firebase">
+        <FILE id="F_FirebaseConfig_h"    name="FirebaseConfig.h"    compile="0" resource="0" file="Source/Firebase/FirebaseConfig.h"/>
+        <FILE id="F_FirebaseManager_cpp" name="FirebaseManager.cpp" compile="1" resource="0" file="Source/Firebase/FirebaseManager.cpp"/>
+        <FILE id="F_FirebaseManager_h"   name="FirebaseManager.h"   compile="0" resource="0" file="Source/Firebase/FirebaseManager.h"/>
       </GROUP>
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E63}" name="Localization">
-        <FILE id="LocalizationManager.cpp" name="LocalizationManager.cpp" compile="1" resource="0" file="Source/Localization/LocalizationManager.cpp"/>
-        <FILE id="LocalizationManager.h" name="LocalizationManager.h" compile="0" resource="0" file="Source/Localization/LocalizationManager.h"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Localization" name="Localization">
+        <FILE id="F_LocalizationManager_cpp" name="LocalizationManager.cpp" compile="1" resource="0" file="Source/Localization/LocalizationManager.cpp"/>
+        <FILE id="F_LocalizationManager_h"   name="LocalizationManager.h"   compile="0" resource="0" file="Source/Localization/LocalizationManager.h"/>
       </GROUP>
-      <GROUP id="{7C8A5C5D-8E5F-4E5E-8E5F-4E5E8E5F4E64}" name="Models">
-        <FILE id="VenueItem.cpp" name="VenueItem.cpp" compile="1" resource="0" file="Source/Models/VenueItem.cpp"/>
-        <FILE id="VenueItem.h" name="VenueItem.h" compile="0" resource="0" file="Source/Models/VenueItem.h"/>
-        <FILE id="QueueItem.cpp" name="QueueItem.cpp" compile="1" resource="0" file="Source/Models/QueueItem.cpp"/>
-        <FILE id="QueueItem.h" name="QueueItem.h" compile="0" resource="0" file="Source/Models/QueueItem.h"/>
-        <FILE id="Singers.cpp" name="Singers.cpp" compile="1" resource="0" file="Source/Models/Singers.cpp"/>
-        <FILE id="Singers.h" name="Singers.h" compile="0" resource="0" file="Source/Models/Singers.h"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Models" name="Models">
+        <FILE id="F_AccessRights_h"          name="AccessRights.h"          compile="0" resource="0" file="Source/Models/AccessRights.h"/>
+        <FILE id="F_Ad_cpp"                  name="Ad.cpp"                  compile="1" resource="0" file="Source/Models/Ad.cpp"/>
+        <FILE id="F_Ad_h"                    name="Ad.h"                    compile="0" resource="0" file="Source/Models/Ad.h"/>
+        <FILE id="F_Audit_cpp"               name="Audit.cpp"               compile="1" resource="0" file="Source/Models/Audit.cpp"/>
+        <FILE id="F_Audit_h"                 name="Audit.h"                 compile="0" resource="0" file="Source/Models/Audit.h"/>
+        <FILE id="F_CdgGroup_cpp"            name="CdgGroup.cpp"            compile="1" resource="0" file="Source/Models/CdgGroup.cpp"/>
+        <FILE id="F_CdgGroup_h"              name="CdgGroup.h"              compile="0" resource="0" file="Source/Models/CdgGroup.h"/>
+        <FILE id="F_CdgSong_cpp"             name="CdgSong.cpp"             compile="1" resource="0" file="Source/Models/CdgSong.cpp"/>
+        <FILE id="F_CdgSong_h"               name="CdgSong.h"               compile="0" resource="0" file="Source/Models/CdgSong.h"/>
+        <FILE id="F_Emoji_h"                 name="Emoji.h"                 compile="0" resource="0" file="Source/Models/Emoji.h"/>
+        <FILE id="F_Host_cpp"                name="Host.cpp"                compile="1" resource="0" file="Source/Models/Host.cpp"/>
+        <FILE id="F_Host_h"                  name="Host.h"                  compile="0" resource="0" file="Source/Models/Host.h"/>
+        <FILE id="F_License_cpp"             name="License.cpp"             compile="1" resource="0" file="Source/Models/License.cpp"/>
+        <FILE id="F_License_h"               name="License.h"               compile="0" resource="0" file="Source/Models/License.h"/>
+        <FILE id="F_ListItem_h"              name="ListItem.h"              compile="0" resource="0" file="Source/Models/ListItem.h"/>
+        <FILE id="F_Location_cpp"            name="Location.cpp"            compile="1" resource="0" file="Source/Models/Location.cpp"/>
+        <FILE id="F_Location_h"              name="Location.h"              compile="0" resource="0" file="Source/Models/Location.h"/>
+        <FILE id="F_Lyric_cpp"               name="Lyric.cpp"               compile="1" resource="0" file="Source/Models/Lyric.cpp"/>
+        <FILE id="F_Lyric_h"                 name="Lyric.h"                 compile="0" resource="0" file="Source/Models/Lyric.h"/>
+        <FILE id="F_Member_cpp"              name="Member.cpp"              compile="1" resource="0" file="Source/Models/Member.cpp"/>
+        <FILE id="F_Member_h"                name="Member.h"                compile="0" resource="0" file="Source/Models/Member.h"/>
+        <FILE id="F_Playing_cpp"             name="Playing.cpp"             compile="1" resource="0" file="Source/Models/Playing.cpp"/>
+        <FILE id="F_Playing_h"              name="Playing.h"               compile="0" resource="0" file="Source/Models/Playing.h"/>
+        <FILE id="F_Playlist_cpp"            name="Playlist.cpp"            compile="1" resource="0" file="Source/Models/Playlist.cpp"/>
+        <FILE id="F_Playlist_h"              name="Playlist.h"              compile="0" resource="0" file="Source/Models/Playlist.h"/>
+        <FILE id="F_Preset_cpp"              name="Preset.cpp"              compile="1" resource="0" file="Source/Models/Preset.cpp"/>
+        <FILE id="F_Preset_h"                name="Preset.h"                compile="0" resource="0" file="Source/Models/Preset.h"/>
+        <FILE id="F_QueueItem_cpp"           name="QueueItem.cpp"           compile="1" resource="0" file="Source/Models/QueueItem.cpp"/>
+        <FILE id="F_QueueItem_h"             name="QueueItem.h"             compile="0" resource="0" file="Source/Models/QueueItem.h"/>
+        <FILE id="F_Singers_cpp"             name="Singers.cpp"             compile="1" resource="0" file="Source/Models/Singers.cpp"/>
+        <FILE id="F_Singers_h"               name="Singers.h"               compile="0" resource="0" file="Source/Models/Singers.h"/>
+        <FILE id="F_Track_cpp"               name="Track.cpp"               compile="1" resource="0" file="Source/Models/Track.cpp"/>
+        <FILE id="F_Track_h"                 name="Track.h"                 compile="0" resource="0" file="Source/Models/Track.h"/>
+        <FILE id="F_User_cpp"                name="User.cpp"                compile="1" resource="0" file="Source/Models/User.cpp"/>
+        <FILE id="F_User_h"                  name="User.h"                  compile="0" resource="0" file="Source/Models/User.h"/>
+        <FILE id="F_UserVenueAssociation_h"  name="UserVenueAssociation.h"  compile="0" resource="0" file="Source/Models/UserVenueAssociation.h"/>
+        <FILE id="F_VenueItem_cpp"           name="VenueItem.cpp"           compile="1" resource="0" file="Source/Models/VenueItem.cpp"/>
+        <FILE id="F_VenueItem_h"             name="VenueItem.h"             compile="0" resource="0" file="Source/Models/VenueItem.h"/>
+        <FILE id="F_VenueUser_cpp"           name="VenueUser.cpp"           compile="1" resource="0" file="Source/Models/VenueUser.cpp"/>
+        <FILE id="F_VenueUser_h"             name="VenueUser.h"             compile="0" resource="0" file="Source/Models/VenueUser.h"/>
       </GROUP>
-      <FILE id="Main.cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Queue" name="Queue">
+        <FILE id="F_QueueManager_cpp" name="QueueManager.cpp" compile="1" resource="0" file="Source/Queue/QueueManager.cpp"/>
+        <FILE id="F_QueueManager_h"   name="QueueManager.h"   compile="0" resource="0" file="Source/Queue/QueueManager.h"/>
+      </GROUP>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_Services" name="Services">
+        <FILE id="F_ArchiveService_cpp"    name="ArchiveService.cpp"    compile="1" resource="0" file="Source/Services/ArchiveService.cpp"/>
+        <FILE id="F_ArchiveService_h"      name="ArchiveService.h"      compile="0" resource="0" file="Source/Services/ArchiveService.h"/>
+        <FILE id="F_FirestoreClient_cpp"   name="FirestoreClient.cpp"   compile="1" resource="0" file="Source/Services/FirestoreClient.cpp"/>
+        <FILE id="F_FirestoreClient_h"     name="FirestoreClient.h"     compile="0" resource="0" file="Source/Services/FirestoreClient.h"/>
+        <FILE id="F_HostService_h"         name="HostService.h"         compile="0" resource="0" file="Source/Services/HostService.h"/>
+        <FILE id="F_ImageCache_cpp"        name="ImageCache.cpp"        compile="1" resource="0" file="Source/Services/ImageCache.cpp"/>
+        <FILE id="F_ImageCache_h"          name="ImageCache.h"          compile="0" resource="0" file="Source/Services/ImageCache.h"/>
+        <FILE id="F_LibraryScanner_cpp"    name="LibraryScanner.cpp"    compile="1" resource="0" file="Source/Services/LibraryScanner.cpp"/>
+        <FILE id="F_LibraryScanner_h"      name="LibraryScanner.h"      compile="0" resource="0" file="Source/Services/LibraryScanner.h"/>
+        <FILE id="F_QueueService_cpp"      name="QueueService.cpp"      compile="1" resource="0" file="Source/Services/QueueService.cpp"/>
+        <FILE id="F_QueueService_h"        name="QueueService.h"        compile="0" resource="0" file="Source/Services/QueueService.h"/>
+        <FILE id="F_RequestService_cpp"    name="RequestService.cpp"    compile="1" resource="0" file="Source/Services/RequestService.cpp"/>
+        <FILE id="F_RequestService_h"      name="RequestService.h"      compile="0" resource="0" file="Source/Services/RequestService.h"/>
+        <FILE id="F_UserPreferences_cpp"   name="UserPreferences.cpp"   compile="1" resource="0" file="Source/Services/UserPreferences.cpp"/>
+        <FILE id="F_UserPreferences_h"     name="UserPreferences.h"     compile="0" resource="0" file="Source/Services/UserPreferences.h"/>
+        <FILE id="F_VenueService_cpp"      name="VenueService.cpp"      compile="1" resource="0" file="Source/Services/VenueService.cpp"/>
+        <FILE id="F_VenueService_h"        name="VenueService.h"        compile="0" resource="0" file="Source/Services/VenueService.h"/>
+        <FILE id="F_SongDatabase_cpp"       name="SongDatabase.cpp"       compile="1" resource="0" file="Source/Services/SongDatabase.cpp"/>
+        <FILE id="F_SongDatabase_h"         name="SongDatabase.h"         compile="0" resource="0" file="Source/Services/SongDatabase.h"/>
+        <FILE id="F_WaveformGenerator_cpp" name="WaveformGenerator.cpp" compile="1" resource="0" file="Source/Services/WaveformGenerator.cpp"/>
+        <FILE id="F_WaveformGenerator_h"   name="WaveformGenerator.h"   compile="0" resource="0" file="Source/Services/WaveformGenerator.h"/>
+      </GROUP>
+
+      <!-- ================================================================== -->
+      <GROUP id="GRP_UI" name="UI">
+        <FILE id="F_BottomBar_cpp"            name="BottomBar.cpp"            compile="1" resource="0" file="Source/UI/BottomBar.cpp"/>
+        <FILE id="F_BottomBar_h"              name="BottomBar.h"              compile="0" resource="0" file="Source/UI/BottomBar.h"/>
+        <FILE id="F_EditSingerModal_cpp"      name="EditSingerModal.cpp"      compile="1" resource="0" file="Source/UI/EditSingerModal.cpp"/>
+        <FILE id="F_EditSingerModal_h"        name="EditSingerModal.h"        compile="0" resource="0" file="Source/UI/EditSingerModal.h"/>
+        <FILE id="F_HomePage_cpp"             name="HomePage.cpp"             compile="1" resource="0" file="Source/UI/HomePage.cpp"/>
+        <FILE id="F_HomePage_h"               name="HomePage.h"               compile="0" resource="0" file="Source/UI/HomePage.h"/>
+        <FILE id="F_LibraryPage_cpp"          name="LibraryPage.cpp"          compile="1" resource="0" file="Source/UI/LibraryPage.cpp"/>
+        <FILE id="F_LibraryPage_h"            name="LibraryPage.h"            compile="0" resource="0" file="Source/UI/LibraryPage.h"/>
+        <FILE id="F_LoginWindow_cpp"          name="LoginWindow.cpp"          compile="1" resource="0" file="Source/UI/LoginWindow.cpp"/>
+        <FILE id="F_LoginWindow_h"            name="LoginWindow.h"            compile="0" resource="0" file="Source/UI/LoginWindow.h"/>
+        <FILE id="F_LyricDisplayComponent_cpp" name="LyricDisplayComponent.cpp" compile="1" resource="0" file="Source/UI/LyricDisplayComponent.cpp"/>
+        <FILE id="F_LyricDisplayComponent_h"   name="LyricDisplayComponent.h"   compile="0" resource="0" file="Source/UI/LyricDisplayComponent.h"/>
+        <FILE id="F_LyricDisplayWindow_cpp"   name="LyricDisplayWindow.cpp"   compile="1" resource="0" file="Source/UI/LyricDisplayWindow.cpp"/>
+        <FILE id="F_LyricDisplayWindow_h"     name="LyricDisplayWindow.h"     compile="0" resource="0" file="Source/UI/LyricDisplayWindow.h"/>
+        <FILE id="F_MainArea_cpp"             name="MainArea.cpp"             compile="1" resource="0" file="Source/UI/MainArea.cpp"/>
+        <FILE id="F_MainArea_h"               name="MainArea.h"               compile="0" resource="0" file="Source/UI/MainArea.h"/>
+        <FILE id="F_MainComponent_cpp"        name="MainComponent.cpp"        compile="1" resource="0" file="Source/UI/MainComponent.cpp"/>
+        <FILE id="F_MainComponent_h"          name="MainComponent.h"          compile="0" resource="0" file="Source/UI/MainComponent.h"/>
+        <FILE id="F_NavBar_cpp"               name="NavBar.cpp"               compile="1" resource="0" file="Source/UI/NavBar.cpp"/>
+        <FILE id="F_NavBar_h"                 name="NavBar.h"                 compile="0" resource="0" file="Source/UI/NavBar.h"/>
+        <FILE id="F_QueueBar_cpp"             name="QueueBar.cpp"             compile="1" resource="0" file="Source/UI/QueueBar.cpp"/>
+        <FILE id="F_QueueBar_h"               name="QueueBar.h"               compile="0" resource="0" file="Source/UI/QueueBar.h"/>
+        <FILE id="F_ResponsiveLayout_cpp"     name="ResponsiveLayout.cpp"     compile="1" resource="0" file="Source/UI/ResponsiveLayout.cpp"/>
+        <FILE id="F_ResponsiveLayout_h"       name="ResponsiveLayout.h"       compile="0" resource="0" file="Source/UI/ResponsiveLayout.h"/>
+        <FILE id="F_SearchPage_cpp"           name="SearchPage.cpp"           compile="1" resource="0" file="Source/UI/SearchPage.cpp"/>
+        <FILE id="F_SearchPage_h"             name="SearchPage.h"             compile="0" resource="0" file="Source/UI/SearchPage.h"/>
+        <FILE id="F_SettingsPage_cpp"         name="SettingsPage.cpp"         compile="1" resource="0" file="Source/UI/SettingsPage.cpp"/>
+        <FILE id="F_SettingsPage_h"           name="SettingsPage.h"           compile="0" resource="0" file="Source/UI/SettingsPage.h"/>
+        <FILE id="F_SongSelectionDialog_cpp"  name="SongSelectionDialog.cpp"  compile="1" resource="0" file="Source/UI/SongSelectionDialog.cpp"/>
+        <FILE id="F_SongSelectionDialog_h"    name="SongSelectionDialog.h"    compile="0" resource="0" file="Source/UI/SongSelectionDialog.h"/>
+        <FILE id="F_TopBar_cpp"               name="TopBar.cpp"               compile="1" resource="0" file="Source/UI/TopBar.cpp"/>
+        <FILE id="F_TopBar_h"                 name="TopBar.h"                 compile="0" resource="0" file="Source/UI/TopBar.h"/>
+      </GROUP>
+
+      <FILE id="F_Main_cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
     </GROUP>
   </MAINGROUP>
+
+  <!-- ==================================================================== -->
   <MODULES>
-    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_basics"     showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices"    showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats"    showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
     <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-    <MODULE id="juce_opengl" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils"      showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core"             showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures"  showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp"              showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events"           showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics"         showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics"       showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra"        showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_opengl"           showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
   </MODULES>
+
+  <!-- ==================================================================== -->
   <EXPORTFORMATS>
-    <VS2022 targetFolder="Builds/VisualStudio2022">
+
+    <!-- macOS / Xcode ---------------------------------------------------- -->
+    <XCODE_MAC targetFolder="Builds/MacOSX">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="EncoreJUCE"/>
-        <CONFIGURATION isDebug="0" name="Release" targetName="EncoreJUCE"/>
+        <CONFIGURATION isDebug="1" name="Debug"
+                       osxSDK="default" osxDeploymentTarget="12.0"
+                       extraLinkerFlags="-lrubberband -lsqlite3 -lfirebase_firestore -lfirebase_auth -lfirebase_app"
+                       extraSearchPaths="/opt/homebrew/include&#10;/usr/local/include&#10;${FIREBASE_SDK_ROOT}/include"
+                       librarySearchPaths="/opt/homebrew/lib&#10;/usr/local/lib&#10;${FIREBASE_SDK_ROOT}/libs/darwin"
+                       targetName="EncoreJUCE"/>
+        <CONFIGURATION isDebug="0" name="Release"
+                       osxSDK="default" osxDeploymentTarget="12.0"
+                       extraLinkerFlags="-lrubberband -lsqlite3 -lfirebase_firestore -lfirebase_auth -lfirebase_app"
+                       extraSearchPaths="/opt/homebrew/include&#10;/usr/local/include&#10;${FIREBASE_SDK_ROOT}/include"
+                       librarySearchPaths="/opt/homebrew/lib&#10;/usr/local/lib&#10;${FIREBASE_SDK_ROOT}/libs/darwin"
+                       targetName="EncoreJUCE"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
-        <MODULEPATH id="juce_audio_basics" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_audio_devices" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_audio_formats" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_basics"     path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_devices"    path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_formats"    path="${JUCE_MODULES}"/>
         <MODULEPATH id="juce_audio_processors" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_audio_utils" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_core" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_data_structures" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_events" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_graphics" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_gui_basics" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_gui_extra" path="${JUCE_MODULES}"/>
-        <MODULEPATH id="juce_opengl" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_utils"      path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_core"             path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_data_structures"  path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_dsp"              path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_events"           path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_graphics"         path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_basics"       path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_extra"        path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_opengl"           path="${JUCE_MODULES}"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+
+    <!-- Windows / VS2022 ------------------------------------------------- -->
+    <VS2022 targetFolder="Builds/VisualStudio2022">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug"
+                       extraLinkerFlags="rubberband.lib sqlite3.lib firebase_firestore.lib firebase_auth.lib firebase_app.lib"
+                       extraSearchPaths="$(RUBBERBAND_ROOT)\\include&#10;$(FIREBASE_SDK_ROOT)\\include"
+                       librarySearchPaths="$(RUBBERBAND_ROOT)\\lib&#10;$(FIREBASE_SDK_ROOT)\\libs\\windows\\VS2019\\MD\\x64\\Debug"
+                       targetName="EncoreJUCE"/>
+        <CONFIGURATION isDebug="0" name="Release"
+                       extraLinkerFlags="rubberband.lib sqlite3.lib firebase_firestore.lib firebase_auth.lib firebase_app.lib"
+                       extraSearchPaths="$(RUBBERBAND_ROOT)\\include&#10;$(FIREBASE_SDK_ROOT)\\include"
+                       librarySearchPaths="$(RUBBERBAND_ROOT)\\lib&#10;$(FIREBASE_SDK_ROOT)\\libs\\windows\\VS2019\\MD\\x64\\Release"
+                       targetName="EncoreJUCE"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics"     path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_devices"    path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_formats"    path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_processors" path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_audio_utils"      path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_core"             path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_data_structures"  path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_dsp"              path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_events"           path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_graphics"         path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_basics"       path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_gui_extra"        path="${JUCE_MODULES}"/>
+        <MODULEPATH id="juce_opengl"           path="${JUCE_MODULES}"/>
       </MODULEPATHS>
     </VS2022>
+
   </EXPORTFORMATS>
+
   <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_USE_CURL="1"/>
 </JUCERPROJECT>

@@ -25,6 +25,7 @@
 
 #include <JuceHeader.h>
 #include "../Services/LibraryScanner.h"
+#include "../Services/SongDatabase.h"
 #include <vector>
 #include <functional>
 
@@ -132,6 +133,7 @@ private:
 
     //==========================================================================
     // Data
+    SongDatabase                  songDb_;   // SQLite index; opened in constructor
     std::vector<CdgSong>          songs_;
     LibraryScanner                scanner_;
     LibraryScanner::ScanStats     stats_;

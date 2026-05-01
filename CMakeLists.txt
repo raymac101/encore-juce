@@ -23,6 +23,7 @@ target_sources(EncoreJUCE
     PRIVATE
         Source/Main.cpp
         Source/Audio/AudioEngine.cpp
+        Source/Audio/PitchShifter.cpp
         Source/UI/MainComponent.cpp
         Source/UI/ResponsiveLayout.cpp
         Source/UI/TopBar.cpp
@@ -41,6 +42,7 @@ target_sources(EncoreJUCE
         Source/UI/LoginWindow.cpp
         Source/CDG/CDGDecoder.cpp
         Source/Services/LibraryScanner.cpp
+        Source/Services/SongDatabase.cpp
         Source/Services/ImageCache.cpp
         Source/Services/UserPreferences.cpp
         Source/Services/WaveformGenerator.cpp
@@ -98,6 +100,42 @@ target_link_libraries(EncoreJUCE
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# Rubber Band Library — required by Source/Audio/PitchShifter for real-time
+# pitch shifting. On macOS users install via `brew install rubberband`; on
+# Windows use `vcpkg install rubberband`. We prefer pkg-config when
+# available, otherwise fall back to find_path / find_library so the build
+# still works on machines without pkg-config installed.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(RUBBERBAND rubberband)
+endif()
+if(NOT RUBBERBAND_FOUND)
+    if(APPLE)
+        execute_process(COMMAND brew --prefix rubberband
+                        OUTPUT_VARIABLE RUBBERBAND_BREW_PREFIX
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET)
+    endif()
+    find_path(RUBBERBAND_INCLUDE_DIR rubberband/RubberBandStretcher.h
+              HINTS ${RUBBERBAND_BREW_PREFIX}/include)
+    find_library(RUBBERBAND_LIBRARY NAMES rubberband
+                 HINTS ${RUBBERBAND_BREW_PREFIX}/lib)
+    if(NOT RUBBERBAND_INCLUDE_DIR OR NOT RUBBERBAND_LIBRARY)
+        message(FATAL_ERROR "Rubber Band Library not found. Install with `brew install rubberband` (macOS) or `vcpkg install rubberband` (Windows).")
+    endif()
+    set(RUBBERBAND_INCLUDE_DIRS ${RUBBERBAND_INCLUDE_DIR})
+    set(RUBBERBAND_LIBRARIES    ${RUBBERBAND_LIBRARY})
+endif()
+target_include_directories(EncoreJUCE PRIVATE ${RUBBERBAND_INCLUDE_DIRS})
+if(RUBBERBAND_LIBRARY_DIRS)
+    target_link_directories(EncoreJUCE PRIVATE ${RUBBERBAND_LIBRARY_DIRS})
+endif()
+target_link_libraries(EncoreJUCE      PRIVATE ${RUBBERBAND_LIBRARIES})
+
+# SQLite3 — used by SongDatabase. macOS ships with system sqlite3.
+find_package(SQLite3 REQUIRED)
+target_link_libraries(EncoreJUCE PRIVATE SQLite3::SQLite3)
 
 # Copy assets to output directory
 add_custom_command(TARGET EncoreJUCE POST_BUILD
