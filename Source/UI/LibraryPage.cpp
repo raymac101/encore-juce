@@ -9,6 +9,7 @@
 */
 
 #include "LibraryPage.h"
+#include "AddSongsDialog.h"
 #include "../Localization/LocalizationManager.h"
 
 //==============================================================================
@@ -210,6 +211,86 @@ void LibraryPage::loadSongbook()
 }
 
 //==============================================================================
+// Match a candidate against `target`:
+//   1. By non-empty id (exact match), else
+//   2. By case-insensitive (artistName + "|" + songName).
+static int findSongIndex(const std::vector<CdgSong>& list, const CdgSong& target)
+{
+    if (! target.id.empty())
+    {
+        for (size_t i = 0; i < list.size(); ++i)
+            if (list[i].id == target.id)
+                return (int) i;
+    }
+    auto lcA = juce::String(target.artistName).toLowerCase();
+    auto lcS = juce::String(target.songName).toLowerCase();
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (juce::String(list[i].artistName).toLowerCase() == lcA
+         && juce::String(list[i].songName).toLowerCase()   == lcS)
+            return (int) i;
+    }
+    return -1;
+}
+
+bool LibraryPage::upsertSong(const CdgSong& song)
+{
+    int idx = findSongIndex(songs_, song);
+
+    CdgSong merged = song;
+    if (idx >= 0)
+    {
+        // Preserve file-related fields the dialog never touches.
+        const auto& existing = songs_[(size_t) idx];
+        if (merged.id.empty())       merged.id       = existing.id;
+        if (merged.fullPath.empty()) merged.fullPath  = existing.fullPath;
+        if (merged.fileName.empty()) merged.fileName  = existing.fileName;
+        if (merged.filePath.empty()) merged.filePath  = existing.filePath;
+        if (merged.fileType.empty()) merged.fileType  = existing.fileType;
+        if (merged.fileDate == 0)    merged.fileDate  = existing.fileDate;
+        if (merged.fileSize == 0)    merged.fileSize  = existing.fileSize;
+        if (merged.code.empty())     merged.code      = existing.code;
+        // Always preserve the original addedAt so edits don't reset the timestamp.
+        if (existing.addedAt > 0)    merged.addedAt   = existing.addedAt;
+
+        songs_[(size_t) idx] = merged;
+    }
+    else
+    {
+        // First time this song enters the library — stamp it.
+        if (merged.addedAt == 0)
+            merged.addedAt = juce::Time::currentTimeMillis();
+        songs_.push_back(merged);
+    }
+
+    // Persist to songbook.json + SQLite index.
+    scanner_.saveSongbook(songs_);
+    if (songDb_.isOpen())
+        songDb_.insertOrReplace(merged);
+
+    refreshStats();
+    if (onSongbookChanged) onSongbookChanged(songs_);
+    return true;
+}
+
+bool LibraryPage::deleteSong(const CdgSong& song)
+{
+    int idx = findSongIndex(songs_, song);
+    if (idx < 0) return false;
+
+    auto removedId = songs_[(size_t) idx].id;
+    songs_.erase(songs_.begin() + idx);
+
+    scanner_.saveSongbook(songs_);
+    if (songDb_.isOpen() && ! removedId.empty())
+        songDb_.remove(juce::String(removedId));
+
+    refreshStats();
+    if (onSongbookChanged) onSongbookChanged(songs_);
+    return true;
+}
+
+//==============================================================================
 void LibraryPage::updateAllText()
 {
     auto& lm = LocalizationManager::getInstance();
@@ -352,7 +433,18 @@ void LibraryPage::onInitialSongLoad()
 
 void LibraryPage::onAddSongs()
 {
-    startFolderChooser(true /* append */);
+    juce::File libRoot(pathEditor_->getText().trim());
+    AddSongsDialog::launch(this, songs_, libRoot,
+        [this](std::vector<CdgSong> mergedSongs, AddSongsDialog::ImportStats)
+        {
+            songs_ = std::move(mergedSongs);
+            if (songDb_.isOpen())
+                for (auto& s : songs_)
+                    songDb_.insertOrReplace(s);
+            scanner_.saveSongbook(songs_);
+            refreshStats();
+            if (onSongbookChanged) onSongbookChanged(songs_);
+        });
 }
 
 void LibraryPage::startFolderChooser(bool appendMode)

@@ -120,6 +120,11 @@ public:
 
     /** Populate each section with data. */
     void setRecentlyPlayed(const std::vector<Track>& tracks);
+
+    /** Populate the Recently Played row from a Firestore play-history list.
+        Resolves each entry against the library for full CdgSong data. */
+    void setRecentlyPlayedFromHistory(const std::vector<Playlist>& items);
+
     void setNewSongs(const std::vector<Playlist>& playlists);
     void setPopularSongs(const std::vector<Playlist>& playlists);
     void setRecommendedSongs(const std::vector<Playlist>& playlists);
@@ -147,12 +152,18 @@ private:
     std::unique_ptr<SongRow> popularRow;
     std::unique_ptr<SongRow> recommendedRow;
 
-    // Per-section CdgSong backing lists (populated by setSongsFromLibrary).
-    // Used to look up the full song record when a card is clicked.
+    // Per-section CdgSong backing lists.  setSongsFromLibrary populates the
+    // Recently Played + New rows; the Popular and Recommended rows are
+    // populated from venue Firestore playlists via setPopular/RecommendedSongs.
+    // Click resolution always reads from these backing lists.
     std::vector<CdgSong> recentSongsSongs_;
     std::vector<CdgSong> newSongsSongs_;
     std::vector<CdgSong> popularSongsSongs_;
     std::vector<CdgSong> recommendedSongsSongs_;
+
+    // Last-known full library, kept so Popular/Recommended playlist entries
+    // can be resolved back to a full CdgSong for Play Now / Add to Queue.
+    std::vector<CdgSong> libraryRef_;
 
     juce::Viewport  pageViewport;
     juce::Component pageContent;

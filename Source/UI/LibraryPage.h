@@ -62,6 +62,19 @@ public:
     const std::vector<CdgSong>& getSongs() const { return songs_; }
 
     //==========================================================================
+    // Insert or update a song in the in-memory library, persist the songbook
+    // to disk + the SQLite index, and fire onSongbookChanged.  Match priority:
+    // by id (when non-empty), otherwise by case-insensitive (artist|song).
+    // Returns true if the songbook actually changed.
+    bool upsertSong(const CdgSong& song);
+
+    //==========================================================================
+    // Remove a song matched by id (preferred) or by case-insensitive
+    // (artist|song).  Persists + fires onSongbookChanged.  Returns true if a
+    // matching record was found and removed.
+    bool deleteSong(const CdgSong& song);
+
+    //==========================================================================
     // Public action: open the folder chooser and run a full ("initial")
     // library scan. Used by the venue-switch flow in LoginWindow → MainComponent
     // when the host picks a venue that wasn't previously configured on this PC.

@@ -269,6 +269,9 @@ void LibraryScanner::startInitialScan(const juce::File& rootDir)
     scanRoot_    = rootDir;
     appendMode_  = false;
     existing_.clear();
+    appendFilter_.clear();
+    appendCopy_  = false;
+    appendDelete_= false;
     startThread(juce::Thread::Priority::low);
 }
 
@@ -280,6 +283,20 @@ void LibraryScanner::startAppendScan(const juce::File& rootDir,
     appendMode_  = true;
     existing_    = existingSongs;
     startThread(juce::Thread::Priority::low);
+}
+
+void LibraryScanner::setAppendFilter(const std::vector<juce::String>& baseNames)
+{
+    appendFilter_.clear();
+    for (auto& n : baseNames)
+        appendFilter_.insert(n.toLowerCase());
+}
+
+void LibraryScanner::setAppendPostOps(bool copySongs, bool deleteSongs, const juce::File& destDir)
+{
+    appendCopy_   = copySongs;
+    appendDelete_ = deleteSongs;
+    appendDest_   = destDir;
 }
 
 void LibraryScanner::stopScan()
@@ -318,8 +335,13 @@ void LibraryScanner::run()
     std::map<juce::String, std::vector<juce::File>> fileGroups;
     for (auto& f : allFiles)
     {
-        juce::String key = f.getParentDirectory().getFullPathName()
-                         + "/" + f.getFileNameWithoutExtension().toLowerCase();
+        juce::String baseLower = f.getFileNameWithoutExtension().toLowerCase();
+        // In append mode with filter, skip files not selected by the user.
+        if (appendMode_ && ! appendFilter_.empty()
+                && appendFilter_.find(baseLower) == appendFilter_.end())
+            continue;
+
+        juce::String key = f.getParentDirectory().getFullPathName() + "/" + baseLower;
         fileGroups[key].push_back(f);
     }
 
@@ -444,7 +466,9 @@ void LibraryScanner::run()
     }
 
     // --- Step 4: merge with existing (append mode) ---------------------------
-    if (appendMode_ && ! existing_.empty())
+    int appendNumNew = 0, appendNumExisting = 0;
+
+    if (appendMode_)
     {
         // Build a lookup of existing songs by normalised artist|song key
         std::map<juce::String, size_t> existingLookup;
@@ -456,20 +480,64 @@ void LibraryScanner::run()
             existingLookup[k] = i;
         }
 
+        const juce::int64 nowMs = juce::Time::currentTimeMillis();
         std::vector<CdgSong> merged = existing_;
+
+        auto fileImportedCb = onFileImported;
+        bool doCopy   = appendCopy_;
+        bool doDelete = appendDelete_;
+        juce::File dest = appendDest_;
+
         for (auto& s : songs)
         {
             juce::String k = normaliseSongKey(
                 juce::String(s.artistName),
                 juce::String(s.songName));
             auto it2 = existingLookup.find(k);
+
+            juce::String baseName = s.fileName.empty()
+                                    ? juce::String(s.songName)
+                                    : juce::File(s.fileName[0]).getFileNameWithoutExtension();
+
             if (it2 == existingLookup.end())
             {
-                merged.push_back(std::move(s));  // Truly new song
+                s.addedAt = nowMs;
+                merged.push_back(s);
+                ++appendNumNew;
+
+                for (auto& fp : s.fullPath)
+                {
+                    juce::File src(fp);
+                    if (doCopy && dest.isDirectory())
+                        src.copyFileTo(dest.getChildFile(src.getFileName()));
+                    if (doDelete)
+                        src.deleteFile();
+                }
+                // Copy/delete paired audio companion (e.g. .mp3 alongside .cdg)
+                if ((doCopy || doDelete) && ! s.filePath.empty() && ! s.fileName.empty())
+                {
+                    juce::File dir(s.filePath[0]);
+                    juce::String stem = juce::File(s.fileName[0]).getFileNameWithoutExtension();
+                    juce::Array<juce::File> companions;
+                    dir.findChildFiles(companions, juce::File::findFiles, false, stem + ".*");
+                    for (auto& cf : companions)
+                    {
+                        if (! isKaraokeFile(cf))
+                        {
+                            if (doCopy && dest.isDirectory())
+                                cf.copyFileTo(dest.getChildFile(cf.getFileName()));
+                            if (doDelete)
+                                cf.deleteFile();
+                        }
+                    }
+                }
+
+                if (fileImportedCb)
+                    juce::MessageManager::callAsync([fileImportedCb, baseName]()
+                        { fileImportedCb(baseName, true, "New Song"); });
             }
             else
             {
-                // Merge new file versions into the existing entry
                 CdgSong& ex = merged[it2->second];
                 for (size_t vi = 0; vi < s.fullPath.size(); ++vi)
                 {
@@ -487,6 +555,11 @@ void LibraryScanner::run()
                         if (vi < s.rating.size())  ex.rating.push_back(s.rating[vi]);
                     }
                 }
+                ++appendNumExisting;
+
+                if (fileImportedCb)
+                    juce::MessageManager::callAsync([fileImportedCb, baseName]()
+                        { fileImportedCb(baseName, false, "Already Exists"); });
             }
         }
         songs = std::move(merged);
@@ -496,7 +569,9 @@ void LibraryScanner::run()
     applyLocalMetadata(songs);
 
     ScanStats stats = computeStats(songs);
-    stats.numGroups = groupCount;
+    stats.numGroups         = groupCount;
+    stats.numNew            = appendNumNew;
+    stats.numAlreadyImported = appendNumExisting;
 
     // Persist to SQLite (primary) and JSON (fallback / legacy).
     // Both calls are synchronous here on the scan thread — cheap vs. the scan.

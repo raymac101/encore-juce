@@ -19,6 +19,7 @@
 #include "../Services/ImageCache.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/ArchiveService.h"
+#include "../Services/ApiService.h"
 #include "EditSingerModal.h"
 #include <cmath>
 
@@ -197,6 +198,7 @@ void MainComponent::setupUI()
     };
 
     bottomBar->onStopAndReturnToZero = [this]() {
+        logPlayHistoryIfNeeded(false); // logs only if played > 30 s
         if (audioEngine) audioEngine->stop();
         bottomBar->setProgress(0.0f);
         bottomBar->setPlaying(false);
@@ -204,8 +206,16 @@ void MainComponent::setupUI()
 
     bottomBar->onPlayPause = [this](bool isNowPlaying) {
         if (! audioEngine) return;
-        if (isNowPlaying) audioEngine->play();
-        else              audioEngine->pause();
+        if (isNowPlaying)
+        {
+            if (playStartTimeMs_ == 0)
+                playStartTimeMs_ = juce::Time::currentTimeMillis();
+            audioEngine->play();
+        }
+        else
+        {
+            audioEngine->pause();
+        }
     };
 
     bottomBar->onJumpToEnd = [this]() {
@@ -395,6 +405,127 @@ void MainComponent::setupUI()
                 }
             });
     };
+
+    // Persist Song-Edit dialog results.  Save also patches the venue
+    // playlists (New / Popular / Recommended) in Firestore based on which
+    // checkboxes the user actually changed, then refreshes the membership
+    // cache + the home-page rows.  Delete additionally removes the song
+    // from every venue playlist it appeared in.
+    mainArea->onSongEditResult = [this](const SongEditResult& r)
+    {
+        auto* lib = mainArea ? mainArea->getLibraryPage() : nullptr;
+        if (lib == nullptr)
+        {
+            DBG ("[SongEdit] no LibraryPage available — skipping persist");
+            return;
+        }
+
+        auto& v = VenueService::getInstance();
+
+        if (r.isSave())
+        {
+            const bool changed = lib->upsertSong(r.song);
+            DBG ("[SongEdit] SAVE id='" << juce::String(r.song.id)
+                 << "' title='" << juce::String(r.song.songName)
+                 << "' artist='" << juce::String(r.song.artistName)
+                 << "' changed=" << (int) changed
+                 << " playlists: new="    << (int) r.addToNew
+                 << " popular="           << (int) r.addToPopular
+                 << " recommended="       << (int) r.addToRecommended);
+
+            // Mirror the saved record into the shared metadata cache so the
+            // next "Get Metadata" lookup serves the user's edits without
+            // hitting the cloud function again.
+            juce::Thread::launch([song = r.song]() {
+                ApiService::getInstance().saveSharedMetadata(song);
+            });
+
+            // Patch venue playlists for any toggle that actually changed.
+            const auto songId = juce::String(r.song.id);
+
+            if (r.newChanged)
+            {
+                if (r.addToNew) v.addSongToNewSongs(r.song);
+                else            v.deleteSongFromNewSongs(songId);
+            }
+            // Existing entries in "new" should also pick up updated metadata.
+            else if (newSongIds_.count(r.song.id) > 0)
+            {
+                v.updateSongInNewSongs(r.song);
+            }
+
+            if (r.popularChanged)
+            {
+                if (r.addToPopular)
+                    v.addSongToLists(r.song, juce::StringArray { "Popular" });
+                else
+                    v.deleteSongFromPlaylist("Popular", songId);
+            }
+            if (r.recommendedChanged)
+            {
+                if (r.addToRecommended)
+                    v.addSongToLists(r.song, juce::StringArray { "Recommended" });
+                else
+                    v.deleteSongFromPlaylist("Recommended", songId);
+            }
+
+            // Refresh the membership cache + Home-page rows after a short
+            // delay so the writes have time to land in Firestore.
+            juce::Component::SafePointer<MainComponent> safe (this);
+            juce::Timer::callAfterDelay(800, [safe]() {
+                if (safe != nullptr) safe->loadVenuePlaylists();
+            });
+        }
+        else if (r.isDelete())
+        {
+            const bool removed = lib->deleteSong(r.song);
+            DBG ("[SongEdit] DELETE id='" << juce::String(r.song.id)
+                 << "' title='" << juce::String(r.song.songName)
+                 << "' removed=" << (int) removed);
+
+            // Best-effort: drop the song from every venue playlist it was in.
+            const auto songId = juce::String(r.song.id);
+            v.deleteSongFromNewSongs    (songId);
+            v.deleteSongFromPlaylist    ("Popular",     songId);
+            v.deleteSongFromPlaylist    ("Recommended", songId);
+
+            juce::Component::SafePointer<MainComponent> safe (this);
+            juce::Timer::callAfterDelay(800, [safe]() {
+                if (safe != nullptr) safe->loadVenuePlaylists();
+            });
+        }
+    };
+
+    // Initial playlist membership for the Edit dialog — reads the cached
+    // sets that loadVenuePlaylists() refreshes from Firestore.
+    mainArea->onSongEditPlaylistQuery = [this](const CdgSong& song,
+                                               SongEditDialog::InitialPlaylists& out)
+    {
+        out.inNew         = newSongIds_        .count(song.id) > 0;
+        out.inPopular     = popularSongIds_    .count(song.id) > 0;
+        out.inRecommended = recommendedSongIds_.count(song.id) > 0;
+    };
+
+    // Spotify-style metadata lookup via the TAGG cloud function.
+    // ApiService handles caching to shared_metadata.json on success.
+    mainArea->onSongEditFetchMetadata =
+        [](juce::String artist, juce::String song,
+           std::function<void(bool ok, CdgSong updated, juce::String message)> done)
+        {
+            CdgSong stub;
+            stub.artistName = artist.toStdString();
+            stub.songName   = song.toStdString();
+            ApiService::getInstance().searchArtistAndSong(stub, artist, song,
+                [done](ApiService::Result r)
+                {
+                    if (! done) return;
+                    juce::String msg = r.ok
+                        ? (r.fromCache ? juce::String("Loaded from local cache.")
+                                       : juce::String("Updated from metadata API."))
+                        : r.errorMessage;
+                    done(r.ok, r.song, msg);
+                });
+        };
 
     // Push settings-page edits back to Firestore. On success the queue bar
     // and lyric display also pick up any name / code changes.
@@ -770,6 +901,7 @@ void MainComponent::setupUI()
     // ── Skip current singer ────────────────────────────────────────────────────
     queueBar->onSkipCurrentSinger = [this]()
     {
+        logPlayHistoryIfNeeded(false); // logs only if played > 30 s
         if (audioEngine) audioEngine->stop();
         if (queueBar)    queueBar->clearNowPlaying();
         if (queueBar)    queueBar->setPlaying(false);
@@ -815,6 +947,8 @@ void MainComponent::setupUI()
     // ── Song-finished → auto-advance ──────────────────────────────────────────
     audioEngine->onSongFinished = [this]()
     {
+        logPlayHistoryIfNeeded(true);
+
         if (queueBar == nullptr) return;
         if (queueBar->isAutoPlayEnabled())
         {
@@ -1706,7 +1840,10 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     if (self->queueBar) self->queueBar->setPlaying (autoStart);
 
     if (autoStart)
+    {
+        self->playStartTimeMs_ = juce::Time::currentTimeMillis();
         self->audioEngine->play();
+    }
     self->hideLoadingOverlay();
     });
 }
@@ -1783,6 +1920,74 @@ void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
 }
 
 //==============================================================================
+void MainComponent::loadVenuePlaylists()
+{
+    const auto venueId = activeVenueId_;
+    if (venueId.isEmpty()) return;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    auto& v = VenueService::getInstance();
+
+    auto applyToHome = [safe](const std::vector<Playlist>& list,
+                              std::unordered_set<std::string>& cache,
+                              const char* logTag,
+                              std::function<void(HomePage&, const std::vector<Playlist>&)> setter)
+    {
+        if (safe == nullptr) return;
+
+        cache.clear();
+        for (auto& p : list)
+            if (! p.id.empty()) cache.insert(p.id);
+
+        DBG ("[Playlists] " << logTag << " count=" << (int) list.size());
+
+        if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+            setter(*hp, list);
+    };
+
+    // The home page "New Songs" row is driven by local addedAt tracking
+    // (setSongsFromLibrary). We still fetch the Firebase "new" playlist to
+    // keep newSongIds_ in sync for the SongEditDialog checkbox state.
+    v.getNewSongs(venueId,
+        [safe](bool ok, std::vector<Playlist> list, juce::String err)
+        {
+            if (safe == nullptr) return;
+            if (! ok) { DBG ("[Playlists] new load failed: " << err); return; }
+            safe->newSongIds_.clear();
+            for (auto& p : list)
+                if (! p.id.empty()) safe->newSongIds_.insert(p.id);
+            DBG ("[Playlists] new (for edit-dialog) count=" << (int) list.size());
+        });
+
+    v.getPlaylists(venueId, "Popular",
+        [safe, applyToHome](bool ok, std::vector<Playlist> list, juce::String err)
+        {
+            if (safe == nullptr) return;
+            if (! ok) { DBG ("[Playlists] Popular load failed: " << err); return; }
+            applyToHome(list, safe->popularSongIds_, "Popular",
+                [](HomePage& hp, const std::vector<Playlist>& l) { hp.setPopularSongs(l); });
+        });
+
+    v.getPlaylists(venueId, "Recommended",
+        [safe, applyToHome](bool ok, std::vector<Playlist> list, juce::String err)
+        {
+            if (safe == nullptr) return;
+            if (! ok) { DBG ("[Playlists] Recommended load failed: " << err); return; }
+            applyToHome(list, safe->recommendedSongIds_, "Recommended",
+                [](HomePage& hp, const std::vector<Playlist>& l) { hp.setRecommendedSongs(l); });
+        });
+
+    v.getRecentlyPlayed(venueId,
+        [safe](bool ok, std::vector<Playlist> list, juce::String err)
+        {
+            if (safe == nullptr) return;
+            if (! ok) { DBG ("[Playlists] RecentlyPlayed load failed: " << err); return; }
+            DBG ("[Playlists] RecentlyPlayed count=" << (int) list.size());
+            if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                hp->setRecentlyPlayedFromHistory(list);
+        });
+}
+
 void MainComponent::setVenueId (const juce::String& venueId, bool requestInitialScan)
 {
     activeVenueId_ = venueId;
@@ -1823,6 +2028,10 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             const juce::String logoUrl (v.logoUrl);
 
             safe->activeVenueNumStrikes_ = v.numStrikes;
+
+            // Pull venue playlists (New / Popular / Recommended) into the
+            // home page + membership caches.
+            safe->loadVenuePlaylists();
 
             if (safe->queueBar != nullptr)
                 safe->queueBar->setVenueInfo (name, code);
@@ -2197,5 +2406,37 @@ void MainComponent::onIncomingDeleteRequest (const QueueItem& item)
             RequestService::getInstance().deleteRequested (venueId, id);
             if (safe != nullptr)
                 safe->reloadQueueFromFirestore (venueId);
+        });
+}
+
+//==============================================================================
+void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
+{
+    if (playStartTimeMs_ == 0) return;
+
+    if (currentSong.songName.empty() && currentSong.artistName.empty()) return;
+
+    if (! naturalEnd)
+    {
+        const auto elapsedMs = juce::Time::currentTimeMillis() - playStartTimeMs_;
+        if (elapsedMs < 30000) return;
+    }
+
+    const auto venueId = activeVenueId_;
+    if (venueId.isEmpty()) return;
+
+    VenueService::PlayHistoryEntry entry;
+    entry.songId     = currentSong.id;
+    entry.songName   = currentSong.songName;
+    entry.artistName = currentSong.artistName;
+    entry.imageUrl   = currentSong.imageUrl;
+    entry.singerName = hasLocalNowPlaying_ ? localNowPlaying_.name : "Unknown";
+
+    playStartTimeMs_ = 0; // Reset before the async write to prevent duplicate entries.
+
+    VenueService::getInstance().addPlayHistory(entry,
+        [venueId](bool ok, juce::String err)
+        {
+            if (! ok) DBG("[History] addPlayHistory failed: " << err);
         });
 }

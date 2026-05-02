@@ -45,14 +45,32 @@ MainArea::MainArea()
     }
 
     // Show the Song Selection dialog whenever a song is chosen from Search or Home.
+    // Only require a song name + artist — we don't gate on `id` here because
+    // some scanned files have valid title/artist but blank IDs, and silently
+    // dropping the click was confusing for the user.
     auto openSongDialog = [this](const CdgSong& song) {
-        if (! song.isValid()) return;
+        if (song.songName.empty() && song.artistName.empty()) return;
         SongSelectionDialog::launch(this, song,
             [this](const SongSelectionResult& r) {
                 if (onSongSelectionResult) onSongSelectionResult(r);
             });
     };
     searchPage->onSongClicked = openSongDialog;
+
+    // Edit column → Song Edit dialog → forward the result up to MainComponent
+    // for persistence.  MainComponent supplies the initial playlist
+    // membership and (later) a Spotify-style metadata fetcher.
+    searchPage->onSongEditClicked = [this](const CdgSong& song) {
+        SongEditDialog::InitialPlaylists pls;
+        if (onSongEditPlaylistQuery)
+            onSongEditPlaylistQuery(song, pls);
+
+        SongEditDialog::launch(this, song, pls, onSongEditFetchMetadata,
+            [this](const SongEditResult& r) {
+                if (! r.isCancel() && onSongEditResult)
+                    onSongEditResult(r);
+            });
+    };
 
     // Create real Library page
     {

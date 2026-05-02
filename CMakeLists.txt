@@ -37,6 +37,8 @@ target_sources(EncoreJUCE
         Source/UI/LibraryPage.cpp
         Source/UI/SettingsPage.cpp
         Source/UI/SongSelectionDialog.cpp
+        Source/UI/SongEditDialog.cpp
+        Source/UI/AddSongsDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
         Source/UI/LoginWindow.cpp
@@ -51,6 +53,7 @@ target_sources(EncoreJUCE
         Source/Services/QueueService.cpp
         Source/Services/RequestService.cpp
         Source/Services/ArchiveService.cpp
+        Source/Services/ApiService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
@@ -79,7 +82,11 @@ target_compile_definitions(EncoreJUCE
         JUCE_USE_CURL=1
         JUCE_WEB_BROWSER=0
         JUCE_USE_CAMERA=0
-        JUCE_DISPLAY_SPLASH_SCREEN=1)
+        JUCE_DISPLAY_SPLASH_SCREEN=1
+        # Dev-only: shows a "Skip Login (Dev)" button on the login page that
+        # auto-signs in as raymac@shaw.ca and selects the "Karaoke Palace"
+        # venue. Set to 0 (or delete this line) for production builds.
+        ENCORE_DEV_SKIP_LOGIN=1)
 
 # Link JUCE modules
 target_link_libraries(EncoreJUCE

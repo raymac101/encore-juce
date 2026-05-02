@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS songs (
     genres        TEXT    DEFAULT '[]',
     versions      TEXT    DEFAULT '[]',
     codes         TEXT    DEFAULT '[]',
-    ratings       TEXT    DEFAULT '[]'
+    ratings       TEXT    DEFAULT '[]',
+    added_at      INTEGER DEFAULT 0
 );
 )SQL";
 
@@ -80,20 +81,39 @@ CREATE INDEX IF NOT EXISTS idx_songs_name   ON songs(song_name   COLLATE NOCASE)
 //==============================================================================
 
 static const char* kInsertSql = R"SQL(
-INSERT OR REPLACE INTO songs
+INSERT INTO songs
     (id, song_name, artist_name, image_url, key_signature,
      tempo, duration_ms, release_date, file_date, file_size,
      full_paths, file_names, file_paths, file_types,
-     genres, versions, codes, ratings)
+     genres, versions, codes, ratings, added_at)
 VALUES
-    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+    song_name    = excluded.song_name,
+    artist_name  = excluded.artist_name,
+    image_url    = excluded.image_url,
+    key_signature= excluded.key_signature,
+    tempo        = excluded.tempo,
+    duration_ms  = excluded.duration_ms,
+    release_date = excluded.release_date,
+    file_date    = excluded.file_date,
+    file_size    = excluded.file_size,
+    full_paths   = excluded.full_paths,
+    file_names   = excluded.file_names,
+    file_paths   = excluded.file_paths,
+    file_types   = excluded.file_types,
+    genres       = excluded.genres,
+    versions     = excluded.versions,
+    codes        = excluded.codes,
+    ratings      = excluded.ratings,
+    added_at     = CASE WHEN songs.added_at > 0 THEN songs.added_at ELSE excluded.added_at END;
 )SQL";
 
 static const char* kSelectAll = R"SQL(
 SELECT id, song_name, artist_name, image_url, key_signature,
        tempo, duration_ms, release_date, file_date, file_size,
        full_paths, file_names, file_paths, file_types,
-       genres, versions, codes, ratings
+       genres, versions, codes, ratings, added_at
 FROM songs
 ORDER BY artist_name COLLATE NOCASE ASC,
          song_name   COLLATE NOCASE ASC;
@@ -103,7 +123,7 @@ static const char* kSelectById = R"SQL(
 SELECT id, song_name, artist_name, image_url, key_signature,
        tempo, duration_ms, release_date, file_date, file_size,
        full_paths, file_names, file_paths, file_types,
-       genres, versions, codes, ratings
+       genres, versions, codes, ratings, added_at
 FROM songs WHERE id = ?;
 )SQL";
 
@@ -112,7 +132,7 @@ static const char* kSearchFts = R"SQL(
 SELECT s.id, s.song_name, s.artist_name, s.image_url, s.key_signature,
        s.tempo, s.duration_ms, s.release_date, s.file_date, s.file_size,
        s.full_paths, s.file_names, s.file_paths, s.file_types,
-       s.genres, s.versions, s.codes, s.ratings
+       s.genres, s.versions, s.codes, s.ratings, s.added_at
 FROM songs_fts f
 JOIN songs s ON s.rowid = f.rowid
 WHERE songs_fts MATCH ?
@@ -168,10 +188,19 @@ void SongDatabase::close()
 
 bool SongDatabase::createSchema()
 {
-    return exec(kCreateSongs)
-        && exec(kCreateFts)
-        && exec(kCreateTriggers)
-        && exec(kCreateIndices);
+    if (! exec(kCreateSongs))   return false;
+    if (! exec(kCreateFts))     return false;
+    if (! exec(kCreateTriggers)) return false;
+    if (! exec(kCreateIndices)) return false;
+
+    // Non-destructive migration: add added_at to databases created before this
+    // column existed.  SQLite returns an error if the column already exists —
+    // that's expected and safe to ignore.
+    sqlite3_exec(db_,
+        "ALTER TABLE songs ADD COLUMN added_at INTEGER DEFAULT 0;",
+        nullptr, nullptr, nullptr);
+
+    return true;
 }
 
 //==============================================================================
@@ -269,6 +298,7 @@ void SongDatabase::bindSong(sqlite3_stmt* stmt, const CdgSong& song) const
     bindText(16, vecToJson(song.version));
     bindText(17, vecToJson(song.code));
     bindText(18, dblVecToJson(song.rating));
+    sqlite3_bind_int64  (stmt, 19, static_cast<sqlite3_int64>(song.addedAt));
 }
 
 // static
@@ -298,6 +328,7 @@ CdgSong SongDatabase::rowToSong(sqlite3_stmt* stmt)
     s.version      = jsonToStrVec(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15)));
     s.code         = jsonToStrVec(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16)));
     s.rating       = jsonToDblVec(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17)));
+    s.addedAt      = static_cast<int64_t>(sqlite3_column_int64(stmt, 18));
     return s;
 }
 

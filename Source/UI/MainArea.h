@@ -21,6 +21,7 @@
 #include "LibraryPage.h"
 #include "SettingsPage.h"
 #include "SongSelectionDialog.h"
+#include "SongEditDialog.h"
 #include "../Models/VenueItem.h"
 #include "../Localization/LocalizationManager.h"
 #include <unordered_map>
@@ -109,6 +110,14 @@ public:
         if (libraryPage) libraryPage->startInitialSongLoad();
     }
 
+    /** Direct access to the Library page so the app shell can issue
+        single-song writes (upsertSong / deleteSong) from the Edit dialog. */
+    LibraryPage* getLibraryPage() const noexcept { return libraryPage; }
+
+    /** Direct access to the Home page so the app shell can push
+        venue-side playlist data (Popular / Recommended) into its rows. */
+    HomePage* getHomePage() const noexcept { return homePage; }
+
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;
 
@@ -116,6 +125,22 @@ public:
         Song Selection dialog (or cancels it). Wire this up in the app shell
         to drive the queue / player. */
     std::function<void(const SongSelectionResult&)> onSongSelectionResult;
+
+    /** Fired when the user saves or deletes a song in the Song Edit dialog
+        (Edit column on a SearchPage row). The shell is responsible for
+        persisting the updated CdgSong to the song database / songbook.json,
+        deleting it from Firestore, and patching playlist memberships. */
+    std::function<void(const SongEditResult&)> onSongEditResult;
+
+    /** Synchronous query that fills in the initial playlist-membership
+        flags for the Edit dialog (whether the song is currently in
+        New / Popular / Recommended for this venue). */
+    std::function<void(const CdgSong&, SongEditDialog::InitialPlaylists&)>
+        onSongEditPlaylistQuery;
+
+    /** Optional async metadata fetcher (Spotify-style). Set on MainArea so
+        the Edit dialog can call it directly via SongEditDialog::launch. */
+    SongEditDialog::MetadataFetcher onSongEditFetchMetadata;
 
 private:
 

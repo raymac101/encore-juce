@@ -249,6 +249,22 @@ public:
         googleButton_.onClick     = [this] { handleOAuth("google.com"); };
         appleButton_.onClick      = [this] { handleOAuth("apple.com");  };
 
+       #if ENCORE_DEV_SKIP_LOGIN
+        addChildComponent(skipButton_);
+        skipButton_.setButtonText("Skip Login (Dev)");
+        skipButton_.getProperties().set("ghost", true);
+        skipButton_.onClick = [this]
+        {
+            // Auto-fill canonical dev credentials, mark the venue we want
+            // post-auth, and reuse the normal sign-in path.
+            isLoginMode_ = true;
+            emailEditor_.setText("raymac@shaw.ca", juce::dontSendNotification);
+            passwordEditor_.setText("123456",      juce::dontSendNotification);
+            autoPickVenueName_ = "Karaoke Palace";
+            handleEmailSubmit();
+        };
+       #endif
+
         // ── Multi-page widgets (created up-front, hidden by default) ─────────
         // SelectVenue: heading + remember-toggle + scrolling venue cards
         addChildComponent(venuesHeadingLabel_);
@@ -551,6 +567,11 @@ private:
         googleButton_.setBounds(area.removeFromTop(44).withSizeKeepingCentre(300, 44));
         area.removeFromTop(10);
         appleButton_.setBounds(area.removeFromTop(44).withSizeKeepingCentre(300, 44));
+
+       #if ENCORE_DEV_SKIP_LOGIN
+        area.removeFromTop(18);
+        skipButton_.setBounds(area.removeFromTop(36).withSizeKeepingCentre(220, 36));
+       #endif
     }
 
     void layoutSelectVenuePage(juce::Rectangle<int> area)
@@ -619,6 +640,9 @@ private:
         switchModeButton_.setVisible(login);
         googleButton_.setVisible(login);
         appleButton_.setVisible(login);
+       #if ENCORE_DEV_SKIP_LOGIN
+        skipButton_.setVisible(login);
+       #endif
 
         venuesHeadingLabel_.setVisible(sel);
         rememberVenueToggle_.setVisible(sel);
@@ -811,6 +835,47 @@ private:
                 setBusy(false, {});
 
                 using O = LoginFlowController::Outcome;
+
+               #if ENCORE_DEV_SKIP_LOGIN
+                // Dev skip path: if a target venue name was set by the Skip
+                // button, find it in the associations list (or accept the
+                // already-resolved single venue) and short-circuit the picker.
+                if (autoPickVenueName_.isNotEmpty())
+                {
+                    juce::String pickId;
+                    if (flowResult_.outcome == O::VenueLoaded)
+                    {
+                        pickId = flowResult_.venueId;
+                    }
+                    else if (flowResult_.outcome == O::PickVenue)
+                    {
+                        for (const auto& a : flowResult_.associations)
+                        {
+                            if (a.venueName.equalsIgnoreCase(autoPickVenueName_))
+                            {
+                                pickId = a.venueId;
+                                break;
+                            }
+                        }
+                    }
+
+                    autoPickVenueName_.clear();
+
+                    if (pickId.isNotEmpty())
+                    {
+                        setBusy(true, "Loading venue...");
+                        UserPreferences::getInstance().setVenueId(pickId);
+                        LoginFlowController::selectVenue(pickId, [this, pickId]
+                        {
+                            setBusy(false, {});
+                            if (onComplete_) onComplete_(pickId, false);
+                        });
+                        return;
+                    }
+                    // Fall through to the normal picker if we couldn't find it.
+                }
+               #endif
+
                 switch (flowResult_.outcome)
                 {
                     case O::VenueLoaded:
@@ -1084,6 +1149,12 @@ private:
     juce::TextButton switchModeButton_;
     juce::TextButton googleButton_;
     juce::TextButton appleButton_;
+   #if ENCORE_DEV_SKIP_LOGIN
+    juce::TextButton skipButton_;
+    // Set when the dev "Skip" button auto-fills credentials so the post-auth
+    // flow knows to bypass the venue picker by name. Cleared after the pick.
+    juce::String     autoPickVenueName_;
+   #endif
 
     // SelectVenue page (custom cards instead of ListBox)
     class VenueCardComponent;

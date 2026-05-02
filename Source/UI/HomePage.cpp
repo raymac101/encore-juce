@@ -341,19 +341,66 @@ void HomePage::setRecentlyPlayed(const std::vector<Track>& tracks)
     recentRow->setTracks(tracks);
 }
 
+// Populate a SongRow + its backing click-resolution list from a Playlist
+// vector.  Each Playlist entry is matched against `library` by id; when a
+// match is found the full CdgSong is stored so Play Now / Add to Queue have
+// access to the local file paths.  Otherwise a minimal stub is built from
+// the Playlist data — clicks still open the Song Selection dialog but with
+// only the metadata Firestore knows about.
+static void populateRowFromPlaylist(SongRow& row,
+                                    std::vector<CdgSong>& backing,
+                                    const std::vector<Playlist>& playlists,
+                                    const std::vector<CdgSong>& library)
+{
+    backing.clear();
+    backing.reserve(playlists.size());
+
+    for (const auto& p : playlists)
+    {
+        const CdgSong* match = nullptr;
+        if (! p.id.empty())
+        {
+            for (const auto& s : library)
+                if (s.id == p.id) { match = &s; break; }
+        }
+        if (match != nullptr)
+        {
+            CdgSong song = *match;
+            if (! p.imageUrl.empty()) song.imageUrl = p.imageUrl;
+            backing.push_back(std::move(song));
+        }
+        else
+        {
+            CdgSong stub;
+            stub.id         = p.id;
+            stub.songName   = p.songName;
+            stub.artistName = p.artistName;
+            stub.imageUrl   = p.imageUrl;
+            backing.push_back(std::move(stub));
+        }
+    }
+
+    row.setPlaylists(playlists);
+}
+
+void HomePage::setRecentlyPlayedFromHistory(const std::vector<Playlist>& items)
+{
+    populateRowFromPlaylist(*recentRow, recentSongsSongs_, items, libraryRef_);
+}
+
 void HomePage::setNewSongs(const std::vector<Playlist>& playlists)
 {
-    newSongsRow->setPlaylists(playlists);
+    populateRowFromPlaylist(*newSongsRow, newSongsSongs_, playlists, libraryRef_);
 }
 
 void HomePage::setPopularSongs(const std::vector<Playlist>& playlists)
 {
-    popularRow->setPlaylists(playlists);
+    populateRowFromPlaylist(*popularRow, popularSongsSongs_, playlists, libraryRef_);
 }
 
 void HomePage::setRecommendedSongs(const std::vector<Playlist>& playlists)
 {
-    recommendedRow->setPlaylists(playlists);
+    populateRowFromPlaylist(*recommendedRow, recommendedSongsSongs_, playlists, libraryRef_);
 }
 
 //==============================================================================
@@ -369,6 +416,7 @@ void HomePage::updateAllText()
 //==============================================================================
 void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
 {
+    libraryRef_ = songs;   // cached for venue-playlist resolution
     if (songs.empty()) return;
 
     constexpr int maxCards = 20;
@@ -414,46 +462,26 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
             row.setPlaylists(cards);
     };
 
-    // --- Popular: highest total rating, drawn from the art-only pool ---
+    // Popular and Recommended now come from venue Firestore playlists —
+    // populated by the shell via setPopularSongs() / setRecommendedSongs().
+    // Only New Songs and Recently Played are derived from the local library
+    // here (and "New Songs" is overwritten by the venue's "new" playlist
+    // once it loads).
+
+    // --- New songs: most recently added to library, falling back to file date ---
     {
-        std::vector<const CdgSong*> sorted = withArt;
-        std::stable_sort(sorted.begin(), sorted.end(),
+        std::vector<const CdgSong*> recent = withArt;
+        std::stable_sort(recent.begin(), recent.end(),
             [](const CdgSong* a, const CdgSong* b) {
-                double rA = 0.0, rB = 0.0;
-                for (auto r : a->rating) rA += r;
-                for (auto r : b->rating) rB += r;
-                return rA > rB;
+                // Primary: addedAt (epoch ms) — 0 means unknown, sorts last.
+                const auto ta = a->addedAt > 0 ? a->addedAt : a->fileDate;
+                const auto tb = b->addedAt > 0 ? b->addedAt : b->fileDate;
+                return ta > tb;
             });
-        fillRow(*popularRow, sorted, popularSongsSongs_);
+        fillRow(*newSongsRow, recent, newSongsSongs_);
     }
 
-    // --- New songs: most recent release date (empty dates sort last) ---
-    {
-        std::vector<const CdgSong*> dated = withArt;
-        std::stable_sort(dated.begin(), dated.end(),
-            [](const CdgSong* a, const CdgSong* b) {
-                if (a->releaseDate.empty() && b->releaseDate.empty()) return false;
-                if (a->releaseDate.empty()) return false;
-                if (b->releaseDate.empty()) return true;
-                return a->releaseDate > b->releaseDate;
-            });
-        fillRow(*newSongsRow, dated, newSongsSongs_);
-    }
-
-    // --- Recommended: random shuffle (fresh seed each app launch) ---
-    {
-        std::vector<const CdgSong*> rec = withArt;
-        juce::Random rng((int) juce::Time::getMillisecondCounter());
-        for (int i = (int) rec.size() - 1; i > 0; --i)
-        {
-            int j = rng.nextInt(i + 1);
-            std::swap(rec[(size_t) i], rec[(size_t) j]);
-        }
-        fillRow(*recommendedRow, rec, recommendedSongsSongs_);
-    }
-
-    // --- Recently Played: separate random shuffle until real play history
-    //     is wired up.  Different seed so it doesn't mirror Recommended. ---
+    // --- Recently Played: random shuffle until real play history is wired up. ---
     {
         std::vector<const CdgSong*> recent = withArt;
         juce::Random rng((int) juce::Time::getMillisecondCounter() ^ 0x5a5a5a5a);

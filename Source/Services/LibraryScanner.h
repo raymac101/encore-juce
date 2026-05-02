@@ -26,6 +26,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <set>
 #include "../Models/CdgSong.h"
 #include "SongDatabase.h"
 
@@ -36,15 +37,17 @@ public:
     //==========================================================================
     struct ScanStats
     {
-        int numSongs   = 0;
-        int numCDG     = 0;
-        int numZip     = 0;
-        int numMP4     = 0;
-        int numM4A     = 0;
-        int numXML     = 0;
-        int numUnknown = 0;
-        int numGroups  = 0;
-        int numMeta    = 0;  // Songs with metadata matched
+        int numSongs          = 0;
+        int numCDG            = 0;
+        int numZip            = 0;
+        int numMP4            = 0;
+        int numM4A            = 0;
+        int numXML            = 0;
+        int numUnknown        = 0;
+        int numGroups         = 0;
+        int numMeta           = 0;  // Songs with metadata matched
+        int numNew            = 0;  // Truly new songs added (append mode)
+        int numAlreadyImported = 0; // Songs already in library (append mode)
     };
 
     //==========================================================================
@@ -60,6 +63,15 @@ public:
     /** Append scan — merges new files with the existing songbook. */
     void startAppendScan(const juce::File& rootDir,
                          const std::vector<CdgSong>& existingSongs);
+
+    /** Restrict the next append scan to only process files whose base name
+        (filename without extension, case-insensitive) is in this list.
+        Pass an empty vector to process all files (default). */
+    void setAppendFilter(const std::vector<juce::String>& baseNames);
+
+    /** Copy new files to `destDir` and/or delete them from source after a
+        successful append scan.  Has no effect on initial scans. */
+    void setAppendPostOps(bool copySongs, bool deleteSongs, const juce::File& destDir);
 
     /** Stop any running scan (waits up to 3 s for the thread to exit). */
     void stopScan();
@@ -107,6 +119,11 @@ public:
                               juce::String& outCode,
                               juce::String& outVersion);
 
+    // Normalise artist+song into a lowercase punctuation-stripped lookup key.
+    // Used by AddSongsDialog to detect already-imported songs.
+    static juce::String normaliseSongKey(const juce::String& artist,
+                                         const juce::String& song);
+
     //==========================================================================
     // Thread-safe progress state (poll freely from the UI thread)
     std::atomic<int>  progressCurrent { 0 };
@@ -123,6 +140,12 @@ public:
     std::function<void(int current, int total, juce::String songName)> onProgress;
     std::function<void(std::vector<CdgSong>, ScanStats)>               onComplete;
     std::function<void(juce::String)>                                   onError;
+
+    /** Fired in append mode for each processed song (new or duplicate).
+        baseName — filename without extension.
+        isNew    — true if this song wasn't in the existing library.
+        message  — human-readable status ("New Song" / "Already Exists"). */
+    std::function<void(juce::String baseName, bool isNew, juce::String message)> onFileImported;
 
 private:
     //==========================================================================
@@ -143,11 +166,6 @@ private:
                                    const juce::String& song,
                                    const juce::String& code);
 
-    // Normalise artist+song into a lowercase punctuation-stripped lookup key
-    // used to group vendor versions of the same song together.
-    static juce::String normaliseSongKey(const juce::String& artist,
-                                         const juce::String& song);
-
     // Map a catalog disc-code prefix (e.g. "SC1234") to a human-readable
     // vendor name (e.g. "Sound Choice").  Returns "" if unrecognised.
     static juce::String vendorVersionFromCode(const juce::String& code);
@@ -165,6 +183,14 @@ private:
     bool                 appendMode_   = false;
     std::vector<CdgSong> existing_;
     SongDatabase*        songDb_       = nullptr;
+
+    // Append filter (empty = process all files)
+    std::set<juce::String> appendFilter_;
+
+    // Post-ops for append scan
+    bool       appendCopy_   = false;
+    bool       appendDelete_ = false;
+    juce::File appendDest_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)
 };

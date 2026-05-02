@@ -61,8 +61,9 @@ juce::String CdgSong::toJson() const
     obj->setProperty("fileName", juce::var(strVecToVar(fileName)));
     obj->setProperty("filePath", juce::var(strVecToVar(filePath)));
     obj->setProperty("fileType", juce::var(strVecToVar(fileType)));
-    obj->setProperty("fileDate", (juce::int64)fileDate);
-    obj->setProperty("fileSize", (juce::int64)fileSize);
+    obj->setProperty("fileDate",  (juce::int64)fileDate);
+    obj->setProperty("fileSize",  (juce::int64)fileSize);
+    obj->setProperty("addedAt",   (juce::int64)addedAt);
     obj->setProperty("releaseDate", juce::String(releaseDate));
     obj->setProperty("genres", juce::var(strVecToVar(genres)));
     obj->setProperty("version", juce::var(strVecToVar(version)));
@@ -99,6 +100,7 @@ CdgSong CdgSong::fromJsonObject(juce::DynamicObject* obj)
     s.fileType     = varToStrVec(obj->getProperty("fileType"));
     s.fileDate     = (int64_t)obj->getProperty("fileDate");
     s.fileSize     = (int64_t)obj->getProperty("fileSize");
+    s.addedAt      = (int64_t)obj->getProperty("addedAt");
     s.releaseDate  = obj->getProperty("releaseDate").toString().toStdString();
     s.genres       = varToStrVec(obj->getProperty("genres"));
     s.version      = varToStrVec(obj->getProperty("version"));

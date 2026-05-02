@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <unordered_set>
 #include "ResponsiveLayout.h"
 #include "../Localization/LocalizationManager.h"
 #include "../Audio/AudioEngine.h"
@@ -167,6 +168,24 @@ private:
     // Cached venue config — populated from VenueService::loadVenue and used
     // by the rotation/strikes logic when a singer is moved to now-singing.
     int activeVenueNumStrikes_ = 0;
+
+    // Venue playlist membership — refreshed from Firestore on venue change
+    // and after every Song-Edit save.  Powers both the home-page Popular /
+    // Recommended rows and the SongEditDialog's initial checkbox state.
+    std::unordered_set<std::string> popularSongIds_;
+    std::unordered_set<std::string> recommendedSongIds_;
+    std::unordered_set<std::string> newSongIds_;
+
+    void loadVenuePlaylists();
+
+    /** Write a play-history entry if the song played long enough (>30 s).
+        Pass `naturalEnd=true` when the audio finished on its own (always
+        qualifies); `false` when the KJ skipped — checked against the 30 s
+        threshold. Resets `playStartTimeMs_` to prevent duplicate writes. */
+    void logPlayHistoryIfNeeded(bool naturalEnd);
+
+    // Play-history tracking — set when a song starts, read by logPlayHistoryIfNeeded.
+    juce::int64  playStartTimeMs_ = 0;
 
     // Local "now singing" override. We mirror the Angular behaviour where
     // the now-playing card is purely UI state on the host machine — there

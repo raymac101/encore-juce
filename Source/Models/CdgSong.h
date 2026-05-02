@@ -34,8 +34,9 @@ struct CdgSong
     std::vector<std::string> fileName;      // File names only
     std::vector<std::string> filePath;      // Directory paths
     std::vector<std::string> fileType;      // File extensions / types
-    int64_t fileDate = 0;                   // File modification date (epoch ms)
-    int64_t fileSize = 0;                   // File size in bytes
+    int64_t fileDate  = 0;                  // File modification date (epoch ms)
+    int64_t fileSize  = 0;                  // File size in bytes
+    int64_t addedAt   = 0;                  // Epoch ms when first added to the local library (0 = unknown)
     std::string releaseDate;
     std::vector<std::string> genres;
     std::vector<std::string> version;       // e.g. "Male", "Female", "Duet"
