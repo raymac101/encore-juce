@@ -339,18 +339,18 @@ public:
 
             auto proceed = [this, venueId](bool initialScan)
             {
-                setBusy(true, "Loading venue...");
-                // Persist as the new "configured on this PC" venue if the
-                // host opted in, OR if they're explicitly switching venues
-                // (the new one then becomes the configured one).
+                // Transition immediately; do not hold the login screen while
+                // venue preference / audit writes finish on slow networks.
+                setBusy(true, "Opening venue...");
+
                 if (rememberVenueToggle_.getToggleState() || initialScan)
                     UserPreferences::getInstance().setVenueId(venueId);
 
-                LoginFlowController::selectVenue(venueId, [this, venueId, initialScan]
-                {
-                    setBusy(false, {});
-                    if (onComplete_) onComplete_(venueId, initialScan);
-                });
+                if (onComplete_)
+                    onComplete_(venueId, initialScan);
+
+                // Fire-and-forget bookkeeping.
+                LoginFlowController::selectVenue(venueId, []() {});
             };
 
             if (isSwitch)

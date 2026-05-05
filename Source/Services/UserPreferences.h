@@ -52,6 +52,10 @@ public:
     juce::String getLibraryPath() const;
     void setLibraryPath(const juce::String& path);
 
+    //--- Audio -----------------------------------------------------------------
+    juce::String getPreferredAudioOutputDevice() const;
+    void setPreferredAudioOutputDevice(const juce::String& deviceName);
+
     //--- Setup flag ------------------------------------------------------------
     bool getSetupCompleted() const;
     void setSetupCompleted(bool completed);

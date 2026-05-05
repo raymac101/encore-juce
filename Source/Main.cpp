@@ -232,6 +232,57 @@ public:
         This class implements the desktop window that contains an instance of
         our MainComponent class.
     */
+    class ShellLoadingComponent : public juce::Component,
+                                  private juce::Timer
+    {
+    public:
+        ShellLoadingComponent()
+        {
+            startTimerHz(30);
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            g.fillAll(juce::Colour(0xff16213e));
+
+            auto area = getLocalBounds();
+            auto centre = area.getCentre().toFloat();
+
+            for (int i = 0; i < 12; ++i)
+            {
+                const float a = phase_ + juce::MathConstants<float>::twoPi * (float) i / 12.0f;
+                const float inner = 12.0f;
+                const float outer = 22.0f;
+                const float alpha = 0.2f + 0.8f * ((float) i / 12.0f);
+                g.setColour(juce::Colour(0xff30daff).withAlpha(alpha));
+                juce::Point<float> p1(centre.x + std::cos(a) * inner,
+                                      centre.y - 20.0f + std::sin(a) * inner);
+                juce::Point<float> p2(centre.x + std::cos(a) * outer,
+                                      centre.y - 20.0f + std::sin(a) * outer);
+                g.drawLine({ p1, p2 }, 3.0f);
+            }
+
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(juce::FontOptions().withHeight(22.0f)).boldened());
+            g.drawText("Encore Karaoke", area.withTrimmedTop(area.getCentreY()), juce::Justification::centredTop);
+
+            g.setColour(juce::Colour(0xffc8d4e8));
+            g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)));
+            g.drawText("Loading application...", area.withTrimmedTop(area.getCentreY() + 32), juce::Justification::centredTop);
+        }
+
+    private:
+        void timerCallback() override
+        {
+            phase_ += 0.14f;
+            if (phase_ > juce::MathConstants<float>::twoPi)
+                phase_ -= juce::MathConstants<float>::twoPi;
+            repaint();
+        }
+
+        float phase_ = 0.0f;
+    };
+
     class MainWindow : public juce::DocumentWindow,
                        public juce::ChangeListener
     {
@@ -243,7 +294,7 @@ public:
                             DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
-            setContentOwned (new MainComponent(), true);
+            setContentOwned (new ShellLoadingComponent(), true);
 
             // Rebuild the content whenever the language changes so that every
             // label, button, tab etc. picks up the new translations.
@@ -254,33 +305,72 @@ public:
            #else
             // Restore saved window bounds, or use a sensible default (1920x1080 centred).
             setResizable (true, true);
+            
+            // Get the primary display bounds to check against screen size
+            auto displayArea = juce::Desktop::getInstance().getDisplays().getTotalBounds(true);
             auto saved = UserPreferences::getInstance().getWindowBounds();
+            
+            // Determine the target window size
+            int targetWidth = 1920;
+            int targetHeight = 1080;
+            
             if (saved.getWidth() > 0 && saved.getHeight() > 0)
             {
-                if (saved.getX() > 0 || saved.getY() > 0)
-                {
-                    // Clamp to the current display so we don't end up off-screen
-                    // if the user disconnected a monitor since last run.
-                    auto displayArea = juce::Desktop::getInstance().getDisplays()
-                                           .getTotalBounds(true);
-                    auto target = saved;
-                    if (! displayArea.intersects(target))
-                        target.setPosition(displayArea.getCentreX() - target.getWidth()  / 2,
-                                           displayArea.getCentreY() - target.getHeight() / 2);
-                    setBounds(target);
-                }
-                else
-                {
-                    centreWithSize(saved.getWidth(), saved.getHeight());
-                }
+                targetWidth = saved.getWidth();
+                targetHeight = saved.getHeight();
+            }
+            
+            // If window is larger than screen, resize it to fit with some padding
+            if (targetWidth > displayArea.getWidth() || targetHeight > displayArea.getHeight())
+            {
+                const int padding = 40; // Leave some padding from screen edges
+                targetWidth = juce::jmin(targetWidth, displayArea.getWidth() - padding);
+                targetHeight = juce::jmin(targetHeight, displayArea.getHeight() - padding);
+            }
+            
+            // Now position the window
+            if (saved.getWidth() > 0 && saved.getHeight() > 0 && (saved.getX() > 0 || saved.getY() > 0))
+            {
+                // Try to restore the saved position
+                auto target = saved;
+                target.setWidth(targetWidth);
+                target.setHeight(targetHeight);
+                if (! displayArea.intersects(target))
+                    target.setPosition(displayArea.getCentreX() - targetWidth / 2,
+                                       displayArea.getCentreY() - targetHeight / 2);
+                setBounds(target);
             }
             else
             {
-                centreWithSize(1920, 1080);
+                // Centre the window with the target size
+                centreWithSize(targetWidth, targetHeight);
             }
            #endif
 
             setVisible (true);
+        }
+
+        void attachMainContent (const juce::String& venueId,
+                                bool requestInitialScan,
+                                juce::MenuBarModel* menuModel)
+        {
+            const auto previousBounds = getBounds();
+            const bool wasFullScreen  = isFullScreen();
+
+            setContentOwned (new MainComponent(), true);
+            setBounds (previousBounds);
+            if (wasFullScreen)
+                setFullScreen (true);
+
+           #if ! JUCE_MAC
+            if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+                content->installMenuBarModel (menuModel);
+           #else
+            juce::ignoreUnused (menuModel);
+           #endif
+
+            if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+                content->setVenueId (venueId, requestInitialScan);
         }
 
         ~MainWindow() override
@@ -386,11 +476,11 @@ private:
     {
         loginWindow_.reset (new LoginWindow ([this](juce::String venueId, bool requestInitialScan)
         {
-            // Defer so the login window can finish closing on the message thread.
+            // Create the main shell immediately, then close the login window.
             juce::MessageManager::callAsync ([this, venueId, requestInitialScan]
             {
-                loginWindow_ = nullptr;
                 createMainWindow (venueId, requestInitialScan);
+                juce::Timer::callAfterDelay(1, [this] { loginWindow_ = nullptr; });
             });
         }));
     }
@@ -400,17 +490,28 @@ private:
         if (mainWindow != nullptr)
             return;
 
+        const auto startMs = juce::Time::getMillisecondCounterHiRes();
+
         mainWindow.reset (new MainWindow (getApplicationName()));
+        DBG("[Startup] MainWindow ctor: " + juce::String(juce::Time::getMillisecondCounterHiRes() - startMs, 1) + " ms");
 
-        if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
-            content->setVenueId (venueId, requestInitialScan);
+        // Let the main window paint first, then start venue/network loading.
+        juce::Component::SafePointer<MainWindow> safeWindow (mainWindow.get());
+        juce::Timer::callAfterDelay(1, [safeWindow, venueId, requestInitialScan, this]
+        {
+            if (safeWindow == nullptr)
+                return;
 
-       #if JUCE_MAC
-        juce::MenuBarModel::setMacMainMenu (this);
-       #else
-        if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
-            content->installMenuBarModel (this);
-       #endif
+            const auto venueStartMs = juce::Time::getMillisecondCounterHiRes();
+            safeWindow->attachMainContent (venueId, requestInitialScan, this);
+            DBG("[Startup] attachMainContent finished in "
+                + juce::String(juce::Time::getMillisecondCounterHiRes() - venueStartMs, 1)
+                + " ms");
+
+           #if JUCE_MAC
+            juce::MenuBarModel::setMacMainMenu (this);
+           #endif
+        });
     }
 
     std::unique_ptr<LoginWindow> loginWindow_;

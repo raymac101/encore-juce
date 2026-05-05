@@ -22,6 +22,7 @@
 
 #include <JuceHeader.h>
 #include "PitchShifter.h"
+#include "../Services/UserPreferences.h"
 
 //==============================================================================
 class AudioEngine : public juce::AudioSource,
@@ -198,7 +199,8 @@ private:
 
     //==========================================================================
     // Internal
-    void setupAudioDevice();
+    bool setupAudioDevice();
+    void persistActiveAudioDevice() const;
     void handleAudioDeviceError(const juce::String& message);
     void applyReverb(juce::AudioBuffer<float>& buffer);
     void applyEcho(juce::AudioBuffer<float>& buffer);

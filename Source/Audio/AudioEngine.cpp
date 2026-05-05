@@ -29,13 +29,15 @@ void AudioEngine::initialize()
     if (initialized)
         return;
 
-    setupAudioDevice();
+    if (! setupAudioDevice())
+        return;
 
     audioSourcePlayer = std::make_unique<juce::AudioSourcePlayer>();
     deviceManager.addAudioCallback(audioSourcePlayer.get());
     audioSourcePlayer->setSource(this);
 
     initialized = true;
+    persistActiveAudioDevice();
 }
 
 void AudioEngine::shutdown()
@@ -66,17 +68,62 @@ void AudioEngine::shutdown()
     initialized = false;
 }
 
-void AudioEngine::setupAudioDevice()
+bool AudioEngine::setupAudioDevice()
 {
-    auto error = deviceManager.initialise(0, 2, nullptr, true);
+    const auto startMs = juce::Time::getMillisecondCounterHiRes();
+    const auto preferredDevice = UserPreferences::getInstance().getPreferredAudioOutputDevice().trim();
+
+    juce::AudioDeviceManager::AudioDeviceSetup preferredSetup;
+    const juce::AudioDeviceManager::AudioDeviceSetup* preferredSetupPtr = nullptr;
+
+    if (preferredDevice.isNotEmpty())
+    {
+        preferredSetup.outputDeviceName = preferredDevice;
+        preferredSetup.inputDeviceName.clear();
+        preferredSetupPtr = &preferredSetup;
+        DBG("[AudioStartup] Attempting preferred output device: " + preferredDevice);
+    }
+    else
+    {
+        DBG("[AudioStartup] No saved output device. Falling back to Windows default device.");
+    }
+
+    auto error = deviceManager.initialise(0, 2, nullptr, true, {}, preferredSetupPtr);
+    const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
 
     if (error.isNotEmpty())
     {
         handleAudioDeviceError("Failed to initialise audio device: " + error);
-        return;
+        DBG("[AudioStartup] deviceManager.initialise failed after " + juce::String(initMs, 1) + " ms");
+        return false;
     }
 
     deviceManager.addChangeListener(this);
+
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        DBG("[AudioStartup] Opened output device '" + device->getName()
+            + "' @ " + juce::String(device->getCurrentSampleRate(), 0)
+            + " Hz, buffer " + juce::String(device->getCurrentBufferSizeSamples())
+            + " in " + juce::String(initMs, 1) + " ms");
+    }
+    else
+    {
+        DBG("[AudioStartup] No active audio device after initialise; completed in "
+            + juce::String(initMs, 1) + " ms");
+    }
+
+    return true;
+}
+
+void AudioEngine::persistActiveAudioDevice() const
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        const auto name = device->getName().trim();
+        if (name.isNotEmpty())
+            UserPreferences::getInstance().setPreferredAudioOutputDevice(name);
+    }
 }
 
 void AudioEngine::handleAudioDeviceError(const juce::String& message)
@@ -468,6 +515,8 @@ void AudioEngine::setAudioDevice(const juce::String& deviceName)
     auto error = deviceManager.setAudioDeviceSetup(setup, true);
     if (error.isNotEmpty())
         handleAudioDeviceError("setAudioDevice: " + error);
+    else
+        persistActiveAudioDevice();
 }
 
 juce::StringArray AudioEngine::getAvailableAudioDevices() const
@@ -503,6 +552,8 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
     if (source == &deviceManager)
     {
+        persistActiveAudioDevice();
+
         // Re-prepare RubberBand and echo buffer for the new device parameters.
         if (auto* dev = deviceManager.getCurrentAudioDevice())
         {

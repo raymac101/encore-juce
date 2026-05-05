@@ -517,6 +517,11 @@ void LocalizationManager::loadFallbackTranslations()
     translations["audio.play"] = "Play";
     translations["audio.pause"] = "Pause";
     translations["audio.stop"] = "Stop";
+    translations["audio.feedback.starting"] = "Audio is Starting...";
+    translations["audio.feedback.ready"] = "Audio is Ready";
+    translations["audio.feedback.unavailable"] = "Audio Unavailable";
+    translations["audio.feedback.engine_starting"] = "Audio engine is still starting...";
+    translations["audio.feedback.engine_unavailable"] = "Audio engine is unavailable.";
 
     // ── Status ──
     translations["status.ready"] = "Ready";

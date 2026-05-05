@@ -22,12 +22,13 @@
 #include "../Models/QueueItem.h"
 #include "../Models/Singers.h"
 #include "TopBar.h"
-#include "BottomBar.h"
 #include "NavBar.h"
 #include "MainArea.h"
 #include "QueueBar.h"
 #include "SongSelectionDialog.h"
 #include "LyricDisplayWindow.h"
+
+class BottomBar;
 
 //==============================================================================
 /**
@@ -114,6 +115,8 @@ private:
     //==============================================================================
     // Secondary-monitor lyric / CDG display
     std::unique_ptr<LyricDisplayWindow> lyricWindow_;
+    juce::String pendingVenueCode_;
+    juce::Image pendingVenueLogo_;
 
     //==============================================================================
     // Embedded menu bar (Windows/Linux only — macOS uses the system bar).
@@ -131,9 +134,11 @@ private:
         bottom-bar transport) to actually start the track. */
     void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones, bool autoStart = true);
 
-    /** Show / hide a full-window "Loading song..." overlay. */
-    void showLoadingOverlay(const juce::String& message);
+    /** Show / hide a full-window loading overlay. */
+    void showLoadingOverlay(const juce::String& message, double progress = -1.0);
+    void updateLoadingOverlay(const juce::String& message, double progress = -1.0);
     void hideLoadingOverlay();
+    void startDeferredAudioServices(const juce::String& venueId, int startupToken);
 
     //==============================================================================
     // /requested pipeline — start RequestService for the active venue and
@@ -162,6 +167,9 @@ private:
     bool highContrastMode = false;
     bool largeTextMode = false;
     bool isConnectedToFirebase = false;
+    int startupLoadToken_ = 0;
+    bool audioStartupInProgress_ = false;
+    bool audioStartupComplete_ = false;
 
     juce::String activeVenueId_;
 
@@ -212,6 +220,7 @@ private:
     // Status updates
     void updateConnectionStatus();
     void updateDebugInfo();
+    void updateAudioStatusIndicator();
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

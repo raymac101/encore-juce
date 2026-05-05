@@ -28,7 +28,6 @@ namespace
 BottomBar::BottomBar()
 {
     setupUI();
-    generateWaveform();
     startTimerHz(30);
 }
 
@@ -198,6 +197,16 @@ void BottomBar::paint(juce::Graphics& g)
         g.setColour(juce::Colours::white.withAlpha(0.7f));
         g.drawLine(static_cast<float>(markerX), static_cast<float>(drawArea.getY()),
                    static_cast<float>(markerX), static_cast<float>(drawArea.getBottom()), 1.5f);
+    }
+    else if (drawArea.getWidth() > 20)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.14f));
+        g.drawRect(drawArea, 1);
+
+        g.setColour(juce::Colours::white.withAlpha(0.9f));
+        g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).boldened());
+        g.drawFittedText(waveformStatusMessage_, drawArea.reduced(12, 8),
+                         juce::Justification::centred, 2);
     }
 }
 
@@ -595,28 +604,20 @@ void BottomBar::updateAllText()
     volumeLabel.setText(lm.getText("bottombar.volume") + " " + juce::String(vol), juce::dontSendNotification);
 }
 
-void BottomBar::generateWaveform()
-{
-    waveform.clear();
-    waveform.reserve(240);
-
-    juce::Random rng(2026);
-    for (int i = 0; i < 240; ++i)
-    {
-        const float x = static_cast<float>(i) / 16.0f;
-        const float base = 0.45f + 0.25f * std::sin(x) + 0.15f * std::sin(x * 0.35f + 1.2f);
-        const float noise = (rng.nextFloat() - 0.5f) * 0.18f;
-        waveform.push_back(juce::jlimit(0.08f, 1.0f, base + noise));
-    }
-}
-
 void BottomBar::setWaveformSamples(const std::vector<float>& samples)
 {
     if (samples.empty())
-        generateWaveform();
+        waveform.clear();
     else
         waveform = samples;
     repaint(getWaveformArea());
+}
+
+void BottomBar::setWaveformStatusMessage(const juce::String& message)
+{
+    waveformStatusMessage_ = message;
+    if (waveform.empty())
+        repaint(getWaveformArea());
 }
 
 juce::Rectangle<int> BottomBar::getTransportArea() const

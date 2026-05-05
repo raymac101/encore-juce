@@ -99,6 +99,7 @@ private:
     void setProgressVisible(bool visible);
     void setScanningState(bool scanning);
     void showMessage(const juce::String& msg, bool isError = false);
+    void loadSongbookAsync();
 
     //==========================================================================
     // UI colours (consistent with the rest of the app)

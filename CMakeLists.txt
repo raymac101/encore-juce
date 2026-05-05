@@ -5,8 +5,17 @@ cmake_minimum_required(VERSION 3.22)
 project(EncoreJUCE VERSION 1.0.0)
 
 # Add JUCE subdirectory (using complete JUCE framework)
-# add_subdirectory(C:/JUCE-Full JUCE)
-add_subdirectory(/Users/raymac/JUCE JUCE)
+if(WIN32)
+    set(JUCE_SOURCE_DIR "C:/JUCE-Full")
+else()
+    set(JUCE_SOURCE_DIR "/Users/raymac/JUCE")
+endif()
+
+if(NOT EXISTS "${JUCE_SOURCE_DIR}")
+    message(FATAL_ERROR "JUCE source directory not found at ${JUCE_SOURCE_DIR}. Set JUCE_SOURCE_DIR in CMakeLists.txt to your local JUCE path.")
+endif()
+
+add_subdirectory(${JUCE_SOURCE_DIR} JUCE)
 
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
@@ -125,9 +134,13 @@ if(NOT RUBBERBAND_FOUND)
                         ERROR_QUIET)
     endif()
     find_path(RUBBERBAND_INCLUDE_DIR rubberband/RubberBandStretcher.h
-              HINTS ${RUBBERBAND_BREW_PREFIX}/include)
+              HINTS ${RUBBERBAND_BREW_PREFIX}/include
+                    $ENV{VCPKG_ROOT}/installed/x64-windows/include
+                    $ENV{VCPKG_ROOT}/installed/x64-windows-static/include)
     find_library(RUBBERBAND_LIBRARY NAMES rubberband
-                 HINTS ${RUBBERBAND_BREW_PREFIX}/lib)
+                 HINTS ${RUBBERBAND_BREW_PREFIX}/lib
+                       $ENV{VCPKG_ROOT}/installed/x64-windows/lib
+                       $ENV{VCPKG_ROOT}/installed/x64-windows-static/lib)
     if(NOT RUBBERBAND_INCLUDE_DIR OR NOT RUBBERBAND_LIBRARY)
         message(FATAL_ERROR "Rubber Band Library not found. Install with `brew install rubberband` (macOS) or `vcpkg install rubberband` (Windows).")
     endif()

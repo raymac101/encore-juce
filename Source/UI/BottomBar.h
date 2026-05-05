@@ -57,9 +57,13 @@ public:
     void setVolume(int volumeStep);
 
     /** Replace the procedural waveform with real peaks. Values should be in
-        [0.0, 1.0]. Pass an empty vector to restore the default procedural
-        waveform. */
+      [0.0, 1.0]. Pass an empty vector to clear waveform rendering and show
+      the status message instead. */
     void setWaveformSamples(const std::vector<float>& samples);
+
+    /** Set the centered message shown in the waveform area while no real
+      waveform peaks are available. */
+    void setWaveformStatusMessage(const juce::String& message);
 
     /** When true, the internal 30Hz timer stops auto-advancing progress so that
         an external source (e.g. the audio engine) drives it via setProgress(). */
@@ -83,7 +87,6 @@ private:
   void updateTransportButtonIcons();
     void updateTimeLabels();
     void configureTransportButton(juce::ShapeButton& button, bool isPrimary);
-    void generateWaveform();
     juce::String formatTime(double seconds) const;
   std::unique_ptr<juce::Drawable> createSpriteIcon(const juce::String& symbolId,
                            const juce::Colour& colour) const;
@@ -110,6 +113,7 @@ private:
     float progress = 0.0f;
     double durationSeconds = 0.0;
     std::vector<float> waveform;
+    juce::String waveformStatusMessage_;
     bool externalProgressControl_ = false;
 
     //==============================================================================

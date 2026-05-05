@@ -275,7 +275,11 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             else if (associations.size() == 1)
             {
                 UserPreferences::getInstance().setVenueId(associations[0].venueId);
-                touchLastAccess(associations[0].venueId, uid);
+                // Do not block startup on a slow network write.
+                juce::Thread::launch([vid = associations[0].venueId, uid]()
+                {
+                    touchLastAccess(vid, uid);
+                });
                 result.outcome = Outcome::VenueLoaded;
                 result.venueId = associations[0].venueId;
             }
@@ -286,7 +290,11 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
                 if (adminOverride)
                 {
-                    touchLastAccess(storedVenueId, uid);
+                    // Do not block startup on a slow network write.
+                    juce::Thread::launch([vid = storedVenueId, uid]()
+                    {
+                        touchLastAccess(vid, uid);
+                    });
                     result.outcome = Outcome::VenueLoaded;
                     result.venueId = storedVenueId;
                 }
@@ -325,12 +333,14 @@ void LoginFlowController::selectVenue(const juce::String& venueId,
     juce::Thread::launch([venueId, onDone = std::move(onDone)]()
     {
         UserPreferences::getInstance().setVenueId(venueId);
-        const auto uid = FirestoreClient::getInstance().getUserId();
-        if (uid.isNotEmpty())
-            touchLastAccess(venueId, uid);
 
         if (onDone)
             postOnMessageThread(onDone);
+
+        // Fire-and-forget update; never hold up UI transition.
+        const auto uid = FirestoreClient::getInstance().getUserId();
+        if (uid.isNotEmpty())
+            touchLastAccess(venueId, uid);
     });
 }
 

@@ -172,8 +172,8 @@ LibraryPage::LibraryPage()
     };
 
     //--------------------------------------------------------------------------
-    // Load existing songbook from disk
-    loadSongbook();
+    // Load existing songbook from disk without blocking first paint.
+    loadSongbookAsync();
 }
 
 //==============================================================================
@@ -208,6 +208,46 @@ void LibraryPage::loadSongbook()
             pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
         }
     }
+}
+
+void LibraryPage::loadSongbookAsync()
+{
+    juce::Component::SafePointer<LibraryPage> safeThis(this);
+    juce::Thread::launch([safeThis]()
+    {
+        if (safeThis == nullptr)
+            return;
+
+        auto loadedSongs = safeThis->scanner_.loadSongbook();
+        auto loadedStats = LibraryScanner::computeStats(loadedSongs);
+
+        juce::MessageManager::callAsync([safeThis, loadedSongs = std::move(loadedSongs), loadedStats]() mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->songs_ = std::move(loadedSongs);
+            safeThis->stats_ = loadedStats;
+            safeThis->refreshStats();
+
+            // Restore scan-root path when available.
+            juce::File rootFile = safeThis->scanner_.getSongbookFile().getSiblingFile("scanRoot.txt");
+            if (rootFile.existsAsFile())
+            {
+                juce::String savedPath = rootFile.loadFileAsString().trim();
+                if (savedPath.isNotEmpty())
+                    safeThis->pathEditor_->setText(savedPath, juce::dontSendNotification);
+            }
+            else if (! safeThis->songs_.empty() && ! safeThis->songs_[0].filePath.empty())
+            {
+                juce::File dir(juce::String(safeThis->songs_[0].filePath[0]));
+                safeThis->pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
+            }
+
+            if (safeThis->onSongbookChanged)
+                safeThis->onSongbookChanged(safeThis->songs_);
+        });
+    });
 }
 
 //==============================================================================

@@ -233,6 +233,20 @@ void UserPreferences::setLibraryPath(const juce::String& path)
 }
 
 //==============================================================================
+juce::String UserPreferences::getPreferredAudioOutputDevice() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("preferredAudioOutputDevice", juce::var()).toString();
+}
+
+void UserPreferences::setPreferredAudioOutputDevice(const juce::String& deviceName)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("preferredAudioOutputDevice", deviceName);
+    save();
+}
+
+//==============================================================================
 bool UserPreferences::getSetupCompleted() const
 {
     const juce::ScopedLock sl(lock_);

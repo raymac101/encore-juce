@@ -11,6 +11,7 @@
 */
 
 #include "MainComponent.h"
+#include "BottomBar.h"
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
@@ -40,7 +41,12 @@ public:
         startTimerHz(30);
     }
 
-    void setMessage(const juce::String& msg) { message_ = msg; repaint(); }
+    void setState(const juce::String& msg, double p)
+    {
+        message_ = msg;
+        progress_ = p;
+        repaint();
+    }
 
     void paint(juce::Graphics& g) override
     {
@@ -48,8 +54,8 @@ public:
         g.fillAll(juce::Colour(0xcc000000));
 
         // Centred card
-        const int cardW = 320;
-        const int cardH = 120;
+        const int cardW = 380;
+        const int cardH = 150;
         auto card = juce::Rectangle<int>(cardW, cardH)
                         .withCentre(getLocalBounds().getCentre());
 
@@ -65,7 +71,24 @@ public:
         // Message
         g.setColour(juce::Colours::white);
         g.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
-        g.drawFittedText(message_, card.reduced(12, 8), juce::Justification::centredLeft, 2);
+        auto textArea = card.reduced(12, 8);
+        g.drawFittedText(message_, textArea.removeFromTop(52), juce::Justification::centredLeft, 2);
+
+        if (progress_ >= 0.0)
+        {
+            auto barArea = textArea.removeFromTop(16).reduced(0, 2);
+            g.setColour(juce::Colour(0xff0d1527));
+            g.fillRoundedRectangle(barArea.toFloat(), 5.0f);
+
+            auto fill = barArea.withWidth((int) std::round(barArea.getWidth() * juce::jlimit(0.0, 1.0, progress_)));
+            g.setColour(juce::Colour(0xff30daff));
+            g.fillRoundedRectangle(fill.toFloat(), 5.0f);
+
+            g.setColour(juce::Colour(0xffb9c3d5));
+            g.setFont(juce::Font(juce::FontOptions().withHeight(12.0f)));
+            g.drawText(juce::String((int) std::round(progress_ * 100.0)) + "%",
+                       textArea.removeFromTop(18), juce::Justification::centredLeft);
+        }
     }
 
 private:
@@ -96,23 +119,25 @@ private:
     }
 
     juce::String message_ { "Loading song..." };
+    double progress_ = -1.0;
     float phase_ = 0.0f;
 };
 
 //==============================================================================
 MainComponent::MainComponent()
 {
+    const auto ctorStartMs = juce::Time::getMillisecondCounterHiRes();
+    audioStartupInProgress_ = false;
+    audioStartupComplete_ = false;
+
     // Set initial size (will be adjusted by responsive system)
     setSize(1200, 800);
 
-    // Create audio engine up front so it's ready before UI hooks it.
+    // Create the audio engine object, but defer actual device initialisation
+    // so a slow driver/device probe does not block first paint.
     audioEngine = std::make_unique<AudioEngine>();
-    audioEngine->initialize();
-
-    // Open the singer-facing lyric display window on the secondary monitor
-    // (falls back to a windowed display if there's only one screen). It
-    // shows an idle screen until a song is loaded.
-    lyricWindow_ = std::make_unique<LyricDisplayWindow> (audioEngine.get());
+    DBG("[Startup] AudioEngine object created: "
+        + juce::String(juce::Time::getMillisecondCounterHiRes() - ctorStartMs, 1) + " ms");
 
     try
     {
@@ -132,6 +157,8 @@ MainComponent::MainComponent()
         // detectAndConfigureScreens(); // Commenting out temporarily
         
         DBG("MainComponent initialized successfully");
+        DBG("[Startup] MainComponent total ctor: "
+            + juce::String(juce::Time::getMillisecondCounterHiRes() - ctorStartMs, 1) + " ms");
     }
     catch (const std::exception& e)
     {
@@ -1000,6 +1027,8 @@ void MainComponent::setupUI()
     statusLabel->setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(statusLabel.get());
     DBG("Status label created with localized text");
+
+    updateAudioStatusIndicator();
     
     // Debug information (always visible for now)
     debugLabel = std::make_unique<juce::Label>("debug", "Debug: Application Running");
@@ -1234,6 +1263,7 @@ void MainComponent::timerCallback()
 {
     updateConnectionStatus();
     updateDebugInfo();
+    updateAudioStatusIndicator();
 
     if (audioEngine == nullptr)
         return;
@@ -1259,6 +1289,30 @@ void MainComponent::timerCallback()
         }
         bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
     }
+}
+
+void MainComponent::updateAudioStatusIndicator()
+{
+    if (bottomBar == nullptr)
+        return;
+
+    auto& lm = LocalizationManager::getInstance();
+    juce::String text;
+
+    if (audioStartupInProgress_)
+    {
+        text = lm.getText("audio.feedback.starting");
+    }
+    else if (audioEngine != nullptr && audioEngine->isInitialized())
+    {
+        text = lm.getText("audio.feedback.ready");
+    }
+    else
+    {
+        text = lm.getText("audio.feedback.unavailable");
+    }
+
+    bottomBar->setWaveformStatusMessage(text);
 }
 
 void MainComponent::updateConnectionStatus()
@@ -1652,6 +1706,20 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     if (! audioEngine)
         return;
 
+    if (! audioEngine->isInitialized())
+    {
+        DBG("loadAndPlaySong: audio engine not ready yet");
+        auto& lm = LocalizationManager::getInstance();
+        showLoadingOverlay(audioStartupInProgress_ ? lm.getText("audio.feedback.engine_starting")
+                                                   : lm.getText("audio.feedback.engine_unavailable"));
+        juce::Timer::callAfterDelay(1200, [safe = juce::Component::SafePointer<MainComponent>(this)]()
+        {
+            if (safe != nullptr)
+                safe->hideLoadingOverlay();
+        });
+        return;
+    }
+
     // Show the loading overlay immediately so the user gets instant feedback
     // instead of the OS beach-ball that the synchronous load would otherwise
     // produce.
@@ -1829,6 +1897,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         self->bottomBar->setProgress(0.0f);
         self->bottomBar->setPlaying(autoStart);
         self->bottomBar->setPitch(pitchSemitones);
+        self->bottomBar->setWaveformSamples({});
 
         // Build a real waveform asynchronously.
         juce::Component::SafePointer<BottomBar> safeBottom(self->bottomBar.get());
@@ -1849,24 +1918,87 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
 }
 
 //==============================================================================
-void MainComponent::showLoadingOverlay(const juce::String& message)
+void MainComponent::showLoadingOverlay(const juce::String& message, double progress)
 {
     if (! loadingOverlay_)
     {
         loadingOverlay_ = std::make_unique<LoadingOverlay>();
         addAndMakeVisible(loadingOverlay_.get());
     }
-    loadingOverlay_->setMessage(message);
+    loadingOverlay_->setState(message, progress);
     loadingOverlay_->setBounds(getLocalBounds());
     loadingOverlay_->toFront(false);
     loadingOverlay_->setVisible(true);
     loadingOverlay_->repaint();
 }
 
+void MainComponent::updateLoadingOverlay(const juce::String& message, double progress)
+{
+    if (loadingOverlay_)
+        loadingOverlay_->setState(message, progress);
+}
+
 void MainComponent::hideLoadingOverlay()
 {
     if (loadingOverlay_)
         loadingOverlay_->setVisible(false);
+}
+
+void MainComponent::startDeferredAudioServices(const juce::String& venueId, int startupToken)
+{
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    updateLoadingOverlay("Starting audio engine...", 0.92);
+    audioStartupInProgress_ = true;
+    audioStartupComplete_ = false;
+
+    juce::MessageManager::callAsync([safeThis, venueId, startupToken]()
+    {
+        if (safeThis == nullptr || safeThis->startupLoadToken_ != startupToken || safeThis->activeVenueId_ != venueId)
+            return;
+
+        safeThis->hideLoadingOverlay();
+    });
+
+    juce::Thread::launch([safeThis, venueId, startupToken]()
+    {
+        if (safeThis == nullptr || safeThis->audioEngine == nullptr)
+            return;
+
+        const auto startMs = juce::Time::getMillisecondCounterHiRes();
+        DBG("[AudioStartup] Background audio startup begin");
+        if (! safeThis->audioEngine->isInitialized())
+            safeThis->audioEngine->initialize();
+        const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
+
+        juce::MessageManager::callAsync([safeThis, venueId, startupToken, initMs]()
+        {
+            if (safeThis == nullptr || safeThis->startupLoadToken_ != startupToken || safeThis->activeVenueId_ != venueId)
+                return;
+
+            const auto lyricStartMs = juce::Time::getMillisecondCounterHiRes();
+
+            if (safeThis->lyricWindow_ == nullptr)
+                safeThis->lyricWindow_ = std::make_unique<LyricDisplayWindow> (safeThis->audioEngine.get());
+
+            const auto lyricMs = juce::Time::getMillisecondCounterHiRes() - lyricStartMs;
+
+            if (auto* d = safeThis->lyricWindow_ != nullptr ? safeThis->lyricWindow_->getDisplay() : nullptr)
+            {
+                if (safeThis->pendingVenueCode_.isNotEmpty())
+                    d->setVenueCode(safeThis->pendingVenueCode_);
+                if (safeThis->pendingVenueLogo_.isValid())
+                    d->setVenueLogo(safeThis->pendingVenueLogo_);
+            }
+
+            safeThis->audioStartupInProgress_ = false;
+            safeThis->audioStartupComplete_ = safeThis->audioEngine != nullptr
+                                            && safeThis->audioEngine->isInitialized();
+
+            DBG("[AudioStartup] Deferred audio init finished in " + juce::String(initMs, 1)
+                + " ms; lyric window setup in " + juce::String(lyricMs, 1) + " ms");
+            safeThis->hideLoadingOverlay();
+        });
+    });
 }
 
 //==============================================================================
@@ -1990,16 +2122,24 @@ void MainComponent::loadVenuePlaylists()
 
 void MainComponent::setVenueId (const juce::String& venueId, bool requestInitialScan)
 {
+    const int startupToken = ++startupLoadToken_;
+    showLoadingOverlay(requestInitialScan ? "Preparing venue and scanning songs..."
+                                          : "Loading venue...",
+                       0.05);
+
     activeVenueId_ = venueId;
 
     if (venueId.isEmpty())
     {
+        pendingVenueCode_.clear();
+        pendingVenueLogo_ = {};
         if (queueBar != nullptr)
             queueBar->setVenueInfo ("No Venue", "");
         if (lyricWindow_ != nullptr)
             if (auto* d = lyricWindow_->getDisplay())
                 d->setVenueCode ({});
         ArchiveService::getInstance().stopNightlyCleanup();
+        hideLoadingOverlay();
         return;
     }
 
@@ -2010,9 +2150,9 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
     juce::Component::SafePointer<MainComponent> safe (this);
 
     VenueService::getInstance().loadVenue (venueId,
-        [safe, requestInitialScan] (bool ok, VenueItem v, juce::String error)
+        [safe, requestInitialScan, venueId, startupToken] (bool ok, VenueItem v, juce::String error)
         {
-            if (safe == nullptr)
+            if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
                 return;
 
             if (! ok)
@@ -2020,18 +2160,30 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                 DBG ("[Venue] load failed: " << error);
                 if (safe->queueBar != nullptr)
                     safe->queueBar->setVenueInfo ("Venue unavailable", "");
+                safe->hideLoadingOverlay();
                 return;
             }
+
+            safe->updateLoadingOverlay("Venue loaded. Loading playlists...", 0.20);
 
             const juce::String name (v.name);
             const juce::String code (v.code);
             const juce::String logoUrl (v.logoUrl);
 
+            safe->pendingVenueCode_ = code;
+
             safe->activeVenueNumStrikes_ = v.numStrikes;
 
-            // Pull venue playlists (New / Popular / Recommended) into the
-            // home page + membership caches.
-            safe->loadVenuePlaylists();
+            auto sharedProgress = std::make_shared<int>(0);
+            auto advanceProgress = [safe, venueId, startupToken, sharedProgress](const juce::String& step)
+            {
+                if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
+                    return;
+
+                ++(*sharedProgress);
+                const double progress = 0.20 + 0.50 * ((double) *sharedProgress / 5.0);
+                safe->updateLoadingOverlay(step, progress);
+            };
 
             if (safe->queueBar != nullptr)
                 safe->queueBar->setVenueInfo (name, code);
@@ -2062,6 +2214,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     {
                         if (safe == nullptr) return;
                         auto loaded = ArtworkCache::getInstance().getOrFetch (logoUrl);
+                        if (loaded.isValid())
+                            safe->pendingVenueLogo_ = loaded;
                         if (loaded.isValid() && safe->lyricWindow_ != nullptr)
                             if (auto* d = safe->lyricWindow_->getDisplay())
                                 d->setVenueLogo (loaded);
@@ -2070,7 +2224,65 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                 if (img.isValid() && safe->lyricWindow_ != nullptr)
                     if (auto* d = safe->lyricWindow_->getDisplay())
                         d->setVenueLogo (img);
+                if (img.isValid())
+                    safe->pendingVenueLogo_ = img;
             }
+
+            // Pull venue playlists (New / Popular / Recommended / history) into the
+            // home page + membership caches, updating staged progress as each returns.
+            auto& vs = VenueService::getInstance();
+            const auto vid = juce::String(v.id);
+
+            vs.getNewSongs(vid,
+                [safe, venueId, startupToken, advanceProgress](bool ok, std::vector<Playlist> list, juce::String err) mutable
+                {
+                    if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
+                        return;
+                    if (! ok) DBG ("[Playlists] new load failed: " << err);
+                    safe->newSongIds_.clear();
+                    for (auto& p : list)
+                        if (! p.id.empty()) safe->newSongIds_.insert(p.id);
+                    advanceProgress("Loaded New Songs");
+                });
+
+            vs.getPlaylists(vid, "Popular",
+                [safe, venueId, startupToken, advanceProgress](bool ok, std::vector<Playlist> list, juce::String err) mutable
+                {
+                    if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
+                        return;
+                    if (! ok) DBG ("[Playlists] Popular load failed: " << err);
+                    safe->popularSongIds_.clear();
+                    for (auto& p : list)
+                        if (! p.id.empty()) safe->popularSongIds_.insert(p.id);
+                    if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                        hp->setPopularSongs(list);
+                    advanceProgress("Loaded Popular Songs");
+                });
+
+            vs.getPlaylists(vid, "Recommended",
+                [safe, venueId, startupToken, advanceProgress](bool ok, std::vector<Playlist> list, juce::String err) mutable
+                {
+                    if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
+                        return;
+                    if (! ok) DBG ("[Playlists] Recommended load failed: " << err);
+                    safe->recommendedSongIds_.clear();
+                    for (auto& p : list)
+                        if (! p.id.empty()) safe->recommendedSongIds_.insert(p.id);
+                    if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                        hp->setRecommendedSongs(list);
+                    advanceProgress("Loaded Recommended Songs");
+                });
+
+            vs.getRecentlyPlayed(vid,
+                [safe, venueId, startupToken, advanceProgress](bool ok, std::vector<Playlist> list, juce::String err) mutable
+                {
+                    if (safe == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
+                        return;
+                    if (! ok) DBG ("[Playlists] RecentlyPlayed load failed: " << err);
+                    if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                        hp->setRecentlyPlayedFromHistory(list);
+                    advanceProgress("Loaded Recently Played");
+                });
 
             // Venue switch path: if this load was triggered by the user
             // picking a different venue than the one configured on this PC,
@@ -2080,11 +2292,10 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
 
             // Load the live queue for this venue from Firestore and push it
             // into the QueueBar (replaces the placeholder/empty state).
-            const juce::String vid (v.id);
             QueueService::getInstance().loadQueue (vid,
-                [safe, vid] (bool qok, QueueService::Snapshot snap, juce::String qerr)
+                [safe, vid, venueId, startupToken, advanceProgress] (bool qok, QueueService::Snapshot snap, juce::String qerr) mutable
                 {
-                    if (safe == nullptr || safe->queueBar == nullptr)
+                    if (safe == nullptr || safe->queueBar == nullptr || safe->startupLoadToken_ != startupToken || safe->activeVenueId_ != venueId)
                         return;
 
                     if (! qok)
@@ -2092,6 +2303,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         DBG ("[Queue] load failed: " << qerr);
                         safe->queueBar->clearNowPlaying();
                         safe->queueBar->setSingers ({});
+                        advanceProgress("Queue unavailable");
+                        safe->startDeferredAudioServices(venueId, startupToken);
                         return;
                     }
 
@@ -2142,6 +2355,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     // we route TAGG requests through autoApprove and into
                     // /queue.
                     safe->startRequestPipelineFor (vid);
+                        advanceProgress("Loaded Queue");
+                        safe->startDeferredAudioServices(venueId, startupToken);
                 });
         });
 }
