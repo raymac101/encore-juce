@@ -97,7 +97,14 @@ MainArea::MainArea()
     }
 
     addPage(NavPage::Charts,          lm.getText("page.charts"));
-    addPage(NavPage::Mixer,           lm.getText("page.mixer"));
+
+    // Create real Mixer page
+    {
+        auto mp = std::make_unique<MixerPage>();
+        mixerPage = mp.get();
+        addChildComponent(mp.get());
+        pages[static_cast<int>(NavPage::Mixer)] = std::move(mp);
+    }
 
     // Create real Settings page
     {
@@ -185,7 +192,7 @@ void MainArea::updateAllText()
         { NavPage::Library,         "page.library" },
         { NavPage::Charts,          "page.charts" },
         { NavPage::Mixer,           "page.mixer" },
-        { NavPage::Settings,        "page.settings" },
+        { NavPage::Settings,        "page.setup" },
         { NavPage::Testing,         "page.testing" },
         { NavPage::Ads,             "page.ads" },
         { NavPage::Playlist,        "page.playlist" },
@@ -206,5 +213,12 @@ void MainArea::updateAllText()
     if (homePage)     homePage->updateAllText();
     if (searchPage)   searchPage->updateAllText();
     if (libraryPage)  libraryPage->updateAllText();
+    if (mixerPage)    mixerPage->updateAllText();
     if (settingsPage) settingsPage->updateAllText();
+}
+
+void MainArea::setAudioEngine(AudioEngine* engine)
+{
+    if (mixerPage)
+        mixerPage->setAudioEngine(engine);
 }

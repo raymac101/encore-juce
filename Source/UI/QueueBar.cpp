@@ -11,6 +11,7 @@
 */
 
 #include "QueueBar.h"
+#include <cmath>
 
 //==============================================================================
 // Helper – microphone emoji repeat
@@ -55,6 +56,59 @@ static juce::Image loadAvatarFromAssets(const juce::String& avatarPath)
         return juce::ImageFileFormat::loadFrom(candidate3);
 
     return {};
+}
+
+//==============================================================================
+// ExpandArrowButton
+QueueBar::ExpandArrowButton::ExpandArrowButton()
+    : juce::Button("expandArrow")
+{
+}
+
+void QueueBar::ExpandArrowButton::paintButton(juce::Graphics& g,
+                                              bool shouldDrawButtonAsHighlighted,
+                                              bool shouldDrawButtonAsDown)
+{
+    auto r = getLocalBounds().toFloat().reduced(1.0f);
+    auto bg = juce::Colour(0xff333333);
+    if (shouldDrawButtonAsDown)
+        bg = bg.brighter(0.12f);
+    else if (shouldDrawButtonAsHighlighted)
+        bg = bg.brighter(0.08f);
+
+    g.setColour(bg);
+    g.fillEllipse(r);
+
+    g.setColour(juce::Colour(0xffa3a6a8));
+    g.drawEllipse(r, 1.0f);
+
+    juce::Path chevron;
+    const float cx = r.getCentreX();
+    const float cy = r.getCentreY();
+    const float s = juce::jmin(r.getWidth(), r.getHeight()) * 0.24f;
+    chevron.startNewSubPath(cx + s * 0.55f, cy - s);
+    chevron.lineTo(cx - s * 0.55f, cy);
+    chevron.lineTo(cx + s * 0.55f, cy + s);
+
+    auto t = juce::AffineTransform::rotation(angle, cx, cy);
+    g.strokePath(chevron, juce::PathStrokeType(2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), t);
+}
+
+void QueueBar::ExpandArrowButton::setExpanded(bool expanded)
+{
+    targetAngle = expanded ? juce::MathConstants<float>::pi : 0.0f;
+    startTimerHz(60);
+}
+
+void QueueBar::ExpandArrowButton::timerCallback()
+{
+    angle += (targetAngle - angle) * 0.28f;
+    if (std::abs(targetAngle - angle) < 0.01f)
+    {
+        angle = targetAngle;
+        stopTimer();
+    }
+    repaint();
 }
 
 //==============================================================================
@@ -605,8 +659,17 @@ QueueBar::QueueBar()
 
     // Viewport for singer list
     listViewport.setViewedComponent(&listContent, false);
-    listViewport.setScrollBarsShown(true, false);
+    listViewport.setScrollBarsShown(true, true);
     addAndMakeVisible(listViewport);
+
+    expandButton = std::make_unique<ExpandArrowButton>();
+    expandButton->setTooltip("Expand queue");
+    expandButton->onClick = [this]()
+    {
+        setExpanded(!expandedMode);
+        if (onExpandToggled) onExpandToggled(expandedMode);
+    };
+    addAndMakeVisible(*expandButton);
 
     // Venue header labels
     venueNameLabel = std::make_unique<juce::Label>("venueName", "");
@@ -737,6 +800,8 @@ void QueueBar::resized()
 
     //--- Venue header ---
     auto headerArea = bounds.removeFromTop(venueHeaderHeight);
+    auto arrowArea = headerArea.removeFromLeft(42).reduced(6, 10);
+    expandButton->setBounds(arrowArea);
     auto headerLeft = headerArea.reduced(8, 4);
     venueNameLabel->setBounds(headerLeft.removeFromTop(headerLeft.getHeight() / 2));
     venueCodeLabel->setBounds(headerLeft);
@@ -781,13 +846,40 @@ void QueueBar::resized()
     auto listArea = bounds;
     listViewport.setBounds(listArea);
 
-    int totalHeight = (int)singerRows.size() * singerRowHeight;
-    listContent.setSize(listArea.getWidth(), juce::jmax(totalHeight, listArea.getHeight()));
-
-    for (int i = 0; i < singerRows.size(); ++i)
+    if (!expandedMode)
     {
-        singerRows[i]->setBounds(0, i * singerRowHeight,
-                                  listContent.getWidth(), singerRowHeight);
+        int totalHeight = (int)singerRows.size() * singerRowHeight;
+        listContent.setSize(listArea.getWidth(), juce::jmax(totalHeight, listArea.getHeight()));
+
+        for (int i = 0; i < singerRows.size(); ++i)
+        {
+            singerRows[i]->setBounds(0, i * singerRowHeight,
+                                     listContent.getWidth(), singerRowHeight);
+        }
+        listViewport.setScrollBarsShown(true, false);
+    }
+    else
+    {
+        const int rowsPerColumn = juce::jmax(1, (listArea.getHeight() - expandedCardGap)
+                                                / (expandedCardHeight + expandedCardGap));
+        const int columns = juce::jmax(1, (int) std::ceil((double) singerRows.size()
+                                                          / (double) rowsPerColumn));
+
+        const int contentW = juce::jmax(listArea.getWidth(),
+                                        expandedCardGap + columns * (expandedCardWidth + expandedCardGap));
+        const int contentH = juce::jmax(listArea.getHeight(),
+                                        expandedCardGap + rowsPerColumn * (expandedCardHeight + expandedCardGap));
+        listContent.setSize(contentW, contentH);
+
+        for (int i = 0; i < singerRows.size(); ++i)
+        {
+            const int col = i / rowsPerColumn;
+            const int row = i % rowsPerColumn;
+            const int x = expandedCardGap + col * (expandedCardWidth + expandedCardGap);
+            const int y = expandedCardGap + row * (expandedCardHeight + expandedCardGap);
+            singerRows[i]->setBounds(x, y, expandedCardWidth, expandedCardHeight);
+        }
+        listViewport.setScrollBarsShown(true, true);
     }
 }
 
@@ -953,6 +1045,16 @@ void QueueBar::setBarWidth(int w)
     barWidth = juce::jlimit(minWidth, maxWidth, w);
 }
 
+void QueueBar::setExpanded(bool shouldExpand)
+{
+    expandedMode = shouldExpand;
+    if (expandButton)
+        expandButton->setExpanded(expandedMode);
+    expandButton->setTooltip(expandedMode ? "Collapse queue" : "Expand queue");
+    resized();
+    repaint();
+}
+
 //==============================================================================
 void QueueBar::rebuildSingerRows()
 {
@@ -1109,6 +1211,41 @@ bool QueueBar::ListContent::isInterestedInDragSource (const SourceDetails& d)
 
 void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
 {
+    if (owner.expandedMode)
+    {
+        const int rowsPerColumn = juce::jmax(1, (getHeight() - QueueBar::expandedCardGap)
+                                                / (QueueBar::expandedCardHeight + QueueBar::expandedCardGap));
+        const int localX = juce::jmax(0, d.localPosition.x - QueueBar::expandedCardGap);
+        const int localY = juce::jmax(0, d.localPosition.y - QueueBar::expandedCardGap);
+        int col = localX / (QueueBar::expandedCardWidth + QueueBar::expandedCardGap);
+        int row = localY / (QueueBar::expandedCardHeight + QueueBar::expandedCardGap);
+        row = juce::jlimit(0, rowsPerColumn - 1, row);
+
+        int toIndex = col * rowsPerColumn + row;
+        toIndex = juce::jlimit(0, (int) owner.singers.size(), toIndex);
+
+        int indicatorX = QueueBar::expandedCardGap + col * (QueueBar::expandedCardWidth + QueueBar::expandedCardGap);
+        int indicatorY = QueueBar::expandedCardGap + row * (QueueBar::expandedCardHeight + QueueBar::expandedCardGap);
+        juce::Rectangle<int> indicator(indicatorX, indicatorY,
+                                       QueueBar::expandedCardWidth,
+                                       QueueBar::expandedCardHeight);
+        if (toIndex >= owner.singerRows.size())
+        {
+            const int endCol = toIndex / rowsPerColumn;
+            const int endRow = toIndex % rowsPerColumn;
+            indicator.setPosition(QueueBar::expandedCardGap + endCol * (QueueBar::expandedCardWidth + QueueBar::expandedCardGap),
+                                  QueueBar::expandedCardGap + endRow * (QueueBar::expandedCardHeight + QueueBar::expandedCardGap));
+        }
+
+        if (indicator != dropIndicatorRect)
+        {
+            dropIndicatorRect = indicator;
+            dropIndicatorY = indicator.getY();
+            repaint();
+        }
+        return;
+    }
+
     // Compute the Y coordinate of the slot the drop will land in and use
     // it to draw a horizontal "insertion line" indicator across the list.
     const int targetY = d.localPosition.y;
@@ -1154,12 +1291,42 @@ void QueueBar::ListContent::itemDragExit (const SourceDetails&)
     if (dropIndicatorY != -1)
     {
         dropIndicatorY = -1;
+        dropIndicatorRect = {};
         repaint();
     }
 }
 
 void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 {
+    if (owner.expandedMode)
+    {
+        const int fromIndex = (int) d.description;
+        const int rowsPerColumn = juce::jmax(1, (getHeight() - QueueBar::expandedCardGap)
+                                                / (QueueBar::expandedCardHeight + QueueBar::expandedCardGap));
+        const int localX = juce::jmax(0, d.localPosition.x - QueueBar::expandedCardGap);
+        const int localY = juce::jmax(0, d.localPosition.y - QueueBar::expandedCardGap);
+
+        int col = localX / (QueueBar::expandedCardWidth + QueueBar::expandedCardGap);
+        int row = localY / (QueueBar::expandedCardHeight + QueueBar::expandedCardGap);
+        row = juce::jlimit(0, rowsPerColumn - 1, row);
+
+        int toIndex = col * rowsPerColumn + row;
+
+        const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
+        if (hasHost) toIndex = juce::jmax (toIndex, 1);
+        toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
+
+        dropIndicatorY = -1;
+        dropIndicatorRect = {};
+
+        if (fromIndex < 0 || fromIndex >= (int) owner.singers.size()) return;
+        if (toIndex == fromIndex) { repaint(); return; }
+
+        owner.moveSinger (fromIndex, toIndex);
+        if (owner.onReorder) owner.onReorder (fromIndex, toIndex);
+        return;
+    }
+
     const int fromIndex = (int) d.description;
     const int targetY   = d.localPosition.y;
 
@@ -1178,6 +1345,7 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
     toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
 
     dropIndicatorY = -1;
+    dropIndicatorRect = {};
 
     if (fromIndex < 0 || fromIndex >= (int) owner.singers.size()) return;
     if (toIndex == fromIndex) { repaint(); return; }
@@ -1190,5 +1358,13 @@ void QueueBar::ListContent::paintOverChildren (juce::Graphics& g)
 {
     if (dropIndicatorY < 0) return;
     g.setColour (juce::Colour (0xff30daff));
-    g.fillRect (juce::Rectangle<int> (0, dropIndicatorY - 1, getWidth(), 3));
+    if (! owner.expandedMode)
+    {
+        g.fillRect (juce::Rectangle<int> (0, dropIndicatorY - 1, getWidth(), 3));
+    }
+    else
+    {
+        if (! dropIndicatorRect.isEmpty())
+            g.drawRect (dropIndicatorRect, 2);
+    }
 }

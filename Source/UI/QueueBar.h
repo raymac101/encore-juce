@@ -87,6 +87,10 @@ public:
     int getBarWidth() const { return barWidth; }
     void setBarWidth(int w);
 
+    // Expanded mode (queue takes the main workspace area)
+    void setExpanded(bool shouldExpand);
+    bool isExpanded() const noexcept { return expandedMode; }
+
     // Localization
     void updateAllText();
 
@@ -102,6 +106,7 @@ public:
     std::function<void(int)>                          onDelayChanged;
     std::function<void(int singerIdx, int songIdx)>   onSongClicked;
     std::function<void(int)>                          onWidthChanged;
+    std::function<void(bool)>                         onExpandToggled;
 
     // Context-menu actions — wired by MainComponent
     std::function<void(int singerIndex)>  onRemoveSinger;     // remove singer from queue
@@ -114,6 +119,20 @@ public:
     std::function<void()>                 onAddSinger;        // KJ manually adds a singer
 
 private:
+    class ExpandArrowButton : public juce::Button,
+                              private juce::Timer
+    {
+    public:
+        ExpandArrowButton();
+        void paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
+        void setExpanded(bool expanded);
+
+    private:
+        void timerCallback() override;
+        float angle = 0.0f;
+        float targetAngle = 0.0f;
+    };
+
     //==============================================================================
     // Internal component: a single singer row in the queue list
     class SingerRow : public juce::Component
@@ -201,7 +220,8 @@ private:
 
     private:
         QueueBar& owner;
-        int      dropIndicatorY = -1;     // -1 when no drag in progress
+        int      dropIndicatorY = -1;     // legacy line indicator (collapsed mode)
+        juce::Rectangle<int> dropIndicatorRect;
     };
 
     //==============================================================================
@@ -215,6 +235,7 @@ private:
     std::unique_ptr<juce::Label> venueNameLabel;
     std::unique_ptr<juce::Label> venueCodeLabel;
     std::unique_ptr<juce::Label> nowSingingLabel;
+    std::unique_ptr<ExpandArrowButton> expandButton;
 
     // Bottom status bar
     std::unique_ptr<juce::Label>      singerCountLabel;
@@ -239,6 +260,7 @@ private:
     int                  delaySec = 0;
     bool                 queueClosed = false;
     int                  countdownSecondsLeft = 0;
+    bool                 expandedMode = false;
 
     // Sizing
     int  barWidth = 280;
@@ -269,6 +291,9 @@ private:
     static constexpr int nowPlayingHeight    = 100;
     static constexpr int statusBarHeight     = 110;
     static constexpr int singerRowHeight     = 64;
+    static constexpr int expandedCardWidth   = 320;
+    static constexpr int expandedCardHeight  = 84;
+    static constexpr int expandedCardGap     = 8;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QueueBar)
 };

@@ -476,10 +476,12 @@ void LocalizationManager::loadFallbackTranslations()
     translations["nav.library"] = "Library";
     translations["nav.charts"] = "Charts";
     translations["nav.mixer"] = "Mixer";
+    translations["nav.setup"] = "Setup";
     translations["nav.settings"] = "Settings";
     translations["nav.testing"] = "Testing";
     translations["nav.ads"] = "Ads";
     translations["nav.playlist"] = "Playlist";
+    translations["nav.locations"] = "Locations";
     translations["nav.venue_management"] = "Venue Mgmt";
     translations["nav.queue"] = "Queue";
     translations["nav.songs"] = "Songs";
@@ -507,11 +509,27 @@ void LocalizationManager::loadFallbackTranslations()
     translations["page.library"] = "Library";
     translations["page.charts"] = "Charts";
     translations["page.mixer"] = "Mixer";
+    translations["page.setup"] = "Setup";
     translations["page.settings"] = "Settings";
     translations["page.testing"] = "Testing";
     translations["page.ads"] = "Ads";
     translations["page.playlist"] = "Playlist";
     translations["page.venue_management"] = "Venue Management";
+
+    // ── Mixer ──
+    translations["mixer.title"] = "Digital Mixer";
+    translations["mixer.subtitle"] = "Channel strips, EQ, inserts, and master bus";
+    translations["mixer.channel.music"] = "MUSIC";
+    translations["mixer.channel.vocal"] = "VOCAL";
+    translations["mixer.channel.fx"] = "FX BUS";
+    translations["mixer.channel.inserts"] = "INSERTS";
+    translations["mixer.channel.master"] = "MASTER";
+    translations["mixer.insert.none"] = "None";
+    translations["mixer.insert.compressor"] = "Compressor";
+    translations["mixer.insert.saturator"] = "Saturator";
+    translations["mixer.insert.limiter"] = "Limiter";
+    translations["mixer.mute"] = "M";
+    translations["mixer.solo"] = "S";
 
     // ── General audio / transport ──
     translations["audio.play"] = "Play";

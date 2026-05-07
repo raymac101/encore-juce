@@ -23,12 +23,119 @@ namespace
 
     constexpr int kTransportIconSize = 22;
     constexpr int kPlayPauseIconSize = 30;
+
+    class VolumeKnobLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
+                              float sliderPosProportional, float rotaryStartAngle,
+                              float rotaryEndAngle, juce::Slider& slider) override
+        {
+            juce::ignoreUnused(slider);
+
+            auto bounds = juce::Rectangle<float>((float) x, (float) y, (float) width, (float) height).reduced(8.0f);
+            const float diameter = juce::jmin(bounds.getWidth(), bounds.getHeight());
+            auto knobBounds = bounds.withSizeKeepingCentre(diameter, diameter);
+            const float radius = diameter * 0.5f;
+            const float lineW = juce::jmax(3.0f, radius * 0.12f);
+            const float arcRadius = radius - lineW * 0.6f;
+            auto centre = knobBounds.getCentre();
+
+            juce::Path bgArc;
+            bgArc.addCentredArc(centre.x, centre.y, arcRadius, arcRadius, 0.0f,
+                                rotaryStartAngle, rotaryEndAngle, true);
+            g.setColour(juce::Colour(0xff2b3442));
+            g.strokePath(bgArc, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            const float angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
+            juce::Path valueArc;
+            valueArc.addCentredArc(centre.x, centre.y, arcRadius, arcRadius, 0.0f,
+                                   rotaryStartAngle, angle, true);
+            g.setColour(kAccent);
+            g.strokePath(valueArc, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(juce::Colour(0xff111821));
+            g.fillEllipse(knobBounds.reduced(lineW * 1.35f));
+
+            juce::Path pointer;
+            pointer.addRoundedRectangle(-lineW * 0.45f, -arcRadius + lineW * 1.2f,
+                                        lineW * 0.9f, arcRadius * 0.58f, lineW * 0.45f);
+            g.setColour(kAccent.brighter(0.25f));
+            g.fillPath(pointer, juce::AffineTransform::rotation(angle).translated(centre.x, centre.y));
+        }
+    };
+
+    class PitchKnobLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
+                              float sliderPosProportional, float rotaryStartAngle,
+                              float rotaryEndAngle, juce::Slider& slider) override
+        {
+            juce::ignoreUnused(sliderPosProportional, rotaryStartAngle, rotaryEndAngle);
+
+            auto bounds = juce::Rectangle<float>((float) x, (float) y, (float) width, (float) height).reduced(8.0f);
+            const float diameter = juce::jmin(bounds.getWidth(), bounds.getHeight());
+            auto knobBounds = bounds.withSizeKeepingCentre(diameter, diameter);
+            const float radius = diameter * 0.5f;
+            const float lineW = juce::jmax(3.0f, radius * 0.12f);
+            const float arcRadius = radius - lineW * 0.6f;
+            auto centre = knobBounds.getCentre();
+
+            constexpr float leftAngle = -juce::MathConstants<float>::halfPi;
+            constexpr float zeroAngle = 0.0f;
+            constexpr float rightAngle = juce::MathConstants<float>::halfPi;
+
+            juce::Path bgArc;
+            bgArc.addCentredArc(centre.x, centre.y, arcRadius, arcRadius, 0.0f,
+                                leftAngle, rightAngle, true);
+            g.setColour(juce::Colour(0xff2b3442));
+            g.strokePath(bgArc, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            const double minValue = slider.getMinimum();
+            const double maxValue = slider.getMaximum();
+            const double value = slider.getValue();
+            float angle = zeroAngle;
+
+            if (value < 0.0)
+                angle = juce::jmap((float) value, (float) minValue, 0.0f, leftAngle, zeroAngle);
+            else if (value > 0.0)
+                angle = juce::jmap((float) value, 0.0f, (float) maxValue, zeroAngle, rightAngle);
+
+            if (std::abs(value) > 0.001)
+            {
+                juce::Path valueArc;
+                valueArc.addCentredArc(centre.x, centre.y, arcRadius, arcRadius, 0.0f,
+                                       juce::jmin(angle, zeroAngle), juce::jmax(angle, zeroAngle), true);
+                g.setColour(kAccent);
+                g.strokePath(valueArc, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+
+            g.setColour(juce::Colour(0xff111821));
+            g.fillEllipse(knobBounds.reduced(lineW * 1.35f));
+
+            juce::Path pointer;
+            pointer.addRoundedRectangle(-lineW * 0.45f, -arcRadius + lineW * 1.2f,
+                                        lineW * 0.9f, arcRadius * 0.58f, lineW * 0.45f);
+            g.setColour(kAccent.brighter(0.25f));
+            g.fillPath(pointer, juce::AffineTransform::rotation(angle).translated(centre.x, centre.y));
+        }
+    };
+
+    VolumeKnobLookAndFeel kVolumeKnobLookAndFeel;
+    PitchKnobLookAndFeel kPitchKnobLookAndFeel;
 }
 
 BottomBar::BottomBar()
 {
     setupUI();
     startTimerHz(30);
+}
+
+BottomBar::~BottomBar()
+{
+    pitchSlider.setLookAndFeel(nullptr);
+    volumeSlider.setLookAndFeel(nullptr);
 }
 
 void BottomBar::setupUI()
@@ -83,51 +190,69 @@ void BottomBar::setupUI()
             onJumpToEnd();
     };
 
-    pitchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    pitchSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    pitchSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    pitchSlider.setRotaryParameters(-juce::MathConstants<float>::halfPi,
+                                    juce::MathConstants<float>::halfPi,
+                                    true);
+    pitchSlider.setTextBoxStyle(juce::Slider::TextBoxAbove, false, 96, 20);
     pitchSlider.setRange(-7, 7, 1);
-    pitchSlider.setValue(0);
+    pitchSlider.setLookAndFeel(&kPitchKnobLookAndFeel);
+    pitchSlider.setVelocityBasedMode(false);
+    pitchSlider.setScrollWheelEnabled(false);
+    pitchSlider.setColour(juce::Slider::textBoxTextColourId, kText);
+    pitchSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    pitchSlider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    pitchSlider.textFromValueFunction = [](double value)
+    {
+        auto base = LocalizationManager::getInstance().getText("bottombar.pitch");
+        if (base.isEmpty() || base.startsWith("["))
+            base = "PITCH";
+        return base + " " + juce::String((int) value) + " st";
+    };
+    pitchSlider.setValue(0, juce::dontSendNotification);
+    pitchSlider.updateText();
     pitchSlider.onValueChange = [this]()
     {
         auto semitones = static_cast<int>(pitchSlider.getValue());
-        pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
         if (onPitchChanged)
             onPitchChanged(semitones);
     };
 
-    volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    volumeSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    volumeSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    volumeSlider.setRotaryParameters(juce::degreesToRadians(210.0f),
+                                     juce::degreesToRadians(510.0f),
+                                     true);
+    volumeSlider.setTextBoxStyle(juce::Slider::TextBoxAbove, false, 96, 20);
     volumeSlider.setRange(0, 10, 1);
-    volumeSlider.setValue(5);
+    volumeSlider.setLookAndFeel(&kVolumeKnobLookAndFeel);
+    volumeSlider.setVelocityBasedMode(false);
+    volumeSlider.setScrollWheelEnabled(false);
+    volumeSlider.setColour(juce::Slider::textBoxTextColourId, kText);
+    volumeSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    volumeSlider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    volumeSlider.textFromValueFunction = [](double value)
+    {
+        auto base = LocalizationManager::getInstance().getText("bottombar.volume");
+        if (base.isEmpty() || base.startsWith("["))
+            base = "VOL";
+        return base + " " + juce::String((int) value);
+    };
+    volumeSlider.setValue(5, juce::dontSendNotification);
+    volumeSlider.updateText();
     volumeSlider.onValueChange = [this]()
     {
         auto volume = static_cast<int>(volumeSlider.getValue());
-        volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " " + juce::String(volume), juce::dontSendNotification);
         if (onVolumeChanged)
             onVolumeChanged(volume);
     };
 
-    pitchSlider.setColour(juce::Slider::trackColourId, juce::Colour(0x35, 0x35, 0x35));
-    pitchSlider.setColour(juce::Slider::thumbColourId, kAccent);
-    pitchSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(0x2a, 0x2a, 0x2a));
+    pitchSlider.setColour(juce::Slider::rotarySliderFillColourId, kAccent);
+    pitchSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0x35, 0x35, 0x35));
 
-    volumeSlider.setColour(juce::Slider::trackColourId, juce::Colour(0x35, 0x35, 0x35));
-    volumeSlider.setColour(juce::Slider::thumbColourId, kAccent);
-    volumeSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(0x2a, 0x2a, 0x2a));
+    volumeSlider.setColour(juce::Slider::rotarySliderFillColourId, kAccent);
+    volumeSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0x35, 0x35, 0x35));
 
-    pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " 0 st", juce::dontSendNotification);
-    pitchLabel.setJustificationType(juce::Justification::centredLeft);
-    pitchLabel.setColour(juce::Label::textColourId, kMutedText);
-    pitchLabel.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
-
-    volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " 5", juce::dontSendNotification);
-    volumeLabel.setJustificationType(juce::Justification::centredLeft);
-    volumeLabel.setColour(juce::Label::textColourId, kMutedText);
-    volumeLabel.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
-
-    addAndMakeVisible(pitchLabel);
     addAndMakeVisible(pitchSlider);
-    addAndMakeVisible(volumeLabel);
     addAndMakeVisible(volumeSlider);
 
     currentTimeLabel.setText("0:00", juce::dontSendNotification);
@@ -235,13 +360,12 @@ void BottomBar::resized()
     playPauseButton.setBounds(playSlot.withSizeKeepingCentre(kPlayPauseIconSize, kPlayPauseIconSize));
     jumpToEndButton.setBounds(nextSlot.withSizeKeepingCentre(kTransportIconSize, kTransportIconSize));
 
-    auto pitchArea = slidersArea.removeFromTop(slidersArea.getHeight() / 2).reduced(2, 4);
-    pitchLabel.setBounds(pitchArea.removeFromTop(18));
-    pitchSlider.setBounds(pitchArea);
+    auto knobsArea = slidersArea.reduced(4, 6);
+    auto pitchArea = knobsArea.removeFromLeft(knobsArea.getWidth() / 2).reduced(4, 0);
+    auto volumeArea = knobsArea.reduced(4, 0);
 
-    auto volumeArea = slidersArea.reduced(2, 4);
-    volumeLabel.setBounds(volumeArea.removeFromTop(18));
-    volumeSlider.setBounds(volumeArea);
+    pitchSlider.setBounds(pitchArea.reduced(0, 2));
+    volumeSlider.setBounds(volumeArea.reduced(0, 2));
 
     repaint(waveformArea);
 }
@@ -363,13 +487,13 @@ void BottomBar::setDurationSeconds(double seconds)
 void BottomBar::setPitch(int semitones)
 {
     pitchSlider.setValue(semitones, juce::dontSendNotification);
-    pitchLabel.setText(LocalizationManager::getInstance().getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
+    pitchSlider.updateText();
 }
 
 void BottomBar::setVolume(int volumeStep)
 {
     volumeSlider.setValue(volumeStep, juce::dontSendNotification);
-    volumeLabel.setText(LocalizationManager::getInstance().getText("bottombar.volume") + " " + juce::String(volumeStep), juce::dontSendNotification);
+    volumeSlider.updateText();
 }
 
 void BottomBar::timerCallback()
@@ -597,11 +721,8 @@ void BottomBar::updateAllText()
     playPauseButton.setTooltip(lm.getText("bottombar.play_pause"));
     jumpToEndButton.setTooltip(lm.getText("bottombar.jump_to_end"));
 
-    auto semitones = static_cast<int>(pitchSlider.getValue());
-    pitchLabel.setText(lm.getText("bottombar.pitch") + " " + juce::String(semitones) + " st", juce::dontSendNotification);
-
-    auto vol = static_cast<int>(volumeSlider.getValue());
-    volumeLabel.setText(lm.getText("bottombar.volume") + " " + juce::String(vol), juce::dontSendNotification);
+    pitchSlider.updateText();
+    volumeSlider.updateText();
 }
 
 void BottomBar::setWaveformSamples(const std::vector<float>& samples)

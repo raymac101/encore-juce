@@ -233,6 +233,17 @@ void MainComponent::setupUI()
 
     bottomBar->onPlayPause = [this](bool isNowPlaying) {
         if (! audioEngine) return;
+
+        if (!audioEngine->isInitialized())
+            audioEngine->initialize();
+
+        if (!audioEngine->isInitialized())
+        {
+            bottomBar->setPlaying(false);
+            updateAudioStatusIndicator();
+            return;
+        }
+
         if (isNowPlaying)
         {
             if (playStartTimeMs_ == 0)
@@ -266,7 +277,6 @@ void MainComponent::setupUI()
         // volumeStep is 0..10 in the slider -> map to 0..1.
         float v = juce::jlimit(0.0f, 1.0f, (float) volumeStep / 10.0f);
         audioEngine->setMasterVolume(v);
-        audioEngine->setMusicVolume(v);
     };
 
     // The BottomBar's own 30Hz timer will no longer auto-advance progress —
@@ -284,6 +294,7 @@ void MainComponent::setupUI()
 
     // Create MainArea (central content area)
     mainArea = std::make_unique<MainArea>();
+    mainArea->setAudioEngine(audioEngine.get());
     addAndMakeVisible(mainArea.get());
 
     // Wire NavBar page selection to MainArea
@@ -629,6 +640,12 @@ void MainComponent::setupUI()
         resized();
     };
 
+    queueBar->onExpandToggled = [this](bool expanded)
+    {
+        queueExpanded_ = expanded;
+        resized();
+    };
+
     queueBar->onPlaySinger = [this](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
         if (queueBar == nullptr) return;
@@ -733,22 +750,67 @@ void MainComponent::setupUI()
         //    bar transport or the now-playing avatar to start the track.
         if (mainArea == nullptr) return;
         const auto& library = mainArea->getLibrarySongs();
-        const juce::String wantId     = juce::String(firstSong.songId);
-        const juce::String wantName   = juce::String(firstSong.songName)  .toLowerCase();
-        const juce::String wantArtist = juce::String(firstSong.songArtist).toLowerCase();
+        const juce::String wantId     = juce::String(firstSong.songId).trim();
+        const juce::String wantName   = juce::String(firstSong.songName).trim().toLowerCase();
+        const juce::String wantArtist = juce::String(firstSong.songArtist).trim().toLowerCase();
 
         const CdgSong* match = nullptr;
         for (const auto& s : library)
         {
-            if (! wantId.isEmpty() && juce::String(s.id) == wantId) { match = &s; break; }
+            if (! wantId.isEmpty() && juce::String(s.id).trim() == wantId)
+            {
+                match = &s;
+                break;
+            }
+        }
+
+        // Fallback: queue songId may be a catalog code, not the local DB id.
+        if (match == nullptr && wantId.isNotEmpty())
+        {
+            for (const auto& s : library)
+            {
+                for (const auto& code : s.code)
+                {
+                    if (juce::String(code).trim().equalsIgnoreCase(wantId))
+                    {
+                        match = &s;
+                        break;
+                    }
+                }
+                if (match != nullptr)
+                    break;
+            }
         }
         if (match == nullptr)
         {
             for (const auto& s : library)
             {
-                if (juce::String(s.songName)  .toLowerCase() == wantName &&
-                    juce::String(s.artistName).toLowerCase() == wantArtist)
-                { match = &s; break; }
+                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
+                const juce::String libArtist = juce::String(s.artistName).trim().toLowerCase();
+
+                const bool nameMatches = (libName == wantName);
+                const bool artistMatches = wantArtist.isEmpty() || (libArtist == wantArtist);
+
+                if (nameMatches && artistMatches)
+                {
+                    match = &s;
+                    break;
+                }
+            }
+        }
+
+        // Last-resort fuzzy fallback: song title contains/contained-by
+        // when metadata variants differ slightly.
+        if (match == nullptr && wantName.isNotEmpty())
+        {
+            for (const auto& s : library)
+            {
+                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
+                if (libName.contains(wantName) || wantName.contains(libName))
+                {
+                    match = &s;
+                    break;
+                }
             }
         }
         if (match == nullptr)
@@ -1133,21 +1195,29 @@ void MainComponent::resized()
     // NavBar on the left (resizable width)
     if (navBar)
     {
-        auto navBounds = bounds.removeFromLeft(navBar->getBarWidth());
-        navBar->setBounds(navBounds);
+        navBar->setVisible(!queueExpanded_);
+        if (!queueExpanded_)
+        {
+            auto navBounds = bounds.removeFromLeft(navBar->getBarWidth());
+            navBar->setBounds(navBounds);
+        }
     }
 
-    // QueueBar on the right (resizable width)
+    // QueueBar on the right (resizable width), or expanded to fill the workspace.
     if (queueBar)
     {
-        auto queueBounds = bounds.removeFromRight(queueBar->getBarWidth());
+        auto queueBounds = queueExpanded_
+            ? bounds
+            : bounds.removeFromRight(queueBar->getBarWidth());
         queueBar->setBounds(queueBounds);
     }
 
     // MainArea fills the remaining centre space
     if (mainArea)
     {
-        mainArea->setBounds(bounds);
+        mainArea->setVisible(!queueExpanded_);
+        if (!queueExpanded_)
+            mainArea->setBounds(bounds);
     }
 
     // Loading overlay always covers the full window when visible.
@@ -1288,6 +1358,7 @@ void MainComponent::timerCallback()
             bottomBar->setProgress((float) (pos / total));
         }
         bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
+        bottomBar->setVolume (juce::roundToInt(audioEngine->getMasterVolume() * 10.0f));
     }
 }
 
@@ -1708,16 +1779,21 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
 
     if (! audioEngine->isInitialized())
     {
-        DBG("loadAndPlaySong: audio engine not ready yet");
-        auto& lm = LocalizationManager::getInstance();
-        showLoadingOverlay(audioStartupInProgress_ ? lm.getText("audio.feedback.engine_starting")
-                                                   : lm.getText("audio.feedback.engine_unavailable"));
-        juce::Timer::callAfterDelay(1200, [safe = juce::Component::SafePointer<MainComponent>(this)]()
+        DBG("loadAndPlaySong: audio engine not ready, attempting immediate init");
+        audioEngine->initialize();
+
+        if (! audioEngine->isInitialized())
         {
-            if (safe != nullptr)
-                safe->hideLoadingOverlay();
-        });
-        return;
+            auto& lm = LocalizationManager::getInstance();
+            showLoadingOverlay(audioStartupInProgress_ ? lm.getText("audio.feedback.engine_starting")
+                                                       : lm.getText("audio.feedback.engine_unavailable"));
+            juce::Timer::callAfterDelay(1200, [safe = juce::Component::SafePointer<MainComponent>(this)]()
+            {
+                if (safe != nullptr)
+                    safe->hideLoadingOverlay();
+            });
+            return;
+        }
     }
 
     // Show the loading overlay immediately so the user gets instant feedback

@@ -107,9 +107,13 @@ namespace
     Singers singerFromDoc(const juce::var& doc)
     {
         auto fields = doc.getProperty("fields", juce::var());
+        const auto docName = doc.getProperty("name", "").toString();
+        const auto docId = docName.fromLastOccurrenceOf("/", false, false);
 
         Singers s;
         s.id            = valueAsString(fieldByName(fields, "id")).toStdString();
+        if (docId.isNotEmpty())
+            s.id = docId.toStdString();
         s.name          = valueAsString(fieldByName(fields, "name")).toStdString();
         s.avatar        = valueAsString(fieldByName(fields, "avatar")).toStdString();
         s.deviceId      = valueAsString(fieldByName(fields, "deviceId")).toStdString();
@@ -175,6 +179,14 @@ namespace
         // Sort by `order` (Angular's sortQueueByOrder).
         std::sort(all.begin(), all.end(),
                   [](const Singers& a, const Singers& b) { return a.order < b.order; });
+
+        // Self-heal inconsistent ordering from older writes:
+        // keep queue order contiguous and force a single unique tail marker.
+        for (size_t i = 0; i < all.size(); ++i)
+        {
+            all[i].order = (int) i;
+            all[i].rotationOrder = (int) i;
+        }
 
         int nowIdx = -1;
         for (size_t i = 0; i < all.size(); ++i)
@@ -384,18 +396,22 @@ void QueueService::appendSong(const juce::String& venueId,
         std::vector<QueueItem> initialSongs { first };
 
         // Determine the document ID to use for this singer's queue doc.
-        // Use profileId (the singer's Auth UID, supplied by mobile requests)
-        // when available, otherwise let Firestore auto-generate.  Falling
-        // back to the host's own UID would 409-Conflict on the second
-        // KJ-added singer, so we deliberately don't do that.
-        const juce::String docId = juce::String(item.profileId).trim();
+        // Mobile users provide profileId; KJ-added singers may have no
+        // profile ID (or "Unknown"). For those, generate a stable unique
+        // queue doc ID so reorder/update calls can always target this singer.
+        const juce::String profileId = juce::String(item.profileId).trim();
+        const bool hasProfileId = profileId.isNotEmpty()
+                       && profileId.compareIgnoreCase("unknown") != 0;
+        juce::String docId = hasProfileId
+                   ? profileId
+                   : ("kj-" + juce::Uuid().toString().removeCharacters("{}-"));
 
         juce::DynamicObject::Ptr fields = new juce::DynamicObject();
         fields->setProperty("id",             FirestoreClient::stringValue(docId));
         fields->setProperty("name",           FirestoreClient::stringValue(juce::String(item.singerName)));
         fields->setProperty("avatar",         FirestoreClient::stringValue(juce::String(item.singerAvatar)));
         fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String(item.deviceId)));
-        fields->setProperty("profileId",      FirestoreClient::stringValue(docId));
+        fields->setProperty("profileId",      FirestoreClient::stringValue(hasProfileId ? profileId : juce::String("Unknown")));
         fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
         fields->setProperty("status",         FirestoreClient::stringValue("queued"));
         fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));

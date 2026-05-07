@@ -20,6 +20,7 @@
 #include "SearchPage.h"
 #include "LibraryPage.h"
 #include "SettingsPage.h"
+#include "MixerPage.h"
 #include "SongSelectionDialog.h"
 #include "SongEditDialog.h"
 #include "../Models/VenueItem.h"
@@ -83,6 +84,9 @@ public:
     /** Re-read all translatable strings from LocalizationManager. */
     void updateAllText();
 
+    /** Provide AudioEngine to pages that need direct DSP control. */
+    void setAudioEngine(AudioEngine* engine);
+
 private:
     NavPage currentPage = NavPage::Home;
 
@@ -93,6 +97,7 @@ private:
     HomePage*     homePage     = nullptr;
     SearchPage*   searchPage   = nullptr;
     LibraryPage*  libraryPage  = nullptr;
+    MixerPage*    mixerPage    = nullptr;
     SettingsPage* settingsPage = nullptr;
 
 public:

@@ -33,7 +33,7 @@ public:
 
     //==============================================================================
     BottomBar();
-    ~BottomBar() override = default;
+    ~BottomBar() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;

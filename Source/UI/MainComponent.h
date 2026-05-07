@@ -172,6 +172,7 @@ private:
     bool audioStartupComplete_ = false;
 
     juce::String activeVenueId_;
+    bool queueExpanded_ = false;
 
     // Cached venue config — populated from VenueService::loadVenue and used
     // by the rotation/strikes logic when a singer is moved to now-singing.

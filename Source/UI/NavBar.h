@@ -111,6 +111,7 @@ private:
         void mouseUp(const juce::MouseEvent& e) override;
         void mouseEnter(const juce::MouseEvent&) override { hovering = true;  repaint(); }
         void mouseExit(const juce::MouseEvent&) override  { hovering = false; repaint(); }
+        void setLabel(const juce::String& newLabel) { label = newLabel; repaint(); }
 
         bool isActive = false;
         bool hovering = false;

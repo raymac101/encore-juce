@@ -39,6 +39,7 @@ target_sources(EncoreJUCE
         Source/UI/BottomBar.cpp
         Source/UI/NavBar.cpp
         Source/UI/MainArea.cpp
+        Source/UI/MixerPage.cpp
         Source/UI/QueueBar.cpp
         Source/UI/EditSingerModal.cpp
         Source/UI/HomePage.cpp

@@ -23,6 +23,7 @@
 #include <JuceHeader.h>
 #include "PitchShifter.h"
 #include "../Services/UserPreferences.h"
+#include <array>
 
 //==============================================================================
 class AudioEngine : public juce::AudioSource,
@@ -75,6 +76,40 @@ public:
     float getVocalEffectsLevel() const noexcept { return vocalEffectsLevel.load(); }
 
     //==========================================================================
+    // Master EQ (3-band) + insert drive
+    void setMasterEqLow(float db);   // -18 to +18 dB
+    void setMasterEqMid(float db);   // -18 to +18 dB
+    void setMasterEqHigh(float db);  // -18 to +18 dB
+    void setMasterInsertDrive(float amount); // 0.0 to 1.0
+
+    float getMasterEqLow() const noexcept { return masterEqLowDb.load(); }
+    float getMasterEqMid() const noexcept { return masterEqMidDb.load(); }
+    float getMasterEqHigh() const noexcept { return masterEqHighDb.load(); }
+    float getMasterInsertDrive() const noexcept { return masterInsertDrive.load(); }
+
+    //==========================================================================
+    // Master dynamics (always-on on the master bus)
+    void setMasterCompressorThreshold(float db); // -48 to 0 dB
+    void setMasterCompressorRatio(float ratio);  // 1 to 20
+    void setMasterCompressorAttackMs(float ms);  // 1 to 200 ms
+    void setMasterCompressorReleaseMs(float ms); // 10 to 1000 ms
+    void setMasterCompressorMakeupDb(float db);  // 0 to 18 dB
+    void setMasterCompressorEnabled(bool enabled);
+    void setMasterLimiterCeilingDb(float db);    // -12 to -0.1 dB
+    void setMasterLimiterReleaseMs(float ms);    // 5 to 500 ms
+    void setMasterLimiterEnabled(bool enabled);
+
+    bool  isMasterCompressorEnabled() const noexcept { return masterCompEnabled.load(); }
+    bool  isMasterLimiterEnabled() const noexcept { return masterLimiterEnabled.load(); }
+    float getMasterCompressorThreshold() const noexcept { return masterCompThresholdDb.load(); }
+    float getMasterCompressorRatio() const noexcept { return masterCompRatio.load(); }
+    float getMasterCompressorAttackMs() const noexcept { return masterCompAttackMs.load(); }
+    float getMasterCompressorReleaseMs() const noexcept { return masterCompReleaseMs.load(); }
+    float getMasterCompressorMakeupDb() const noexcept { return masterCompMakeupDb.load(); }
+    float getMasterLimiterCeilingDb() const noexcept { return masterLimiterCeilingDb.load(); }
+    float getMasterLimiterReleaseMs() const noexcept { return masterLimiterReleaseMs.load(); }
+
+    //==========================================================================
     // Reverb
     void setReverbEnabled(bool enabled);
     void setReverbRoomSize(float size);   // 0.0 – 1.0
@@ -91,6 +126,8 @@ public:
     void enableFrequencyAnalysis(bool enabled);
     const std::vector<float>& getFrequencySpectrum() const { return frequencyData; }
     float getCurrentLevel() const noexcept { return currentAudioLevel.load(); }
+    float getMasterCompressorOutputMeter() const noexcept { return masterCompOutputMeter.load(); }
+    float getMasterLimiterReductionMeter() const noexcept { return masterLimiterReductionMeter.load(); }
 
     //==========================================================================
     // Song-end callback — fired on the message thread when playback reaches
@@ -174,6 +211,38 @@ private:
     std::atomic<float>  vocalVolume        { 0.8f };
     std::atomic<float>  vocalEffectsLevel  { 0.3f };
     std::atomic<int>    keyChangeSemitones { 0 };
+    std::atomic<float>  masterEqLowDb      { 0.0f };
+    std::atomic<float>  masterEqMidDb      { 0.0f };
+    std::atomic<float>  masterEqHighDb     { 0.0f };
+    std::atomic<float>  masterInsertDrive  { 0.0f };
+    std::atomic<float>  masterCompThresholdDb { -18.0f };
+    std::atomic<float>  masterCompRatio       { 3.0f };
+    std::atomic<float>  masterCompAttackMs    { 18.0f };
+    std::atomic<float>  masterCompReleaseMs   { 220.0f };
+    std::atomic<float>  masterCompMakeupDb    { 3.0f };
+    std::atomic<bool>   masterCompEnabled     { true };
+    std::atomic<float>  masterLimiterCeilingDb { -1.0f };
+    std::atomic<float>  masterLimiterReleaseMs { 75.0f };
+    std::atomic<bool>   masterLimiterEnabled   { true };
+
+    struct MasterEqState
+    {
+      std::atomic<bool> dirty { true };
+      std::array<juce::IIRFilter, 2> lowShelf;
+      std::array<juce::IIRFilter, 2> midPeak;
+      std::array<juce::IIRFilter, 2> highShelf;
+    } masterEqState;
+
+    struct MasterDynamicsState
+    {
+        std::atomic<bool> dirty { true };
+        double sampleRate = 44100.0;
+        float compAttackCoeff = 0.0f;
+        float compReleaseCoeff = 0.0f;
+        float limiterReleaseCoeff = 0.0f;
+        float compGainDb = 0.0f;
+        float limiterGain = 1.0f;
+    } masterDynamicsState;
 
     //==========================================================================
     // Playback state
@@ -187,6 +256,8 @@ private:
     bool               frequencyAnalysisEnabled = false;
     std::vector<float> frequencyData;
     std::atomic<float> currentAudioLevel { 0.0f };
+    std::atomic<float> masterCompOutputMeter { 0.0f };
+    std::atomic<float> masterLimiterReductionMeter { 0.0f };
 
     //==========================================================================
     // CDG
@@ -204,6 +275,10 @@ private:
     void handleAudioDeviceError(const juce::String& message);
     void applyReverb(juce::AudioBuffer<float>& buffer);
     void applyEcho(juce::AudioBuffer<float>& buffer);
+    void applyMasterEq(juce::AudioBuffer<float>& buffer);
+    void applyMasterInsert(juce::AudioBuffer<float>& buffer);
+    void applyMasterDynamics(juce::AudioBuffer<float>& buffer);
+    void updateMasterDynamicsCoefficients();
     void updatePlaybackPosition();
     void performFrequencyAnalysis(const juce::AudioBuffer<float>& buffer);
 

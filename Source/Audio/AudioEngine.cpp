@@ -7,6 +7,7 @@
 */
 
 #include "AudioEngine.h"
+#include <cmath>
 
 //==============================================================================
 AudioEngine::AudioEngine()
@@ -235,6 +236,8 @@ void AudioEngine::pause()
         transportSource->stop();
         playing = false;
         paused  = true;
+        masterCompOutputMeter = 0.0f;
+        masterLimiterReductionMeter = 0.0f;
     }
     else if (paused)
     {
@@ -254,6 +257,8 @@ void AudioEngine::stop()
     playing         = false;
     paused          = false;
     currentPosition = 0.0;
+    masterCompOutputMeter = 0.0f;
+    masterLimiterReductionMeter = 0.0f;
 }
 
 void AudioEngine::seekToPosition(double positionInSeconds)
@@ -297,6 +302,78 @@ void AudioEngine::setMasterVolume(float v) { masterVolume = juce::jlimit(0.0f, 1
 void AudioEngine::setMusicVolume(float v)  { musicVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalVolume(float v)  { vocalVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalEffectsLevel(float l) { vocalEffectsLevel = juce::jlimit(0.0f, 1.0f, l); }
+
+void AudioEngine::setMasterEqLow(float db)
+{
+    masterEqLowDb = juce::jlimit(-18.0f, 18.0f, db);
+    masterEqState.dirty = true;
+}
+
+void AudioEngine::setMasterEqMid(float db)
+{
+    masterEqMidDb = juce::jlimit(-18.0f, 18.0f, db);
+    masterEqState.dirty = true;
+}
+
+void AudioEngine::setMasterEqHigh(float db)
+{
+    masterEqHighDb = juce::jlimit(-18.0f, 18.0f, db);
+    masterEqState.dirty = true;
+}
+
+void AudioEngine::setMasterInsertDrive(float amount)
+{
+    masterInsertDrive = juce::jlimit(0.0f, 1.0f, amount);
+}
+
+void AudioEngine::setMasterCompressorThreshold(float db)
+{
+    masterCompThresholdDb = juce::jlimit(-48.0f, 0.0f, db);
+    masterDynamicsState.dirty = true;
+}
+
+void AudioEngine::setMasterCompressorRatio(float ratio)
+{
+    masterCompRatio = juce::jlimit(1.0f, 20.0f, ratio);
+}
+
+void AudioEngine::setMasterCompressorAttackMs(float ms)
+{
+    masterCompAttackMs = juce::jlimit(1.0f, 200.0f, ms);
+    masterDynamicsState.dirty = true;
+}
+
+void AudioEngine::setMasterCompressorReleaseMs(float ms)
+{
+    masterCompReleaseMs = juce::jlimit(10.0f, 1000.0f, ms);
+    masterDynamicsState.dirty = true;
+}
+
+void AudioEngine::setMasterCompressorMakeupDb(float db)
+{
+    masterCompMakeupDb = juce::jlimit(0.0f, 18.0f, db);
+}
+
+void AudioEngine::setMasterCompressorEnabled(bool enabled)
+{
+    masterCompEnabled = enabled;
+}
+
+void AudioEngine::setMasterLimiterCeilingDb(float db)
+{
+    masterLimiterCeilingDb = juce::jlimit(-12.0f, -0.1f, db);
+}
+
+void AudioEngine::setMasterLimiterReleaseMs(float ms)
+{
+    masterLimiterReleaseMs = juce::jlimit(5.0f, 500.0f, ms);
+    masterDynamicsState.dirty = true;
+}
+
+void AudioEngine::setMasterLimiterEnabled(bool enabled)
+{
+    masterLimiterEnabled = enabled;
+}
 
 //==============================================================================
 // Reverb
@@ -366,6 +443,10 @@ void AudioEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
     maxEchoDelaySamples = static_cast<int>(sampleRate * 2.0);
     echoBuffer.setSize(2, maxEchoDelaySamples, false, true, false);
     echoWritePos = 0;
+
+    masterEqState.dirty = true;
+    masterDynamicsState.sampleRate = sampleRate;
+    masterDynamicsState.dirty = true;
 }
 
 void AudioEngine::releaseResources()
@@ -389,17 +470,27 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     // 2. Pitch shift + time stretch via RubberBand.
     pitchShifter.process(buf);
 
-    // 3. Apply master + music volume.
+    // 3. Apply per-channel style gains (current engine has one program source,
+    // so we treat vocal volume as a trim influencing FX return feel).
     const float gain = masterVolume.load() * musicVolume.load();
     buf.applyGain(gain);
 
-    // 4. Reverb.
+    // 4. Master EQ.
+    applyMasterEq(buf);
+
+    // 5. Reverb.
     applyReverb(buf);
 
-    // 5. Echo.
+    // 6. Echo.
     applyEcho(buf);
 
-    // 6. Update position and VU level.
+    // 7. Insert saturation on the post-FX bus.
+    applyMasterInsert(buf);
+
+    // 8. Always-on master compressor + limiter for song-to-song consistency.
+    applyMasterDynamics(buf);
+
+    // 9. Update position and VU level.
     updatePlaybackPosition();
 
     if (frequencyAnalysisEnabled)
@@ -407,7 +498,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
 
     currentAudioLevel = buf.getRMSLevel(0, bufferToFill.startSample, bufferToFill.numSamples);
 
-    // 7. CDG sync callback.
+    // 10. CDG sync callback.
     if (cdgLoaded && cdgSyncCallback)
         cdgSyncCallback(currentPosition.load(), {});
 }
@@ -472,6 +563,172 @@ void AudioEngine::applyEcho(juce::AudioBuffer<float>& buffer)
 
         echoWritePos = (echoWritePos + 1) % maxEchoDelaySamples;
     }
+}
+
+void AudioEngine::applyMasterEq(juce::AudioBuffer<float>& buffer)
+{
+    if (masterEqState.dirty.exchange(false))
+    {
+        const auto sr = juce::jmax(22050.0, getCurrentSampleRate());
+        const auto low = juce::Decibels::decibelsToGain(masterEqLowDb.load());
+        const auto mid = juce::Decibels::decibelsToGain(masterEqMidDb.load());
+        const auto high = juce::Decibels::decibelsToGain(masterEqHighDb.load());
+
+        auto lowCoeffs = juce::IIRCoefficients::makeLowShelf(sr, 120.0, 0.7071, low);
+        auto midCoeffs = juce::IIRCoefficients::makePeakFilter(sr, 1200.0, 0.8, mid);
+        auto highCoeffs = juce::IIRCoefficients::makeHighShelf(sr, 8000.0, 0.7071, high);
+
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            masterEqState.lowShelf[(size_t) ch].setCoefficients(lowCoeffs);
+            masterEqState.midPeak[(size_t) ch].setCoefficients(midCoeffs);
+            masterEqState.highShelf[(size_t) ch].setCoefficients(highCoeffs);
+        }
+    }
+
+    const int channels = juce::jmin(2, buffer.getNumChannels());
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        auto* s = buffer.getWritePointer(ch);
+        const int n = buffer.getNumSamples();
+        masterEqState.lowShelf[(size_t) ch].processSamples(s, n);
+        masterEqState.midPeak[(size_t) ch].processSamples(s, n);
+        masterEqState.highShelf[(size_t) ch].processSamples(s, n);
+    }
+}
+
+void AudioEngine::applyMasterInsert(juce::AudioBuffer<float>& buffer)
+{
+    const float drive = masterInsertDrive.load();
+    if (drive <= 0.0001f)
+        return;
+
+    const float inGain = 1.0f + drive * 6.0f;
+    const float outGain = 1.0f / (1.0f + drive * 1.8f);
+    const int channels = buffer.getNumChannels();
+    const int n = buffer.getNumSamples();
+
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        auto* s = buffer.getWritePointer(ch);
+        for (int i = 0; i < n; ++i)
+        {
+            const float x = s[i] * inGain;
+            s[i] = std::tanh(x) * outGain;
+        }
+    }
+}
+
+void AudioEngine::updateMasterDynamicsCoefficients()
+{
+    const auto sr = juce::jmax(22050.0, masterDynamicsState.sampleRate);
+
+    const auto attackSeconds = juce::jmax(0.001f, masterCompAttackMs.load() * 0.001f);
+    const auto releaseSeconds = juce::jmax(0.005f, masterCompReleaseMs.load() * 0.001f);
+    const auto limiterReleaseSeconds = juce::jmax(0.003f, masterLimiterReleaseMs.load() * 0.001f);
+
+    masterDynamicsState.compAttackCoeff = std::exp(-1.0f / (float) (attackSeconds * (float) sr));
+    masterDynamicsState.compReleaseCoeff = std::exp(-1.0f / (float) (releaseSeconds * (float) sr));
+    masterDynamicsState.limiterReleaseCoeff = std::exp(-1.0f / (float) (limiterReleaseSeconds * (float) sr));
+}
+
+void AudioEngine::applyMasterDynamics(juce::AudioBuffer<float>& buffer)
+{
+    if (masterDynamicsState.dirty.exchange(false))
+        updateMasterDynamicsCoefficients();
+
+    const int channels = juce::jmin(2, buffer.getNumChannels());
+    const int n = buffer.getNumSamples();
+    if (channels <= 0 || n <= 0)
+        return;
+
+    auto* left = buffer.getWritePointer(0);
+    auto* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
+
+    const bool compEnabled = masterCompEnabled.load();
+    const bool limiterEnabled = masterLimiterEnabled.load();
+    const float thresholdDb = masterCompThresholdDb.load();
+    const float ratio = juce::jmax(1.0f, masterCompRatio.load());
+    const float makeupDb = masterCompMakeupDb.load();
+    const float compAtk = masterDynamicsState.compAttackCoeff;
+    const float compRel = masterDynamicsState.compReleaseCoeff;
+
+    const float limiterCeilingGain = juce::Decibels::decibelsToGain(masterLimiterCeilingDb.load());
+    const float limiterRelease = masterDynamicsState.limiterReleaseCoeff;
+
+    float compGainDb = masterDynamicsState.compGainDb;
+    float limiterGain = masterDynamicsState.limiterGain;
+    float compPostPeak = 0.0f;
+    float limiterReductionPeak = 0.0f;
+
+    constexpr float kMinLinear = 1.0e-9f;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const float inL = left[i];
+        const float inR = right != nullptr ? right[i] : inL;
+        float compGain = 1.0f;
+        if (compEnabled)
+        {
+            const float detector = juce::jmax(std::abs(inL), std::abs(inR));
+            const float levelDb = juce::Decibels::gainToDecibels(juce::jmax(detector, kMinLinear), -160.0f);
+            const float overDb = levelDb - thresholdDb;
+            const float targetCompGainDb = overDb > 0.0f ? -(overDb - (overDb / ratio)) : 0.0f;
+
+            const float compCoeff = targetCompGainDb < compGainDb ? compAtk : compRel;
+            compGainDb = compCoeff * compGainDb + (1.0f - compCoeff) * targetCompGainDb;
+            compGain = juce::Decibels::decibelsToGain(compGainDb + makeupDb);
+        }
+        else
+        {
+            compGainDb = 0.0f;
+            compGain = 1.0f;
+        }
+
+        float yL = inL * compGain;
+        float yR = inR * compGain;
+
+        compPostPeak = juce::jmax(compPostPeak, juce::jmax(std::abs(yL), std::abs(yR)));
+
+        if (limiterEnabled)
+        {
+            const float postDetector = juce::jmax(std::abs(yL), std::abs(yR));
+            const float targetLimiterGain = postDetector > limiterCeilingGain
+                                                ? (limiterCeilingGain / juce::jmax(postDetector, kMinLinear))
+                                                : 1.0f;
+
+            if (targetLimiterGain < limiterGain)
+                limiterGain = targetLimiterGain;
+            else
+                limiterGain = limiterRelease * limiterGain + (1.0f - limiterRelease) * targetLimiterGain;
+        }
+        else
+        {
+            limiterGain = 1.0f;
+        }
+
+        left[i] = yL * limiterGain;
+        if (right != nullptr)
+            right[i] = yR * limiterGain;
+
+        limiterReductionPeak = juce::jmax(limiterReductionPeak, 1.0f - limiterGain);
+    }
+
+    masterDynamicsState.compGainDb = compGainDb;
+    masterDynamicsState.limiterGain = limiterGain;
+
+    const float compPostDb = juce::Decibels::gainToDecibels(juce::jmax(compPostPeak, 1.0e-9f), -160.0f);
+    const float compNorm = juce::jlimit(0.0f, 1.0f, (compPostDb + 54.0f) / 54.0f);
+
+    const float prevComp = masterCompOutputMeter.load();
+    const float compSmoothed = juce::jmax(compNorm, prevComp * 0.88f + compNorm * 0.12f);
+    masterCompOutputMeter = compSmoothed;
+
+    const float prevLimiter = masterLimiterReductionMeter.load();
+    const float limiterSmoothed = limiterReductionPeak > prevLimiter
+                                      ? limiterReductionPeak
+                                      : (prevLimiter * 0.92f + limiterReductionPeak * 0.08f);
+    masterLimiterReductionMeter = juce::jlimit(0.0f, 1.0f, limiterSmoothed);
 }
 
 void AudioEngine::updatePlaybackPosition()
@@ -567,6 +824,9 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
             maxEchoDelaySamples  = static_cast<int>(sr * 2.0);
             echoBuffer.setSize(2, maxEchoDelaySamples, false, true, false);
             echoWritePos = 0;
+
+            masterDynamicsState.sampleRate = sr;
+            masterDynamicsState.dirty = true;
         }
     }
 }

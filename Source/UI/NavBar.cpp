@@ -100,6 +100,14 @@ namespace NavIcons
         p.addTriangle(7, 6, 7, 12, 14, 9);         // play button
         return p;
     }
+
+    static juce::Path makeLocations()
+    {
+        juce::Path p;
+        p.addEllipse(5, 2, 10, 10);
+        p.addRectangle(8, 11, 4, 7);
+        return p;
+    }
 }
 
 //==============================================================================
@@ -208,7 +216,7 @@ NavBar::NavBar()
             case NavPage::Testing:         iconPath = NavIcons::makeTesting();  break;
             case NavPage::Ads:             iconPath = NavIcons::makeAds();      break;
             case NavPage::Playlist:        break;
-            case NavPage::VenueManagement: break;
+            case NavPage::VenueManagement: iconPath = NavIcons::makeLocations(); break;
         }
 
         auto* btn = buttons.add(new NavButton(item.label, iconPath));
@@ -258,9 +266,10 @@ void NavBar::buildMenuItems()
         { NavPage::Library,  lm.getText("nav.library"),  {}, AccessRight::Library  },
         { NavPage::Charts,   lm.getText("nav.charts"),   {}, AccessRight::Charts   },
         { NavPage::Mixer,    lm.getText("nav.mixer"),    {}, AccessRight::Mixer    },
-        { NavPage::Settings, lm.getText("nav.settings"), {}, AccessRight::Settings },
+        { NavPage::Settings, lm.getText("nav.setup"),    {}, AccessRight::Settings },
         { NavPage::Testing,  lm.getText("nav.testing"),  {}, AccessRight::Testing  },
         { NavPage::Ads,      lm.getText("nav.ads"),      {}, AccessRight::Ads      },
+        { NavPage::VenueManagement, lm.getText("nav.locations"), {}, AccessRight::VenueManagement },
     };
 }
 
@@ -390,11 +399,15 @@ void NavBar::updateAllText()
     // Rebuild menu item labels
     static const juce::String navKeys[] = {
         "nav.home", "nav.search", "nav.library", "nav.charts",
-        "nav.mixer", "nav.settings", "nav.testing", "nav.ads"
+        "nav.mixer", "nav.setup", "nav.testing", "nav.ads", "nav.locations"
     };
 
-    for (size_t i = 0; i < menuItems.size() && i < 8; ++i)
+    for (size_t i = 0; i < menuItems.size() && i < std::size(navKeys); ++i)
+    {
         menuItems[i].label = lm.getText(navKeys[i]);
+        if (i < (size_t) buttons.size())
+            buttons[(int) i]->setLabel(menuItems[i].label);
+    }
 
     // Genre header
     if (genreHeader)
