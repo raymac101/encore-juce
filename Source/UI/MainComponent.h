@@ -222,6 +222,11 @@ private:
     void updateConnectionStatus();
     void updateDebugInfo();
     void updateAudioStatusIndicator();
+    void runSongbookHealthCheckIfReady();
+    void showSongUnavailableMessage(const QueueItem& item);
+
+    bool pendingSongbookHealthCheck_ = true;
+    bool songbookHealthPromptShown_ = false;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

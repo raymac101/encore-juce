@@ -17,6 +17,7 @@
 #include "../Services/QueueService.h"
 #include "../Services/RequestService.h"
 #include "../Services/HostService.h"
+#include "../Services/SongDatabase.h"
 #include "../Services/ImageCache.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/ArchiveService.h"
@@ -813,15 +814,58 @@ void MainComponent::setupUI()
                 }
             }
         }
+
+        // Database fallback for multi-computer venues:
+        // queue item may come from another machine (different library cache
+        // lifetime), so resolve against this machine's local song DB.
+        CdgSong dbMatch;
+        if (match == nullptr)
+        {
+            SongDatabase db;
+            if (db.open())
+            {
+                if (wantId.isNotEmpty())
+                    dbMatch = db.getById(wantId);
+
+                if (dbMatch.id.empty() && wantName.isNotEmpty())
+                {
+                    const juce::String query = wantArtist.isNotEmpty()
+                        ? (wantName + " " + wantArtist)
+                        : wantName;
+
+                    auto hits = db.searchPrefix(query, 40);
+                    if (!hits.empty())
+                        dbMatch = hits.front();
+                }
+            }
+
+            if (!dbMatch.id.empty())
+                match = &dbMatch;
+        }
         if (match == nullptr)
         {
             DBG("Play singer: no library match for '" << juce::String(firstSong.songName)
                 << "' by '" << juce::String(firstSong.songArtist) << "'");
+            showSongUnavailableMessage(firstSong);
             return;
         }
 
+        int resolvedVersionIndex = 0;
+        const juce::String wantedVersion = juce::String(firstSong.songVersion).trim();
+        if (wantedVersion.isNotEmpty() && !match->version.empty())
+        {
+            for (size_t vi = 0; vi < match->version.size(); ++vi)
+            {
+                if (juce::String(match->version[vi]).trim().equalsIgnoreCase(wantedVersion))
+                {
+                    resolvedVersionIndex = (int) vi;
+                    break;
+                }
+            }
+        }
+
         const int pitchSemis = juce::roundToInt(firstSong.pitch);
-        loadAndPlaySong(*match, /*versionIndex*/ 0, pitchSemis, /*autoStart*/ false);
+        loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, /*autoStart*/ false);
     };
 
     queueBar->onPlayCurrent = [this]() {
@@ -1334,6 +1378,7 @@ void MainComponent::timerCallback()
     updateConnectionStatus();
     updateDebugInfo();
     updateAudioStatusIndicator();
+    runSongbookHealthCheckIfReady();
 
     if (audioEngine == nullptr)
         return;
@@ -1360,6 +1405,107 @@ void MainComponent::timerCallback()
         bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
         bottomBar->setVolume (juce::roundToInt(audioEngine->getMasterVolume() * 10.0f));
     }
+}
+
+void MainComponent::showSongUnavailableMessage(const QueueItem& item)
+{
+    juce::String msg = "Song not found on this computer";
+    const juce::String name = juce::String(item.songName).trim();
+    if (name.isNotEmpty())
+        msg = "Song unavailable on this computer: " + name;
+
+    showLoadingOverlay(msg, -1.0);
+    if (bottomBar != nullptr)
+        bottomBar->setWaveformStatusMessage("Missing local file. Run Library scan to relink this venue.");
+
+    juce::Timer::callAfterDelay(1800, [safe = juce::Component::SafePointer<MainComponent>(this)]()
+    {
+        if (safe != nullptr)
+            safe->hideLoadingOverlay();
+    });
+}
+
+void MainComponent::runSongbookHealthCheckIfReady()
+{
+    if (!pendingSongbookHealthCheck_ || songbookHealthPromptShown_)
+        return;
+    if (mainArea == nullptr)
+        return;
+
+    auto* libraryPage = mainArea->getLibraryPage();
+    if (libraryPage == nullptr)
+        return;
+
+    const auto& songs = mainArea->getLibrarySongs();
+    if (songs.empty())
+        return;
+
+    pendingSongbookHealthCheck_ = false;
+
+    int checked = 0;
+    int missing = 0;
+    int macStyle = 0;
+
+    for (const auto& s : songs)
+    {
+        juce::String path;
+        if (!s.fullPath.empty())
+            path = juce::String(s.fullPath.front()).trim();
+
+        if (path.isEmpty() && !s.filePath.empty() && !s.fileName.empty())
+            path = juce::File(juce::String(s.filePath.front())).getChildFile(juce::String(s.fileName.front())).getFullPathName();
+
+        if (path.isEmpty())
+            continue;
+
+        ++checked;
+        if (!juce::File(path).existsAsFile())
+            ++missing;
+
+        if (path.startsWithIgnoreCase("/Users/")
+            || path.startsWithIgnoreCase("/Volumes/")
+            || path.startsWithIgnoreCase("/System/"))
+            ++macStyle;
+
+        if (checked >= 120)
+            break;
+    }
+
+    if (checked < 10)
+        return;
+
+    const int missingPct = (missing * 100) / checked;
+    const int macPct = (macStyle * 100) / checked;
+    const bool severeMissing = missingPct >= 70;
+    const bool likelyMacPaths = macPct >= 30;
+
+    if (!severeMissing && !likelyMacPaths)
+        return;
+
+    songbookHealthPromptShown_ = true;
+
+    juce::String detail = "Songbook paths appear to be from another computer.\n"
+                         "Detected " + juce::String(missingPct) + "% missing files in sampled songs.\n\n"
+                         "Run Initial Song Load now to relink this machine?";
+
+    juce::AlertWindow::showOkCancelBox(
+        juce::AlertWindow::WarningIcon,
+        "Library Path Mismatch Detected",
+        detail,
+        "Run Scan",
+        "Later",
+        this,
+        juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<MainComponent>(this)](int result)
+        {
+            if (safe == nullptr || result == 0 || safe->mainArea == nullptr)
+                return;
+
+            if (auto* lp = safe->mainArea->getLibraryPage())
+            {
+                safe->mainArea->setCurrentPage(NavPage::Library);
+                lp->startInitialSongLoad();
+            }
+        }));
 }
 
 void MainComponent::updateAudioStatusIndicator()
@@ -1834,6 +1980,31 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         if (sibling.existsAsFile())
             audioFile = sibling;
         ext = audioFile.getFileExtension().toLowerCase();
+    }
+
+    if (! audioFile.existsAsFile())
+    {
+        // Fallback: if the requested version path is unavailable, try every
+        // known version path and pick the first playable file.
+        for (const auto& fp : song.fullPath)
+        {
+            juce::File candidate { juce::String(fp) };
+            auto cext = candidate.getFileExtension().toLowerCase();
+            if (cext == ".cdg" || cext == ".zip")
+            {
+                auto sibling = candidate.withFileExtension("mp3");
+                if (sibling.existsAsFile())
+                    candidate = sibling;
+            }
+
+            if (candidate.existsAsFile())
+            {
+                audioFile = candidate;
+                ext = audioFile.getFileExtension().toLowerCase();
+                DBG("loadAndPlaySong: fallback picked playable version: " + audioFile.getFullPathName());
+                break;
+            }
+        }
     }
 
     if (! audioFile.existsAsFile())
