@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isWorker() {
+      return isSignedIn() && request.auth.token.worker == true;
+    }
+
+    // Canonical metadata documents. Client read-only.
+    match /metadataSongs/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isWorker();
+    }
+
+    // Queue is worker-only by default. Requests should go through callable function.
+    match /metadataFetchQueue/{docId} {
+      allow read: if isWorker();
+      allow write: if isWorker();
+    }
+
+    // Daily quota tracking doc(s)
+    match /metadataQuota/{docId} {
+      allow read: if isWorker();
+      allow write: if isWorker();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

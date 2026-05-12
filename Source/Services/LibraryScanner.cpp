@@ -913,7 +913,30 @@ int LibraryScanner::applyLocalMetadata(std::vector<CdgSong>& songs)
     // meta_data.json lives alongside songbook.json in the EncoreKaraoke app-data dir.
     // Copy it there from src/assets/data/meta_data.json if not already present.
     juce::File metaFile = getSongbookFile().getSiblingFile("meta_data.json");
-    if (! metaFile.existsAsFile()) return 0;
+    if (! metaFile.existsAsFile())
+    {
+        auto appDataDir = metaFile.getParentDirectory();
+        appDataDir.createDirectory();
+
+        const auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                                .getParentDirectory();
+        const juce::Array<juce::File> candidates {
+            exeDir.getChildFile("assets").getChildFile("data").getChildFile("meta_data.json"),
+            juce::File::getCurrentWorkingDirectory().getChildFile("assets").getChildFile("data").getChildFile("meta_data.json")
+        };
+
+        for (const auto& candidate : candidates)
+        {
+            if (candidate.existsAsFile())
+            {
+                candidate.copyFileTo(metaFile);
+                break;
+            }
+        }
+
+        if (! metaFile.existsAsFile())
+            return 0;
+    }
 
     // meta_data.json is a JSON *object* keyed by Firestore document IDs:
     //   { "<docId>": { "artistName":"...", "songName":"...", ... }, ... }
