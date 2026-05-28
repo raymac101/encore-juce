@@ -106,6 +106,9 @@ public:
     /** User wants to remove an existing user (identified by email). */
     std::function<void(const juce::String& email)> onRemoveUser;
 
+    /** User wants to revoke a pending invitation (identified by email). */
+    std::function<void(const juce::String& email)> onRevokeInvitation;
+
     /** User wants to upload a new logo. Provides the local file path chosen. */
     std::function<void(const juce::File& logoFile)> onUploadLogo;
 
@@ -142,8 +145,19 @@ public:
         bool active = true;
     };
 
+    struct PendingInvitation
+    {
+        juce::String email;
+        juce::String role;
+        juce::Time   expirationDate;
+        bool         expired = false;
+    };
+
     /** Replace the user list displayed in the User Management section. */
     void setUserList(const std::vector<VenueUser>& users);
+
+    /** Replace the pending invitation list displayed in User Management. */
+    void setPendingInvitations(const std::vector<PendingInvitation>& invitations);
 
 private:
     //==========================================================================

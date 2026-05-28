@@ -24,6 +24,7 @@
 #include "../Services/ApiService.h"
 #include "EditSingerModal.h"
 #include <cmath>
+#include <cstring>
 
 //==============================================================================
 // Simple semi-transparent overlay shown while a song is loading. It paints a
@@ -439,8 +440,7 @@ void MainComponent::setupUI()
                 }
                 else
                 {
-                    if (safe != nullptr)
-                        safe->reloadQueueFromFirestore(venueId);
+                    safe->reloadQueueFromFirestore(venueId);
                 }
             });
     };
@@ -500,6 +500,7 @@ void MainComponent::setupUI()
                 else
                     v.deleteSongFromPlaylist("Popular", songId);
             }
+
             if (r.recommendedChanged)
             {
                 if (r.addToRecommended)
@@ -619,6 +620,448 @@ void MainComponent::setupUI()
     // also runs as part of the nightly cleanup timer started in setVenueId.
     if (auto* sp = mainArea->getSettingsPage())
     {
+        auto normalizeRoleForFirestore = [](const juce::String& roleLabel)
+        {
+            auto role = roleLabel.trim();
+            if (role.isEmpty())
+                return juce::String("Basic");
+
+            if (role.equalsIgnoreCase("Host"))
+                return juce::String("Host");
+            if (role.equalsIgnoreCase("Admin"))
+                return juce::String("Admin");
+            if (role.equalsIgnoreCase("Tester"))
+                return juce::String("Tester");
+            if (role.equalsIgnoreCase("EnterpriseAdmin") || role.equalsIgnoreCase("Enterprise Admin"))
+                return juce::String("EnterpriseAdmin");
+            if (role.equalsIgnoreCase("Basic") || role.equalsIgnoreCase("Basic User"))
+                return juce::String("Basic");
+
+            return juce::String("Basic");
+        };
+
+        auto isPrivilegedRole = [](const juce::String& role)
+        {
+            return role.equalsIgnoreCase("Admin")
+                || role.equalsIgnoreCase("Tester")
+                || role.equalsIgnoreCase("EnterpriseAdmin")
+                || role.equalsIgnoreCase("Enterprise Admin");
+        };
+
+        struct AssociationLookupResult
+        {
+            juce::String path;
+            juce::String role;
+            juce::String status;
+        };
+
+        auto findAssociationByEmail = [this](const juce::String& rawEmail) -> AssociationLookupResult
+        {
+            AssociationLookupResult out;
+            if (activeVenueId_.isEmpty())
+                return out;
+
+            const auto targetEmail = rawEmail.trim().toLowerCase();
+            auto& fc = FirestoreClient::getInstance();
+            auto docs = fc.listCollection("user-venue-lookup", 1000);
+            for (auto& d : docs)
+            {
+                if (FirestoreClient::readString(d, "venueId") != activeVenueId_)
+                    continue;
+                if (FirestoreClient::readString(d, "userEmail").toLowerCase() != targetEmail)
+                    continue;
+
+                const auto fullName = d.getProperty("name", juce::var()).toString();
+                const auto marker = "/documents/";
+                const auto idx = fullName.indexOf(marker);
+                if (idx < 0)
+                    continue;
+
+                out.path = fullName.substring(idx + (int) std::strlen(marker));
+                out.role = FirestoreClient::readString(d, "role");
+                out.status = FirestoreClient::readString(d, "status");
+                return out;
+            }
+            return out;
+        };
+
+        auto countActivePrivilegedUsers = [this, isPrivilegedRole]() -> int
+        {
+            if (activeVenueId_.isEmpty())
+                return 0;
+
+            int count = 0;
+            auto docs = FirestoreClient::getInstance().listCollection("user-venue-lookup", 1000);
+            for (auto& d : docs)
+            {
+                if (FirestoreClient::readString(d, "venueId") != activeVenueId_)
+                    continue;
+                if (! FirestoreClient::readString(d, "status").equalsIgnoreCase("active"))
+                    continue;
+                if (! isPrivilegedRole(FirestoreClient::readString(d, "role")))
+                    continue;
+                ++count;
+            }
+            return count;
+        };
+
+        sp->onSetVenueCode = [this](const juce::String& code)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            VenueService::getInstance().updateVenueCode(venueId, code,
+                [safe, venueId](bool ok, juce::String err)
+                {
+                    if (safe == nullptr)
+                        return;
+                    if (! ok)
+                    {
+                        DBG("[Settings] set venue code failed: " << err);
+                        return;
+                    }
+
+                    VenueService::getInstance().loadVenue(venueId,
+                        [safe](bool loaded, VenueItem v, juce::String loadErr)
+                        {
+                            if (safe == nullptr) return;
+                            if (! loaded)
+                            {
+                                DBG("[Settings] reload venue after set code failed: " << loadErr);
+                                return;
+                            }
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->setVenueData(v);
+                            if (safe->queueBar != nullptr)
+                                safe->queueBar->setVenueInfo(juce::String(v.name), juce::String(v.code));
+                            if (safe->lyricWindow_ != nullptr)
+                                if (auto* d = safe->lyricWindow_->getDisplay())
+                                    d->setVenueCode(juce::String(v.code));
+                        });
+                });
+        };
+
+        sp->onGenerateVenueCode = [this]()
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            VenueService::getInstance().addCode(venueId,
+                [safe, venueId](bool ok, juce::String err)
+                {
+                    if (safe == nullptr)
+                        return;
+                    if (! ok)
+                    {
+                        DBG("[Settings] generate venue code failed: " << err);
+                        return;
+                    }
+
+                    VenueService::getInstance().loadVenue(venueId,
+                        [safe](bool loaded, VenueItem v, juce::String loadErr)
+                        {
+                            if (safe == nullptr) return;
+                            if (! loaded)
+                            {
+                                DBG("[Settings] reload venue after generate code failed: " << loadErr);
+                                return;
+                            }
+
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->setVenueData(v);
+
+                            if (safe->queueBar != nullptr)
+                                safe->queueBar->setVenueInfo(juce::String(v.name), juce::String(v.code));
+
+                            if (safe->lyricWindow_ != nullptr)
+                                if (auto* d = safe->lyricWindow_->getDisplay())
+                                    d->setVenueCode(juce::String(v.code));
+                        });
+                });
+        };
+
+        sp->onSetEmergencyCode = [this](const juce::String& emergencyCode)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            juce::Thread::launch([safe, venueId, emergencyCode]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                const auto path = "venues/" + venueId + "?updateMask.fieldPaths=codePlus";
+                const auto fields = FirestoreClient::makeFields({
+                    { "codePlus", FirestoreClient::stringValue(emergencyCode) }
+                });
+                const bool ok = fc.patchDocument(path, fields);
+
+                juce::MessageManager::callAsync([safe, ok, venueId]
+                {
+                    if (safe == nullptr)
+                        return;
+                    if (! ok)
+                    {
+                        DBG("[Settings] set emergency code failed");
+                        return;
+                    }
+
+                    VenueService::getInstance().loadVenue(venueId,
+                        [safe](bool loaded, VenueItem v, juce::String loadErr)
+                        {
+                            if (safe == nullptr) return;
+                            if (! loaded)
+                            {
+                                DBG("[Settings] reload venue after set emergency code failed: " << loadErr);
+                                return;
+                            }
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->setVenueData(v);
+                        });
+                });
+            });
+        };
+
+        sp->onGenerateEmergencyCode = [this]()
+        {
+            const auto generated = VenueService::getInstance().generateCode();
+            if (auto* settings = mainArea != nullptr ? mainArea->getSettingsPage() : nullptr)
+                if (settings->onSetEmergencyCode)
+                    settings->onSetEmergencyCode(generated);
+        };
+
+        sp->onInviteUser = [this, normalizeRoleForFirestore](const juce::String& email, const juce::String& roleLabel)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            const auto venueName = mainArea != nullptr && mainArea->getSettingsPage() != nullptr
+                                 ? juce::String(mainArea->getSettingsPage()->getVenueData().name)
+                                 : juce::String();
+
+            juce::Thread::launch([safe, venueId, venueName, email = email.trim(), role = normalizeRoleForFirestore(roleLabel)]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                const auto lowerEmail = email.toLowerCase();
+
+                bool hasPendingInvite = false;
+                auto invites = fc.listCollection("venueInvitations", 500);
+                for (auto& inv : invites)
+                {
+                    if (FirestoreClient::readString(inv, "venueId") != venueId)
+                        continue;
+                    if (FirestoreClient::readString(inv, "invitedUserEmail").toLowerCase() != lowerEmail)
+                        continue;
+                    if (FirestoreClient::readBool(inv, "isAccepted", false))
+                        continue;
+                    if (FirestoreClient::readBool(inv, "isExpired", false))
+                        continue;
+                    hasPendingInvite = true;
+                    break;
+                }
+
+                if (! hasPendingInvite)
+                {
+                    const auto inviterEmail = fc.getEmail();
+                    const auto now = juce::Time::getCurrentTime();
+                    const auto expiry = now + juce::RelativeTime::days(30.0);
+                    auto fields = FirestoreClient::makeFields({
+                        { "venueId",          FirestoreClient::stringValue(venueId) },
+                        { "venueName",        FirestoreClient::stringValue(venueName) },
+                        { "invitedUserEmail", FirestoreClient::stringValue(lowerEmail) },
+                        { "invitedByEmail",   FirestoreClient::stringValue(inviterEmail) },
+                        { "invitedByName",    FirestoreClient::stringValue(inviterEmail) },
+                        { "role",             FirestoreClient::stringValue(role) },
+                        { "invitationDate",   FirestoreClient::timestampValue(now) },
+                        { "expirationDate",   FirestoreClient::timestampValue(expiry) },
+                        { "isAccepted",       FirestoreClient::booleanValue(false) },
+                        { "isExpired",        FirestoreClient::booleanValue(false) }
+                    });
+                    fc.createDocument("venueInvitations", fields);
+                }
+
+                juce::MessageManager::callAsync([safe]
+                {
+                    if (safe == nullptr) return;
+                    safe->refreshSettingsUsers();
+                    safe->refreshSettingsInvitations();
+                });
+            });
+        };
+
+        sp->onChangeUserRole = [this, normalizeRoleForFirestore, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole](const juce::String& email, const juce::String& roleLabel)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto role = normalizeRoleForFirestore(roleLabel);
+            juce::Thread::launch([safe, role, email, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                const auto assoc = findAssociationByEmail(email);
+                bool blocked = false;
+
+                if (assoc.path.isNotEmpty()
+                    && assoc.status.equalsIgnoreCase("active")
+                    && isPrivilegedRole(assoc.role)
+                    && ! isPrivilegedRole(role)
+                    && countActivePrivilegedUsers() <= 1)
+                {
+                    blocked = true;
+                }
+
+                if (! blocked && assoc.path.isNotEmpty())
+                {
+                    auto patchPath = assoc.path + "?updateMask.fieldPaths=role";
+                    auto fields = FirestoreClient::makeFields({
+                        { "role", FirestoreClient::stringValue(role) }
+                    });
+                    fc.patchDocument(patchPath, fields);
+                }
+
+                juce::MessageManager::callAsync([safe, blocked]
+                {
+                    if (safe == nullptr) return;
+                    if (blocked)
+                    {
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Role Change Blocked",
+                            "Cannot remove the last privileged venue user.");
+                    }
+                    safe->refreshSettingsUsers();
+                });
+            });
+        };
+
+        sp->onDeactivateUser = [this, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole](const juce::String& email)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            juce::Thread::launch([safe, email, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                const auto assoc = findAssociationByEmail(email);
+                bool blocked = false;
+
+                if (assoc.path.isNotEmpty()
+                    && assoc.status.equalsIgnoreCase("active")
+                    && isPrivilegedRole(assoc.role)
+                    && countActivePrivilegedUsers() <= 1)
+                {
+                    blocked = true;
+                }
+
+                if (! blocked && assoc.path.isNotEmpty())
+                {
+                    auto patchPath = assoc.path + "?updateMask.fieldPaths=status";
+                    auto fields = FirestoreClient::makeFields({
+                        { "status", FirestoreClient::stringValue("inactive") }
+                    });
+                    fc.patchDocument(patchPath, fields);
+                }
+
+                juce::MessageManager::callAsync([safe, blocked]
+                {
+                    if (safe == nullptr) return;
+                    if (blocked)
+                    {
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Deactivation Blocked",
+                            "Cannot deactivate the last privileged venue user.");
+                    }
+                    safe->refreshSettingsUsers();
+                });
+            });
+        };
+
+        sp->onRemoveUser = [this, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole](const juce::String& email)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            juce::Thread::launch([safe, email, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                const auto assoc = findAssociationByEmail(email);
+                bool blocked = false;
+
+                if (assoc.path.isNotEmpty()
+                    && assoc.status.equalsIgnoreCase("active")
+                    && isPrivilegedRole(assoc.role)
+                    && countActivePrivilegedUsers() <= 1)
+                {
+                    blocked = true;
+                }
+
+                if (! blocked && assoc.path.isNotEmpty())
+                    fc.deleteDocument(assoc.path);
+
+                juce::MessageManager::callAsync([safe, blocked]
+                {
+                    if (safe == nullptr) return;
+                    if (blocked)
+                    {
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Removal Blocked",
+                            "Cannot remove the last privileged venue user.");
+                    }
+                    safe->refreshSettingsUsers();
+                    safe->refreshSettingsInvitations();
+                    safe->refreshSettingsSessionStats();
+                });
+            });
+        };
+
+        sp->onRevokeInvitation = [this](const juce::String& email)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            juce::Thread::launch([safe, venueId, email = email.trim().toLowerCase()]
+            {
+                auto& fc = FirestoreClient::getInstance();
+                auto invites = fc.listCollection("venueInvitations", 1000);
+                for (auto& inv : invites)
+                {
+                    if (FirestoreClient::readString(inv, "venueId") != venueId)
+                        continue;
+                    if (FirestoreClient::readString(inv, "invitedUserEmail").toLowerCase() != email)
+                        continue;
+                    if (FirestoreClient::readBool(inv, "isAccepted", false))
+                        continue;
+
+                    const auto fullName = inv.getProperty("name", juce::var()).toString();
+                    const auto marker = "/documents/";
+                    const auto idx = fullName.indexOf(marker);
+                    if (idx < 0)
+                        continue;
+                    const auto relPath = fullName.substring(idx + (int) std::strlen(marker));
+                    fc.deleteDocument(relPath);
+                }
+
+                juce::MessageManager::callAsync([safe]
+                {
+                    if (safe == nullptr) return;
+                    safe->refreshSettingsInvitations();
+                });
+            });
+        };
+
         sp->onEndSession = [this](std::function<void(bool)> done)
         {
             if (activeVenueId_.isEmpty())
@@ -890,62 +1333,8 @@ void MainComponent::setupUI()
     };
 
     queueBar->onPlayCurrent = [this]() {
-        DBG("QueueBar: Play current singer");
-        if (audioEngine) audioEngine->play();
-        if (bottomBar)   bottomBar->setPlaying (true);
-        if (queueBar)    queueBar->setPlaying (true);
-    };
-
-    queueBar->onPauseCurrent = [this]() {
-        DBG("QueueBar: Pause current singer");
-        if (audioEngine) audioEngine->pause();
-        if (bottomBar)   bottomBar->setPlaying (false);
-        if (queueBar)    queueBar->setPlaying (false);
-    };
-
-    queueBar->onClearQueue = [this]() {
-        DBG("QueueBar: Clear queue requested");
-    };
-
-    queueBar->onReorder = [this](int from, int to) {
-        DBG("QueueBar: Reorder singer from " + juce::String(from) + " to " + juce::String(to));
-
-        // Persist new ordering by PATCHing each affected singer's `order`
-        // field. Snapshot the current singer list (already mutated locally
-        // by QueueBar::moveSinger) and write the new positions to Firestore.
-        const auto venueId = activeVenueId_;
-        if (venueId.isEmpty() || queueBar == nullptr) return;
-
-        const auto& singers = queueBar->getSingers();
-        struct Update { juce::String docId; int order; int rotationOrder; bool isHost; };
-        std::vector<Update> updates;
-        updates.reserve(singers.size());
-        for (size_t i = 0; i < singers.size(); ++i)
-        {
-            updates.push_back({ juce::String(singers[i].id),
-                                (int) i,
-                                singers[i].rotationOrder,
-                                singers[i].isHost });
-        }
-
-        juce::Thread::launch([venueId, updates]()
-        {
-            for (const auto& u : updates)
-            {
-                if (u.docId.isEmpty()) continue;
-                juce::String path = "venues/" + venueId + "/queue/" + u.docId
-                                  + "?updateMask.fieldPaths=order";
-                juce::DynamicObject::Ptr fields = new juce::DynamicObject();
-                fields->setProperty("order", FirestoreClient::integerValue(u.order));
-                if (! u.isHost)
-                {
-                    path += "&updateMask.fieldPaths=rotationOrder";
-                    fields->setProperty("rotationOrder",
-                                        FirestoreClient::integerValue(u.rotationOrder));
-                }
-                FirestoreClient::getInstance().patchDocument(path, juce::var(fields.get()));
-            }
-        });
+        if (queueBar == nullptr) return;
+        if (queueBar->onPlaySinger) queueBar->onPlaySinger(0);
     };
 
     queueBar->onSongClicked = [this](int singerIdx, int /*songIdx*/) {
@@ -1171,6 +1560,15 @@ void MainComponent::setupUI()
     if (languageButton) languageButton->setBounds(tempBounds.removeFromTop(40).withWidth(200));
     if (statusLabel) statusLabel->setBounds(tempBounds.removeFromTop(30));
     if (debugLabel) debugLabel->setBounds(tempBounds.removeFromTop(30));
+
+    maintenanceToastLabel_ = std::make_unique<juce::Label>("maintenanceToast", "");
+    maintenanceToastLabel_->setJustificationType(juce::Justification::centredLeft);
+    maintenanceToastLabel_->setColour(juce::Label::textColourId, juce::Colours::white);
+    maintenanceToastLabel_->setColour(juce::Label::backgroundColourId, juce::Colour(0xff1f6f5f).withAlpha(0.94f));
+    maintenanceToastLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
+    maintenanceToastLabel_->setBorderSize(juce::BorderSize<int>(4, 12, 4, 12));
+    maintenanceToastLabel_->setVisible(false);
+    addAndMakeVisible(maintenanceToastLabel_.get());
     
     DBG("setupUI completed successfully with initial bounds set");
     
@@ -1288,6 +1686,22 @@ void MainComponent::resized()
     // Loading overlay always covers the full window when visible.
     if (loadingOverlay_)
         loadingOverlay_->setBounds(getLocalBounds());
+
+    if (maintenanceToastLabel_)
+    {
+        int topOffset = 8;
+       #if ! JUCE_MAC
+        if (menuBar_ != nullptr && menuBar_->isVisible())
+            topOffset += 24;
+       #endif
+        if (topBar != nullptr)
+            topOffset += topBar->getBarHeight();
+
+        const int toastW = juce::jmin(520, juce::jmax(280, getWidth() - 280));
+        const int toastH = 34;
+        maintenanceToastLabel_->setBounds(getWidth() - toastW - 16, topOffset + 10, toastW, toastH);
+        maintenanceToastLabel_->toFront(false);
+    }
 
     // The old placeholder labels are no longer laid out in the centre;
     // they can be hidden or removed entirely later.
@@ -1443,6 +1857,26 @@ void MainComponent::showSongUnavailableMessage(const QueueItem& item)
     {
         if (safe != nullptr)
             safe->hideLoadingOverlay();
+    });
+}
+
+void MainComponent::showMaintenanceToast(const juce::String& message)
+{
+    if (message.isEmpty() || maintenanceToastLabel_ == nullptr)
+        return;
+
+    const int token = ++maintenanceToastToken_;
+    maintenanceToastLabel_->setText(message, juce::dontSendNotification);
+    maintenanceToastLabel_->setVisible(true);
+    maintenanceToastLabel_->toFront(false);
+
+    juce::Timer::callAfterDelay(3500, [safe = juce::Component::SafePointer<MainComponent>(this), token]()
+    {
+        if (safe == nullptr || safe->maintenanceToastLabel_ == nullptr)
+            return;
+        if (safe->maintenanceToastToken_ != token)
+            return;
+        safe->maintenanceToastLabel_->setVisible(false);
     });
 }
 
@@ -2466,6 +2900,10 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             if (safe->mainArea != nullptr)
                 safe->mainArea->setVenueData (v);
 
+            safe->refreshSettingsUsers();
+            safe->refreshSettingsInvitations();
+            safe->refreshSettingsSessionStats();
+
             // Start the nightly archive + clear timer for this venue. The
             // service reads the configured cleanup hour from UserPreferences
             // each minute, so a settings change takes effect immediately.
@@ -2626,6 +3064,254 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         advanceProgress("Loaded Queue");
                         safe->startDeferredAudioServices(venueId, startupToken);
                 });
+        });
+}
+
+void MainComponent::refreshSettingsUsers()
+{
+    if (activeVenueId_.isEmpty())
+        return;
+    if (mainArea == nullptr || mainArea->getSettingsPage() == nullptr)
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    const auto venueId = activeVenueId_;
+    juce::Thread::launch([safe, venueId]
+    {
+        std::vector<SettingsPage::VenueUser> users;
+        auto docs = FirestoreClient::getInstance().listCollection("user-venue-lookup", 1000);
+        for (auto& d : docs)
+        {
+            if (FirestoreClient::readString(d, "venueId") != venueId)
+                continue;
+
+            const auto status = FirestoreClient::readString(d, "status");
+            if (status == "removed")
+                continue;
+
+            SettingsPage::VenueUser u;
+            u.email = FirestoreClient::readString(d, "userEmail");
+            if (u.email.isEmpty())
+                continue;
+
+            const auto role = FirestoreClient::readString(d, "role");
+            if (role.equalsIgnoreCase("Host"))
+                u.role = "Host";
+            else if (role.equalsIgnoreCase("Admin"))
+                u.role = "Admin";
+            else if (role.equalsIgnoreCase("Tester"))
+                u.role = "Tester";
+            else if (role.equalsIgnoreCase("EnterpriseAdmin") || role.equalsIgnoreCase("Enterprise Admin"))
+                u.role = "EnterpriseAdmin";
+            else
+                u.role = "Basic";
+            u.active = (status == "active");
+            users.push_back(std::move(u));
+        }
+
+        std::sort(users.begin(), users.end(), [](const SettingsPage::VenueUser& a, const SettingsPage::VenueUser& b)
+        {
+            return a.email.compareIgnoreCase(b.email) < 0;
+        });
+
+        juce::MessageManager::callAsync([safe, users = std::move(users)]() mutable
+        {
+            if (safe == nullptr || safe->mainArea == nullptr)
+                return;
+            if (auto* sp = safe->mainArea->getSettingsPage())
+                sp->setUserList(users);
+        });
+    });
+}
+
+void MainComponent::refreshSettingsInvitations()
+{
+    if (activeVenueId_.isEmpty())
+        return;
+    if (mainArea == nullptr || mainArea->getSettingsPage() == nullptr)
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    const auto venueId = activeVenueId_;
+    juce::Thread::launch([safe, venueId]
+    {
+        std::vector<SettingsPage::PendingInvitation> invitesOut;
+        auto& fc = FirestoreClient::getInstance();
+        auto invites = fc.listCollection("venueInvitations", 1000);
+        auto associations = fc.listCollection("user-venue-lookup", 1000);
+        const auto now = juce::Time::getCurrentTime();
+        int autoAcceptedCount = 0;
+        int autoExpiredCount = 0;
+
+        std::unordered_set<std::string> activeEmails;
+        for (auto& d : associations)
+        {
+            if (FirestoreClient::readString(d, "venueId") != venueId)
+                continue;
+            if (!FirestoreClient::readString(d, "status").equalsIgnoreCase("active"))
+                continue;
+
+            const auto email = FirestoreClient::readString(d, "userEmail").trim().toLowerCase();
+            if (email.isNotEmpty())
+                activeEmails.insert(email.toStdString());
+        }
+
+        auto getRelPathFromName = [](const juce::var& doc) -> juce::String
+        {
+            const auto fullName = doc.getProperty("name", juce::var()).toString();
+            const auto marker = "/documents/";
+            const auto idx = fullName.indexOf(marker);
+            if (idx < 0)
+                return {};
+            return fullName.substring(idx + (int) std::strlen(marker));
+        };
+
+        for (auto& inv : invites)
+        {
+            if (FirestoreClient::readString(inv, "venueId") != venueId)
+                continue;
+
+            const auto email = FirestoreClient::readString(inv, "invitedUserEmail").trim().toLowerCase();
+            if (email.isEmpty())
+                continue;
+
+            bool isAccepted = FirestoreClient::readBool(inv, "isAccepted", false);
+            bool isExpired = FirestoreClient::readBool(inv, "isExpired", false);
+
+            const auto expirationDate = FirestoreClient::readTime(inv, "expirationDate");
+            const bool expiredByTime = (expirationDate > juce::Time() && expirationDate < now);
+            const bool hasActiveAssociation = activeEmails.count(email.toStdString()) > 0;
+
+            const auto relPath = getRelPathFromName(inv);
+
+            if (! isAccepted && hasActiveAssociation && relPath.isNotEmpty())
+            {
+                const auto path = relPath
+                    + "?updateMask.fieldPaths=isAccepted"
+                    + "&updateMask.fieldPaths=acceptedDate";
+                const auto fields = FirestoreClient::makeFields({
+                    { "isAccepted",  FirestoreClient::booleanValue(true) },
+                    { "acceptedDate", FirestoreClient::timestampValue(now) }
+                });
+                fc.patchDocument(path, fields);
+                isAccepted = true;
+                ++autoAcceptedCount;
+            }
+
+            if (! isAccepted && ! isExpired && expiredByTime && relPath.isNotEmpty())
+            {
+                const auto path = relPath + "?updateMask.fieldPaths=isExpired";
+                const auto fields = FirestoreClient::makeFields({
+                    { "isExpired", FirestoreClient::booleanValue(true) }
+                });
+                fc.patchDocument(path, fields);
+                isExpired = true;
+                ++autoExpiredCount;
+            }
+
+            if (isAccepted)
+                continue;
+
+            SettingsPage::PendingInvitation pending;
+            pending.email = email;
+            pending.role = FirestoreClient::readString(inv, "role");
+            pending.expirationDate = expirationDate;
+            pending.expired = isExpired || expiredByTime;
+
+            if (pending.role.equalsIgnoreCase("Enterprise Admin"))
+                pending.role = "EnterpriseAdmin";
+            if (pending.role.isEmpty())
+                pending.role = "Basic";
+
+            invitesOut.push_back(std::move(pending));
+        }
+
+        std::sort(invitesOut.begin(), invitesOut.end(), [](const SettingsPage::PendingInvitation& a,
+                                                           const SettingsPage::PendingInvitation& b)
+        {
+            return a.email.compareIgnoreCase(b.email) < 0;
+        });
+
+        juce::MessageManager::callAsync([safe, invitesOut = std::move(invitesOut), autoAcceptedCount, autoExpiredCount]() mutable
+        {
+            if (safe == nullptr || safe->mainArea == nullptr)
+                return;
+            if (auto* sp = safe->mainArea->getSettingsPage())
+                sp->setPendingInvitations(invitesOut);
+
+            if (autoAcceptedCount > 0 || autoExpiredCount > 0)
+            {
+                juce::StringArray parts;
+                if (autoAcceptedCount > 0)
+                    parts.add(juce::String(autoAcceptedCount) + " invite" + (autoAcceptedCount == 1 ? "" : "s") + " accepted");
+                if (autoExpiredCount > 0)
+                    parts.add(juce::String(autoExpiredCount) + " invite" + (autoExpiredCount == 1 ? "" : "s") + " expired");
+                safe->showMaintenanceToast("Invitation maintenance: " + parts.joinIntoString(", "));
+            }
+        });
+    });
+}
+
+void MainComponent::refreshSettingsSessionStats()
+{
+    if (activeVenueId_.isEmpty())
+        return;
+    if (mainArea == nullptr || mainArea->getSettingsPage() == nullptr)
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    VenueService::getInstance().checkExistingSessionData(activeVenueId_,
+        [safe](bool ok, VenueService::SessionCounts counts, juce::String /*error*/)
+        {
+            if (safe == nullptr || ! ok || safe->mainArea == nullptr)
+                return;
+
+            const auto venueId = safe->activeVenueId_;
+            juce::Thread::launch([safe, counts, venueId]
+            {
+                int songsToday = 0;
+                int activeMembers = 0;
+                auto docs = FirestoreClient::getInstance().listCollection("venues/" + venueId + "/playHistory", 500);
+                auto associationDocs = FirestoreClient::getInstance().listCollection("user-venue-lookup", 1000);
+
+                auto now = juce::Time::getCurrentTime();
+                auto startOfDay = juce::Time(now.getYear(), now.getMonth(), now.getDayOfMonth(), 0, 0, 0, 0, false);
+                const auto startMs = startOfDay.toMilliseconds();
+                const auto endMs = startMs + 24LL * 60LL * 60LL * 1000LL;
+
+                for (auto& d : docs)
+                {
+                    auto fields = d.getProperty("fields", juce::var());
+                    auto playedAtField = fields.getProperty("playedAt", juce::var());
+                    const auto playedAt = playedAtField.getProperty("integerValue", "0").toString().getLargeIntValue();
+                    if (playedAt >= startMs && playedAt < endMs)
+                        ++songsToday;
+                }
+
+                for (auto& d : associationDocs)
+                {
+                    if (FirestoreClient::readString(d, "venueId") != venueId)
+                        continue;
+                    if (!FirestoreClient::readString(d, "status").equalsIgnoreCase("active"))
+                        continue;
+                    ++activeMembers;
+                }
+
+                juce::MessageManager::callAsync([safe, counts, songsToday, activeMembers]
+                {
+                    if (safe == nullptr || safe->mainArea == nullptr)
+                        return;
+
+                    SettingsPage::SessionStats stats;
+                    stats.songsPlayedToday = songsToday;
+                    stats.activeMembers = activeMembers;
+                    stats.singersInQueue = counts.queueCount;
+                    stats.requestedSongs = counts.requestedCount;
+
+                    if (auto* sp = safe->mainArea->getSettingsPage())
+                        sp->setSessionStats(stats);
+                });
+            });
         });
 }
 

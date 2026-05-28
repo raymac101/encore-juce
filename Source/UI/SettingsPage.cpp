@@ -74,7 +74,16 @@ public:
         statusBadge_.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(statusBadge_);
 
-        auto roleCol = (user.role == "Admin") ? kTagAdmin : (user.role == "Host") ? kTagHost : kBtnNormal;
+        const auto normalizedRole = user.role.trim();
+        uint32_t roleCol = kBtnNormal;
+        if (normalizedRole == "Admin")
+            roleCol = kTagAdmin;
+        else if (normalizedRole == "Host")
+            roleCol = kTagHost;
+        else if (normalizedRole == "Tester")
+            roleCol = 0xff7a4fa3;
+        else if (normalizedRole == "EnterpriseAdmin")
+            roleCol = 0xff9a7a1a;
         roleBadge_.setText(user.role.toUpperCase(), juce::dontSendNotification);
         roleBadge_.setFont(juce::Font(juce::FontOptions().withHeight(10.f)).boldened());
         roleBadge_.setColour(juce::Label::textColourId,       juce::Colours::white);
@@ -82,18 +91,29 @@ public:
         roleBadge_.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(roleBadge_);
 
-        roleCombo_.addItem("Basic", 1);
-        roleCombo_.addItem("Host",  2);
-        roleCombo_.addItem("Admin", 3);
-        if (user.role == "Basic")      roleCombo_.setSelectedId(1, juce::dontSendNotification);
-        else if (user.role == "Host")  roleCombo_.setSelectedId(2, juce::dontSendNotification);
-        else if (user.role == "Admin") roleCombo_.setSelectedId(3, juce::dontSendNotification);
+        roleCombo_.addItem("Basic",            1);
+        roleCombo_.addItem("Host",             2);
+        roleCombo_.addItem("Admin",            3);
+        roleCombo_.addItem("Tester",           4);
+        roleCombo_.addItem("Enterprise Admin", 5);
+        if (normalizedRole == "Basic")
+            roleCombo_.setSelectedId(1, juce::dontSendNotification);
+        else if (normalizedRole == "Host")
+            roleCombo_.setSelectedId(2, juce::dontSendNotification);
+        else if (normalizedRole == "Admin")
+            roleCombo_.setSelectedId(3, juce::dontSendNotification);
+        else if (normalizedRole == "Tester")
+            roleCombo_.setSelectedId(4, juce::dontSendNotification);
+        else if (normalizedRole == "EnterpriseAdmin")
+            roleCombo_.setSelectedId(5, juce::dontSendNotification);
+        else
+            roleCombo_.setSelectedId(1, juce::dontSendNotification);
         roleCombo_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1527));
         roleCombo_.setColour(juce::ComboBox::textColourId,       juce::Colour(kTextPrimary));
         roleCombo_.setColour(juce::ComboBox::outlineColourId,    juce::Colour(kAccent).withAlpha(0.4f));
         roleCombo_.onChange = [this]() {
             if (onRoleChanged) {
-                juce::StringArray roles = { "Basic", "Host", "Admin" };
+                juce::StringArray roles = { "Basic", "Host", "Admin", "Tester", "EnterpriseAdmin" };
                 onRoleChanged(roles[roleCombo_.getSelectedId() - 1]);
             }
         };
@@ -139,6 +159,64 @@ private:
     juce::TextButton btnDeactivate_, btnRemove_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(UserRowComponent)
+};
+
+class InvitationRowComponent : public juce::Component
+{
+public:
+    std::function<void()> onRevoke;
+
+    explicit InvitationRowComponent(const SettingsPage::PendingInvitation& invite)
+    {
+        emailLabel_.setText(invite.email, juce::dontSendNotification);
+        emailLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.f)).boldened());
+        emailLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
+        addAndMakeVisible(emailLabel_);
+
+        const auto expires = invite.expirationDate.toString(true, true);
+        const auto statusText = invite.expired ? "Expired" : "Expires " + expires;
+        statusLabel_.setText(statusText, juce::dontSendNotification);
+        statusLabel_.setFont(juce::Font(juce::FontOptions().withHeight(12.f)));
+        statusLabel_.setColour(juce::Label::textColourId,
+                               juce::Colour(invite.expired ? kBtnDanger : kTextSecond));
+        addAndMakeVisible(statusLabel_);
+
+        roleBadge_.setText(invite.role.toUpperCase(), juce::dontSendNotification);
+        roleBadge_.setFont(juce::Font(juce::FontOptions().withHeight(10.f)).boldened());
+        roleBadge_.setColour(juce::Label::textColourId, juce::Colours::white);
+        roleBadge_.setColour(juce::Label::backgroundColourId, juce::Colour(kBtnNormal));
+        roleBadge_.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(roleBadge_);
+
+        btnRevoke_.setButtonText("REVOKE");
+        btnRevoke_.setColour(juce::TextButton::buttonColourId, juce::Colour(kBtnDanger));
+        btnRevoke_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+        btnRevoke_.onClick = [this]() {
+            if (onRevoke) onRevoke();
+        };
+        addAndMakeVisible(btnRevoke_);
+    }
+
+    void resized() override
+    {
+        const int w = getWidth();
+        emailLabel_.setBounds(kPadX, 6, 280, 18);
+        statusLabel_.setBounds(kPadX, 26, 320, 16);
+        roleBadge_.setBounds(kPadX + 328, 22, 120, 22);
+        btnRevoke_.setBounds(w - kPadX - 100, 14, 100, 28);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.setColour(juce::Colour(kTextSecond).withAlpha(0.2f));
+        g.drawLine(0, (float) getHeight() - 1, (float) getWidth(), (float) getHeight() - 1);
+    }
+
+private:
+    juce::Label      emailLabel_, statusLabel_, roleBadge_;
+    juce::TextButton btnRevoke_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InvitationRowComponent)
 };
 
 //==============================================================================
@@ -252,8 +330,11 @@ public:
         lblInviteHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
         lblInviteHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
         initEditor(edInviteEmail_, lm.getText("settings.ph_invite_email"));
-        cbInviteRole_.addItem("Basic User", 1);
-        cbInviteRole_.addItem("Host",       2);
+        cbInviteRole_.addItem("Basic",            1);
+        cbInviteRole_.addItem("Host",             2);
+        cbInviteRole_.addItem("Admin",            3);
+        cbInviteRole_.addItem("Tester",           4);
+        cbInviteRole_.addItem("Enterprise Admin", 5);
         cbInviteRole_.setSelectedId(1, juce::dontSendNotification);
         cbInviteRole_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1527));
         cbInviteRole_.setColour(juce::ComboBox::textColourId,       juce::Colour(kTextPrimary));
@@ -266,6 +347,18 @@ public:
         lblCurrentUsersHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
         userListPanel_ = std::make_unique<juce::Component>();
         addAndMakeVisible(*userListPanel_);
+
+        initFieldLabel(lblPendingInvitesHeader_, "Pending Invitations");
+        lblPendingInvitesHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
+        lblPendingInvitesHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
+        inviteListPanel_ = std::make_unique<juce::Component>();
+        addAndMakeVisible(*inviteListPanel_);
+
+        initFieldLabel(lblExpiredInvitesHeader_, "Expired Invitations");
+        lblExpiredInvitesHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
+        lblExpiredInvitesHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
+        expiredInviteListPanel_ = std::make_unique<juce::Component>();
+        addAndMakeVisible(*expiredInviteListPanel_);
 
         // ── Section 4: Logo Management ────────────────────────────────────────
         initSectionLabel(secLogo_, lm.getText("settings.sec_logo"));
@@ -596,6 +689,28 @@ public:
                 userRows_[(size_t)i]->setBounds(0, i * userRowH, w, userRowH);
             y += userListPanel_->getHeight();
         }
+        y += kFieldGap;
+        lblPendingInvitesHeader_.setBounds(kPadX, y, w - kPadX * 2, 26); y += 30;
+        if (inviteListPanel_)
+        {
+            const int inviteRowH = 56;
+            int numRows = (int) inviteRows_.size();
+            inviteListPanel_->setBounds(0, y, w, inviteRowH * juce::jmax(1, numRows));
+            for (int i = 0; i < numRows; ++i)
+                inviteRows_[(size_t) i]->setBounds(0, i * inviteRowH, w, inviteRowH);
+            y += inviteListPanel_->getHeight();
+        }
+        y += kFieldGap;
+        lblExpiredInvitesHeader_.setBounds(kPadX, y, w - kPadX * 2, 26); y += 30;
+        if (expiredInviteListPanel_)
+        {
+            const int inviteRowH = 56;
+            int numRows = (int) expiredInviteRows_.size();
+            expiredInviteListPanel_->setBounds(0, y, w, inviteRowH * juce::jmax(1, numRows));
+            for (int i = 0; i < numRows; ++i)
+                expiredInviteRows_[(size_t) i]->setBounds(0, i * inviteRowH, w, inviteRowH);
+            y += expiredInviteListPanel_->getHeight();
+        }
         cardEnd(cs);
         y += kSectionGap;
 
@@ -680,6 +795,8 @@ public:
         lblInviteHeader_.setText(lm.getText("settings.lbl_invite_header"),      juce::dontSendNotification);
         btnInviteUser_.setButtonText(lm.getText("settings.btn_invite_user"));
         lblCurrentUsersHeader_.setText(lm.getText("settings.lbl_current_users"), juce::dontSendNotification);
+        lblPendingInvitesHeader_.setText("Pending Invitations", juce::dontSendNotification);
+        lblExpiredInvitesHeader_.setText("Expired Invitations", juce::dontSendNotification);
 
         secLogo_.setText(lm.getText("settings.sec_logo"),                  juce::dontSendNotification);
         lblLogo_.setText(lm.getText("settings.lbl_logo"),                  juce::dontSendNotification);
@@ -804,6 +921,39 @@ public:
         resized();
     }
 
+    void updateInvitationList(const std::vector<SettingsPage::PendingInvitation>& invites)
+    {
+        inviteRows_.clear();
+        expiredInviteRows_.clear();
+        if (inviteListPanel_) inviteListPanel_->removeAllChildren();
+        if (expiredInviteListPanel_) expiredInviteListPanel_->removeAllChildren();
+
+        for (auto& inv : invites)
+        {
+            auto row = std::make_unique<InvitationRowComponent>(inv);
+            row->onRevoke = [this, email = inv.email]() {
+                juce::AlertWindow::showOkCancelBox(
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Revoke Invitation", "Revoke pending invitation for " + email + "?",
+                    "Revoke", "Cancel", nullptr,
+                    juce::ModalCallbackFunction::create([this, email](int r) {
+                        if (r == 1 && owner_.onRevokeInvitation) owner_.onRevokeInvitation(email);
+                    }));
+            };
+            if (inv.expired)
+            {
+                if (expiredInviteListPanel_) expiredInviteListPanel_->addAndMakeVisible(row.get());
+                expiredInviteRows_.push_back(std::move(row));
+            }
+            else
+            {
+                if (inviteListPanel_) inviteListPanel_->addAndMakeVisible(row.get());
+                inviteRows_.push_back(std::move(row));
+            }
+        }
+        resized();
+    }
+
 private:
     SettingsPage& owner_;
     bool venueEditMode_ = false;
@@ -841,6 +991,12 @@ private:
     juce::Label      lblCurrentUsersHeader_;
     std::unique_ptr<juce::Component> userListPanel_;
     std::vector<std::unique_ptr<UserRowComponent>> userRows_;
+    juce::Label      lblPendingInvitesHeader_;
+    std::unique_ptr<juce::Component> inviteListPanel_;
+    std::vector<std::unique_ptr<InvitationRowComponent>> inviteRows_;
+    juce::Label      lblExpiredInvitesHeader_;
+    std::unique_ptr<juce::Component> expiredInviteListPanel_;
+    std::vector<std::unique_ptr<InvitationRowComponent>> expiredInviteRows_;
 
     // Section 4: Logo
     juce::Label      secLogo_;
@@ -991,8 +1147,8 @@ private:
                 "Invalid Email", "Please enter a valid email address.");
             return;
         }
-        juce::StringArray roles = { "Basic User", "Host" };
-        auto role = roles[juce::jlimit(0, 1, cbInviteRole_.getSelectedId() - 1)];
+        juce::StringArray roles = { "Basic", "Host", "Admin", "Tester", "EnterpriseAdmin" };
+        auto role = roles[juce::jlimit(0, (int) roles.size() - 1, cbInviteRole_.getSelectedId() - 1)];
         if (owner_.onInviteUser) owner_.onInviteUser(email, role);
         edInviteEmail_.clear();
     }
@@ -1093,6 +1249,11 @@ void SettingsPage::setSessionStats(const SessionStats& stats)
 void SettingsPage::setUserList(const std::vector<VenueUser>& users)
 {
     if (panel_) panel_->updateUserList(users);
+}
+
+void SettingsPage::setPendingInvitations(const std::vector<PendingInvitation>& invitations)
+{
+    if (panel_) panel_->updateInvitationList(invitations);
 }
 
 void SettingsPage::notifyChanged()

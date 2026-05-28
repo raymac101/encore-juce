@@ -186,6 +186,10 @@ private:
     std::unordered_set<std::string> newSongIds_;
 
     void loadVenuePlaylists();
+    void refreshSettingsUsers();
+    void refreshSettingsInvitations();
+    void refreshSettingsSessionStats();
+    void showMaintenanceToast(const juce::String& message);
 
     /** Write a play-history entry if the song played long enough (>30 s).
         Pass `naturalEnd=true` when the audio finished on its own (always
@@ -227,6 +231,8 @@ private:
 
     bool pendingSongbookHealthCheck_ = true;
     bool songbookHealthPromptShown_ = false;
+    std::unique_ptr<juce::Label> maintenanceToastLabel_;
+    int maintenanceToastToken_ = 0;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
