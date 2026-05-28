@@ -2,7 +2,8 @@
   "functions": [
     {
       "source": "functions",
-      "codebase": "default"
+      "codebase": "metadata",
+      "ignore": ["node_modules", ".git", "firebase-debug.log", "*.local"]
     }
   ],
   "firestore": {

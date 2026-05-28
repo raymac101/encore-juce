@@ -29,6 +29,7 @@
 
 #include <JuceHeader.h>
 #include "../Models/CdgSong.h"
+#include "FirestoreClient.h"
 
 class ApiService
 {
@@ -38,8 +39,18 @@ public:
     /** Result delivered to searchArtistAndSong's callback. */
     struct Result
     {
+        enum class Source
+        {
+            none,
+            localCache,
+            firestore,
+            legacyApi
+        };
+
         bool         ok = false;
         bool         fromCache = false;        // true when served from shared_metadata.json
+        bool         queued = false;           // true when enqueueMetadataFetch was attempted
+        Source       source = Source::none;
         CdgSong      song;                     // updated record (only valid when ok)
         juce::String errorMessage;             // human-readable when !ok
     };
@@ -57,6 +68,14 @@ public:
                              const juce::String& artist,
                              const juce::String& song,
                              Callback onDone);
+
+    /** Metadata lookup that checks only shared sources (local cache +
+        Firestore metadataSongs) and does not enqueue or call the legacy API.
+        Useful for polling queued enrichments. */
+    void lookupSharedMetadataOnly(const CdgSong& currentSong,
+                                  const juce::String& artist,
+                                  const juce::String& song,
+                                  Callback onDone);
 
     //==========================================================================
     // Helpers — exposed for testing and reuse from other code paths.
@@ -101,6 +120,14 @@ private:
     ApiService();
     ~ApiService() = default;
 
+    Result tryFirestoreLookup(const CdgSong& currentSong,
+                              const juce::String& artist,
+                              const juce::String& song);
+
+    void enqueueMetadataFetch(const juce::String& artist,
+                              const juce::String& song,
+                              const juce::String& normalizedKey);
+
     Result doSpotifyApiCall(const CdgSong& currentSong,
                             const juce::String& artist,
                             const juce::String& song);
@@ -110,6 +137,7 @@ private:
                            const juce::String& song);
 
     juce::String taggApiUrl_  = "https://us-central1-tagg-9ee2b.cloudfunctions.net/app/";
+    juce::String enqueueMetadataUrl_ = "https://us-central1-tagg-9ee2b.cloudfunctions.net/enqueueMetadataFetch";
     juce::String bearerToken_ = "KaraokeWorld";
     int          timeoutMs_   = 15000;
 

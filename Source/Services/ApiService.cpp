@@ -7,6 +7,7 @@
 */
 
 #include "ApiService.h"
+#include "../Firebase/FirebaseConfig.h"
 
 namespace
 {
@@ -88,6 +89,62 @@ namespace
         }
         return out;
     }
+
+    juce::String fsString(const juce::var& fields, const char* key)
+    {
+        auto f = fields.getProperty(juce::Identifier(key), juce::var());
+        if (f.hasProperty("stringValue"))
+            return f.getProperty("stringValue", {}).toString();
+        if (f.hasProperty("integerValue") || f.hasProperty("doubleValue"))
+            return f.getProperty("integerValue", f.getProperty("doubleValue", {})).toString();
+        return {};
+    }
+
+    int fsInt(const juce::var& fields, const char* key)
+    {
+        auto f = fields.getProperty(juce::Identifier(key), juce::var());
+        if (f.hasProperty("integerValue"))
+            return f.getProperty("integerValue", {}).toString().getIntValue();
+        if (f.hasProperty("doubleValue"))
+            return (int) f.getProperty("doubleValue", 0.0);
+        if (f.hasProperty("stringValue"))
+            return f.getProperty("stringValue", {}).toString().getIntValue();
+        return 0;
+    }
+
+    double fsDouble(const juce::var& fields, const char* key)
+    {
+        auto f = fields.getProperty(juce::Identifier(key), juce::var());
+        if (f.hasProperty("doubleValue"))
+            return (double) f.getProperty("doubleValue", 0.0);
+        if (f.hasProperty("integerValue"))
+            return (double) f.getProperty("integerValue", {}).toString().getDoubleValue();
+        if (f.hasProperty("stringValue"))
+            return f.getProperty("stringValue", {}).toString().getDoubleValue();
+        return 0.0;
+    }
+
+    std::vector<std::string> fsStringArray(const juce::var& fields, const char* key)
+    {
+        std::vector<std::string> out;
+        auto f = fields.getProperty(juce::Identifier(key), juce::var());
+        auto arrayValue = f.getProperty("arrayValue", juce::var());
+        auto values = arrayValue.getProperty("values", juce::var());
+        if (auto* arr = values.getArray())
+        {
+            out.reserve((size_t) arr->size());
+            for (auto& item : *arr)
+            {
+                if (item.hasProperty("stringValue"))
+                {
+                    auto s = item.getProperty("stringValue", {}).toString();
+                    if (s.isNotEmpty())
+                        out.push_back(s.toStdString());
+                }
+            }
+        }
+        return out;
+    }
 }
 
 //==============================================================================
@@ -154,20 +211,134 @@ juce::String ApiService::getKeySignature(const juce::String& spotifyKeyMode)
 juce::String ApiService::makeCacheKey(const juce::String& artist,
                                       const juce::String& song)
 {
-    auto clean = [](juce::String x)
+    auto normalizeText = [](juce::String x)
     {
         x = x.toLowerCase().trim();
-        // Keep alphanumerics and spaces; drop everything else
+
+        if (x.endsWith(", the"))
+            x = x.dropLastCharacters(5).trim();
+        else if (x.endsWith(",the"))
+            x = x.dropLastCharacters(4).trim();
+
+        if (x.startsWith("the "))
+            x = x.substring(4).trim();
+
         juce::String out;
         out.preallocateBytes((size_t) x.length());
+        bool lastWasSpace = false;
         for (auto c : x)
         {
             if (juce::CharacterFunctions::isLetterOrDigit(c) || c == ' ')
-                out += juce::String::charToString(c);
+            {
+                if (c == ' ')
+                {
+                    if (! lastWasSpace)
+                        out += " ";
+                    lastWasSpace = true;
+                }
+                else
+                {
+                    out += juce::String::charToString(c);
+                    lastWasSpace = false;
+                }
+            }
         }
         return out.trim();
     };
-    return clean(artist) + "|" + clean(song);
+
+    return normalizeText(artist) + "|" + normalizeText(song);
+}
+
+ApiService::Result ApiService::tryFirestoreLookup(const CdgSong& currentSong,
+                                                  const juce::String& artist,
+                                                  const juce::String& song)
+{
+    Result r;
+
+    auto key = makeCacheKey(artist, song);
+    if (key == "|")
+        return r;
+
+    auto encodedKey = juce::URL::addEscapeChars(key, false);
+    int status = 0;
+    auto doc = FirestoreClient::getInstance().getDocument("metadataSongs/" + encodedKey, &status);
+
+    if (status == 404 || ! doc.isObject())
+        return r;
+
+    auto fields = doc.getProperty("fields", juce::var());
+    if (! fields.isObject())
+        return r;
+
+    CdgSong out = currentSong;
+
+    auto imageUrl = fsString(fields, "imageUrl");
+    if (imageUrl.isNotEmpty()) out.imageUrl = imageUrl.toStdString();
+
+    auto durationMs = fsInt(fields, "durationMS");
+    if (durationMs > 0) out.durationMS = durationMs;
+
+    auto keySignature = fsString(fields, "keySignature");
+    if (keySignature.isNotEmpty()) out.keySignature = keySignature.toStdString();
+
+    auto tempo = fsDouble(fields, "tempo");
+    if (tempo > 0.0) out.tempo = tempo;
+
+    auto songName = fsString(fields, "songName");
+    if (songName.isNotEmpty()) out.songName = songName.toStdString();
+
+    auto artistName = fsString(fields, "artistName");
+    if (artistName.isNotEmpty()) out.artistName = artistName.toStdString();
+
+    auto releaseDate = fsString(fields, "releaseDate");
+    if (releaseDate.isNotEmpty()) out.releaseDate = releaseDate.toStdString();
+
+    auto genres = fsStringArray(fields, "genres");
+    if (! genres.empty()) out.genres = std::move(genres);
+
+    auto version = fsStringArray(fields, "version");
+    if (! version.empty()) out.version = std::move(version);
+
+    if (out.tempo > 0.0)
+        out.tempo = std::round(out.tempo);
+
+    r.ok = true;
+    r.fromCache = true;
+    r.source = Result::Source::firestore;
+    r.song = std::move(out);
+    return r;
+}
+
+void ApiService::enqueueMetadataFetch(const juce::String& artist,
+                                      const juce::String& song,
+                                      const juce::String& normalizedKey)
+{
+    if (normalizedKey == "|")
+        return;
+
+    juce::DynamicObject::Ptr dataObj = new juce::DynamicObject();
+    dataObj->setProperty("artistName", artist);
+    dataObj->setProperty("songName", song);
+    dataObj->setProperty("normalizedKey", normalizedKey);
+    dataObj->setProperty("appVersion", "encore-juce");
+
+    juce::DynamicObject::Ptr bodyObj = new juce::DynamicObject();
+    bodyObj->setProperty("data", juce::var(dataObj.get()));
+
+    auto body = juce::JSON::toString(juce::var(bodyObj.get()), false);
+    juce::URL url(enqueueMetadataUrl_);
+
+    int statusCode = 0;
+    auto stream = url.withPOSTData(body).createInputStream(
+        juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
+            .withConnectionTimeoutMs(timeoutMs_)
+            .withHttpRequestCmd("POST")
+            .withExtraHeaders("Content-Type: application/json\r\n"
+                              "Accept: application/json")
+            .withStatusCode(&statusCode));
+
+    if (stream != nullptr)
+        (void) stream->readEntireStreamAsString();
 }
 
 //==============================================================================
@@ -284,6 +455,7 @@ ApiService::Result ApiService::tryCachedLookup(const CdgSong& currentSong,
 
     r.ok = true;
     r.fromCache = true;
+    r.source = Result::Source::localCache;
     r.song = std::move(out);
     return r;
 }
@@ -494,6 +666,7 @@ ApiService::Result ApiService::doSpotifyApiCall(const CdgSong& currentSong,
         out.tempo = std::round(out.tempo);
 
     r.ok = true;
+    r.source = Result::Source::legacyApi;
     r.song = std::move(out);
     return r;
 }
@@ -525,14 +698,57 @@ void ApiService::searchArtistAndSong(const CdgSong& currentSong,
             return;
         }
 
-        // 2) Cloud function call.
+        // 2) Firestore shared metadata lookup.
+        r = tryFirestoreLookup(currentSong, artist, song);
+        if (r.ok)
+        {
+            saveSharedMetadata(r.song);
+            if (onDone)
+                juce::MessageManager::callAsync([onDone, r]() { onDone(r); });
+            return;
+        }
+
+        // 3) Queue remote enrichment so background workers can hydrate later.
+        enqueueMetadataFetch(artist, song, makeCacheKey(artist, song));
+        bool queuedRequest = true;
+
+        // 4) Legacy cloud function fallback for immediate enrichment.
         r = doSpotifyApiCall(currentSong, artist, song);
+        r.queued = queuedRequest;
 
         if (r.ok)
         {
             // Persist successful API result to the shared cache.
             saveSharedMetadata(r.song);
         }
+
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, r]() { onDone(r); });
+    });
+}
+
+void ApiService::lookupSharedMetadataOnly(const CdgSong& currentSong,
+                                          const juce::String& artist,
+                                          const juce::String& song,
+                                          Callback onDone)
+{
+    if (artist.trim().isEmpty() || song.trim().isEmpty())
+    {
+        Result r;
+        r.errorMessage = "Artist and song name are required.";
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, r]() { onDone(r); });
+        return;
+    }
+
+    juce::Thread::launch([this, currentSong, artist, song, onDone]()
+    {
+        Result r = tryCachedLookup(currentSong, artist, song);
+        if (! r.ok)
+            r = tryFirestoreLookup(currentSong, artist, song);
+
+        if (! r.ok)
+            r.errorMessage = "Metadata not available in shared sources yet.";
 
         if (onDone)
             juce::MessageManager::callAsync([onDone, r]() { onDone(r); });

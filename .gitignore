@@ -37,3 +37,4 @@ JuceLibraryCode/
 # Assets (only track source, not build outputs)
 src/assets/images/
 src/assets/icon/
+firebase_SA.json

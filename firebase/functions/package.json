@@ -12,7 +12,12 @@
     "import:metadata": "node scripts/importMetadataJson.js"
   },
   "dependencies": {
+    "axios": "^1.6.8",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
     "firebase-admin": "^13.7.0",
-    "firebase-functions": "^6.5.0"
+    "firebase-functions": "^6.5.0",
+    "multer": "^1.4.5-lts.1",
+    "spotify-web-api-node": "^5.0.2"
   }
 }

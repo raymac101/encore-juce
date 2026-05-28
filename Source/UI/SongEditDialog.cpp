@@ -375,9 +375,13 @@ void SongEditDialog::doGetMetadata()
                     ++changed;
                 }
 
-                self->setStatus(changed > 0
-                                    ? juce::String("Updated ") + juce::String(changed) + " field(s)."
-                                    : juce::String("No useful metadata returned."),
+                juce::String baseMsg = changed > 0
+                    ? juce::String("Updated ") + juce::String(changed) + " field(s)."
+                    : juce::String("No useful metadata returned.");
+                if (message.isNotEmpty())
+                    baseMsg << " " << message;
+
+                self->setStatus(baseMsg,
                                 juce::Colour(changed > 0 ? kStatusOkBg : kStatusWarnBg));
             });
         });

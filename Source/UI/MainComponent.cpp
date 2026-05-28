@@ -558,10 +558,31 @@ void MainComponent::setupUI()
                 [done](ApiService::Result r)
                 {
                     if (! done) return;
-                    juce::String msg = r.ok
-                        ? (r.fromCache ? juce::String("Loaded from local cache.")
-                                       : juce::String("Updated from metadata API."))
-                        : r.errorMessage;
+                    juce::String msg;
+                    if (r.ok)
+                    {
+                        switch (r.source)
+                        {
+                            case ApiService::Result::Source::localCache:
+                                msg = "Loaded from local cache.";
+                                break;
+                            case ApiService::Result::Source::firestore:
+                                msg = "Loaded from shared Firestore metadata.";
+                                break;
+                            case ApiService::Result::Source::legacyApi:
+                                msg = "Updated from metadata API.";
+                                break;
+                            default:
+                                msg = "Metadata updated.";
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        msg = r.errorMessage;
+                        if (r.queued)
+                            msg << " Request queued for background metadata processing.";
+                    }
                     done(r.ok, r.song, msg);
                 });
         };

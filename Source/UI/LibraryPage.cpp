@@ -10,7 +10,12 @@
 
 #include "LibraryPage.h"
 #include "AddSongsDialog.h"
+#include "../Services/ApiService.h"
 #include "../Localization/LocalizationManager.h"
+
+#include <unordered_set>
+#include <unordered_map>
+#include <atomic>
 
 //==============================================================================
 // Helper: style a stat label
@@ -20,6 +25,16 @@ static void styleStatLabel(juce::Label* lbl, uint32_t textColour)
     lbl->setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
     lbl->setColour(juce::Label::textColourId, juce::Colour(textColour));
     lbl->setJustificationType(juce::Justification::centredLeft);
+}
+
+static bool needsRemoteMetadata(const CdgSong& song)
+{
+    return song.imageUrl.empty()
+        || song.durationMS <= 0
+        || song.keySignature.empty()
+        || song.tempo <= 0.0
+        || song.releaseDate.empty()
+        || song.genres.empty();
 }
 
 //==============================================================================
@@ -164,6 +179,15 @@ LibraryPage::LibraryPage()
         showMessage(LocalizationManager::getInstance().getText("library.songs_loaded").replace("{n}", juce::String((int)songs_.size())), false);
 
         if (onSongbookChanged) onSongbookChanged(songs_);
+
+        std::vector<size_t> needsMetadata;
+        needsMetadata.reserve(songs_.size());
+        for (size_t i = 0; i < songs_.size(); ++i)
+            if (needsRemoteMetadata(songs_[i]))
+                needsMetadata.push_back(i);
+
+        if (! needsMetadata.empty())
+            fetchMetadataForImportedSongs(std::move(needsMetadata), lastScanWasAppend_);
     };
 
     scanner_.onError = [this](juce::String err) {
@@ -474,8 +498,13 @@ void LibraryPage::onInitialSongLoad()
 void LibraryPage::onAddSongs()
 {
     juce::File libRoot(pathEditor_->getText().trim());
+    std::unordered_set<std::string> preImportIds;
+    preImportIds.reserve(songs_.size());
+    for (const auto& song : songs_)
+        preImportIds.insert(song.id);
+
     AddSongsDialog::launch(this, songs_, libRoot,
-        [this](std::vector<CdgSong> mergedSongs, AddSongsDialog::ImportStats)
+        [this, preImportIds = std::move(preImportIds)](std::vector<CdgSong> mergedSongs, AddSongsDialog::ImportStats)
         {
             songs_ = std::move(mergedSongs);
             if (songDb_.isOpen())
@@ -484,7 +513,427 @@ void LibraryPage::onAddSongs()
             scanner_.saveSongbook(songs_);
             refreshStats();
             if (onSongbookChanged) onSongbookChanged(songs_);
+
+            std::vector<size_t> newlyImported;
+            newlyImported.reserve(songs_.size());
+            for (size_t i = 0; i < songs_.size(); ++i)
+            {
+                if (preImportIds.find(songs_[i].id) == preImportIds.end())
+                    newlyImported.push_back(i);
+            }
+
+            if (! newlyImported.empty())
+                fetchMetadataForImportedSongs(std::move(newlyImported), true);
         });
+}
+
+        void LibraryPage::fetchMetadataForImportedSongs(std::vector<size_t> songIndices,
+                                bool allowOnlineLookup)
+{
+    if (songIndices.empty())
+        return;
+
+    // Show an immediate wait state while we build/check local metadata.
+    setScanningState(true);
+    progressLabel_->setText("Preparing local metadata...", juce::dontSendNotification);
+    currentSongLabel_->setText("Checking local metadata file. Please wait...", juce::dontSendNotification);
+    progressValue_ = -1.0;
+    progressBar_->repaint();
+    showMessage("Checking local metadata file before online lookup...", false);
+    repaint();
+
+    // Always run a local metadata pre-pass first so previous scans in
+    // meta_data.json are applied before any online lookup starts.
+    const int localPrePassMatched = scanner_.applyLocalMetadata(songs_);
+
+    std::vector<size_t> targets;
+    targets.reserve(songIndices.size());
+    for (auto index : songIndices)
+    {
+        if (index < songs_.size() && needsRemoteMetadata(songs_[index]))
+            targets.push_back(index);
+    }
+
+    if (targets.empty())
+    {
+        scanner_.saveSongbook(songs_);
+        stats_ = LibraryScanner::computeStats(songs_);
+        refreshStats();
+        setScanningState(false);
+        if (onSongbookChanged)
+            onSongbookChanged(songs_);
+        showMessage("Local metadata matched " + juce::String(localPrePassMatched)
+                    + " songs. No online lookup needed.", false);
+        return;
+    }
+
+    if (! allowOnlineLookup)
+    {
+        scanner_.saveSongbook(songs_);
+        stats_ = LibraryScanner::computeStats(songs_);
+        refreshStats();
+        setScanningState(false);
+        if (onSongbookChanged)
+            onSongbookChanged(songs_);
+
+        showMessage("Initial load is local-only: matched "
+                    + juce::String(localPrePassMatched)
+                    + " songs from meta_data.json; "
+                    + juce::String((int) targets.size())
+                    + " songs remain without local metadata.", false);
+        return;
+    }
+
+    setScanningState(true);
+    progressLabel_->setText(LocalizationManager::getInstance().getText("library.applying_metadata"), juce::dontSendNotification);
+    progressValue_ = 0.0;
+    progressBar_->repaint();
+    showMessage("Local metadata matched " + juce::String(localPrePassMatched)
+                + " songs. Fetching online metadata for "
+                + juce::String((int) targets.size()) + " remaining songs...", false);
+
+    constexpr int kMaxTransientRetries = 2;
+    constexpr int kQueuePollMaxRounds = 4;
+    constexpr int kQueuePollDelayMs = 4000;
+
+    auto isTransientError = [](const juce::String& err) -> bool
+    {
+        auto msg = err.toLowerCase();
+        return msg.contains("429")
+            || msg.contains("too many")
+            || msg.contains("rate")
+            || msg.contains("timeout")
+            || msg.contains("timed out")
+            || msg.contains("could not connect")
+            || msg.contains("temporarily")
+            || msg.contains("unavailable")
+            || msg.contains("503");
+    };
+
+    struct State
+    {
+        juce::Component::SafePointer<LibraryPage> owner;
+        std::vector<size_t> targets;
+        size_t position = 0;
+        int updatedCount = 0;
+        std::atomic<int> inFlightTimerToken { 0 };
+
+        int localCacheHits = 0;
+        int firestoreHits = 0;
+        int legacyApiHits = 0;
+        int queuedCount = 0;
+        int failedCount = 0;
+        int retryCount = 0;
+        int queueRound = 0;
+
+        std::unordered_map<size_t, int> retriesBySongIndex;
+        std::unordered_set<size_t> queuedSongIndices;
+    };
+
+    auto state = std::make_shared<State>();
+    state->owner   = juce::Component::SafePointer<LibraryPage>(this);
+    state->targets = std::move(targets);
+
+    auto persistRunReport = [state](int pendingQueued)
+    {
+        auto reportFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+            .getChildFile("EncoreKaraoke")
+            .getChildFile("metadata_run_report.json");
+        reportFile.getParentDirectory().createDirectory();
+
+        juce::var root;
+        if (reportFile.existsAsFile())
+            root = juce::JSON::parse(reportFile);
+        if (! root.isObject())
+            root = juce::var(new juce::DynamicObject());
+
+        auto* rootObj = root.getDynamicObject();
+
+        juce::Array<juce::var> runs;
+        auto existingRuns = rootObj->getProperty("runs");
+        if (auto* arr = existingRuns.getArray())
+            runs = *arr;
+
+        juce::DynamicObject::Ptr run = new juce::DynamicObject();
+        run->setProperty("timestampMs", juce::Time::currentTimeMillis());
+        run->setProperty("totalTargets", (int) state->targets.size());
+        run->setProperty("updated", state->updatedCount);
+        run->setProperty("cache", state->localCacheHits);
+        run->setProperty("firestore", state->firestoreHits);
+        run->setProperty("legacyApi", state->legacyApiHits);
+        run->setProperty("queued", state->queuedCount);
+        run->setProperty("retries", state->retryCount);
+        run->setProperty("failed", state->failedCount);
+        run->setProperty("pendingQueued", pendingQueued);
+        run->setProperty("queuePollRounds", state->queueRound);
+        runs.add(juce::var(run.get()));
+
+        constexpr int kMaxRuns = 25;
+        while (runs.size() > kMaxRuns)
+            runs.remove(0);
+
+        rootObj->setProperty("runs", juce::var(runs));
+        rootObj->setProperty("lastUpdatedMs", juce::Time::currentTimeMillis());
+
+        reportFile.replaceWithText(juce::JSON::toString(root, true));
+    };
+
+    auto statusSummary = [state]() -> juce::String
+    {
+        return "Metadata: cache=" + juce::String(state->localCacheHits)
+             + " firestore=" + juce::String(state->firestoreHits)
+             + " api=" + juce::String(state->legacyApiHits)
+             + " queued=" + juce::String(state->queuedCount)
+             + " retries=" + juce::String(state->retryCount)
+             + " failed=" + juce::String(state->failedCount);
+    };
+
+    auto finalize = [state, statusSummary, persistRunReport](const juce::String& suffix)
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        persistRunReport((int) state->queuedSongIndices.size());
+
+        owner->scanner_.saveSongbook(owner->songs_);
+        owner->stats_ = LibraryScanner::computeStats(owner->songs_);
+        owner->refreshStats();
+        owner->setScanningState(false);
+        owner->showMessage(statusSummary() + suffix, false);
+        if (owner->onSongbookChanged)
+            owner->onSongbookChanged(owner->songs_);
+    };
+
+    auto fetchNext = std::make_shared<std::function<void(int)>>();
+    auto scheduleNext = [state, fetchNext](int delayMs)
+    {
+        auto token = ++state->inFlightTimerToken;
+        juce::Timer::callAfterDelay(juce::jmax(0, delayMs), [state, fetchNext, token]()
+        {
+            if (state->owner == nullptr)
+                return;
+            if (token != state->inFlightTimerToken.load())
+                return;
+            (*fetchNext)(0);
+        });
+    };
+
+    auto pollQueued = std::make_shared<std::function<void()>>();
+    *pollQueued = [state, statusSummary, finalize, pollQueued, kQueuePollMaxRounds, kQueuePollDelayMs]()
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        if (state->queuedSongIndices.empty())
+        {
+            finalize(". Queued metadata resolved.");
+            return;
+        }
+
+        if (state->queueRound >= kQueuePollMaxRounds)
+        {
+            finalize(". " + juce::String((int) state->queuedSongIndices.size())
+                     + " queued song(s) still pending in backend.");
+            return;
+        }
+
+        ++state->queueRound;
+        owner->progressLabel_->setText("Polling queued metadata (round "
+                                       + juce::String(state->queueRound)
+                                       + "/" + juce::String(kQueuePollMaxRounds)
+                                       + ")",
+                                       juce::dontSendNotification);
+        owner->progressValue_ = -1.0;
+        owner->progressBar_->repaint();
+        owner->showMessage(statusSummary() + " - waiting for queued metadata...", false);
+
+        auto pending = std::make_shared<std::vector<size_t>>();
+        pending->reserve(state->queuedSongIndices.size());
+        for (auto idx : state->queuedSongIndices)
+            pending->push_back(idx);
+
+        auto pollIndex = std::make_shared<size_t>(0);
+        auto pollNextOne = std::make_shared<std::function<void()>>();
+        *pollNextOne = [state, pending, pollIndex, pollNextOne, pollQueued, kQueuePollDelayMs]()
+        {
+            auto* owner = state->owner.getComponent();
+            if (owner == nullptr)
+                return;
+
+            if (*pollIndex >= pending->size())
+            {
+                juce::Timer::callAfterDelay(kQueuePollDelayMs, [pollQueued]() { (*pollQueued)(); });
+                return;
+            }
+
+            const size_t songIndex = (*pending)[(*pollIndex)++];
+            if (songIndex >= owner->songs_.size())
+            {
+                (*pollNextOne)();
+                return;
+            }
+
+            const auto current = owner->songs_[songIndex];
+            ApiService::getInstance().lookupSharedMetadataOnly(
+                current,
+                juce::String(current.artistName),
+                juce::String(current.songName),
+                [state, pollNextOne, songIndex](ApiService::Result result)
+                {
+                    auto* ownerInner = state->owner.getComponent();
+                    if (ownerInner == nullptr)
+                        return;
+
+                    if (result.ok)
+                    {
+                        ownerInner->songs_[songIndex] = result.song;
+                        ++state->updatedCount;
+
+                        if (result.source == ApiService::Result::Source::localCache)
+                            ++state->localCacheHits;
+                        else if (result.source == ApiService::Result::Source::firestore)
+                            ++state->firestoreHits;
+
+                        state->queuedSongIndices.erase(songIndex);
+                    }
+
+                    (*pollNextOne)();
+                });
+        };
+
+        (*pollNextOne)();
+    };
+
+    *fetchNext = [state, fetchNext, scheduleNext, statusSummary, finalize, pollQueued, isTransientError, kMaxTransientRetries](int)
+    {
+        if (state->owner == nullptr)
+            return;
+
+        if (state->position >= state->targets.size())
+        {
+            if (! state->queuedSongIndices.empty())
+                (*pollQueued)();
+            else
+                finalize(".");
+            return;
+        }
+
+        const size_t songIndex = state->targets[state->position++];
+        auto current = state->owner->songs_[(size_t) songIndex];
+        auto songLabel = juce::String(current.artistName) + " - " + juce::String(current.songName);
+        state->owner->currentSongLabel_->setText(
+            juce::String("[") + juce::String((int) state->position) + "/"
+            + juce::String((int) state->targets.size()) + "] "
+            + songLabel,
+            juce::dontSendNotification);
+        state->owner->progressValue_ = (double) (state->position - 1) / (double) state->targets.size();
+        state->owner->progressBar_->repaint();
+
+        auto handleResult = [state, scheduleNext, songIndex, songLabel, statusSummary, isTransientError, kMaxTransientRetries](ApiService::Result result)
+        {
+            if (state->owner == nullptr)
+                return;
+
+            if (result.ok)
+            {
+                state->owner->songs_[(size_t) songIndex] = result.song;
+                ++state->updatedCount;
+
+                if (result.source == ApiService::Result::Source::localCache)
+                    ++state->localCacheHits;
+                else if (result.source == ApiService::Result::Source::firestore)
+                    ++state->firestoreHits;
+                else if (result.source == ApiService::Result::Source::legacyApi)
+                    ++state->legacyApiHits;
+
+                state->queuedSongIndices.erase(songIndex);
+            }
+            else
+            {
+                if (result.queued)
+                {
+                    auto inserted = state->queuedSongIndices.insert(songIndex).second;
+                    if (inserted)
+                        ++state->queuedCount;
+                }
+
+                const bool transient = isTransientError(result.errorMessage);
+                const int retriesSoFar = state->retriesBySongIndex[songIndex];
+                if (transient && retriesSoFar < kMaxTransientRetries)
+                {
+                    state->retriesBySongIndex[songIndex] = retriesSoFar + 1;
+                    ++state->retryCount;
+
+                    // Re-try this item by rewinding position.
+                    if (state->position > 0)
+                        --state->position;
+
+                    state->owner->showMessage(statusSummary()
+                        + " - transient error, retrying "
+                        + songLabel, false);
+
+                    const int retryDelayMs = 400 + (retriesSoFar * 350);
+                    scheduleNext(retryDelayMs);
+                    return;
+                }
+
+                ++state->failedCount;
+            }
+
+            state->owner->progressValue_ = (double) state->position / (double) state->targets.size();
+            state->owner->progressBar_->repaint();
+            state->owner->showMessage(statusSummary(), false);
+
+            // Gentle pacing to avoid bursty endpoint traffic.
+            int nextDelayMs = 120;
+
+            // If we queued but did not get immediate metadata, back off.
+            if (! result.ok && result.queued)
+                nextDelayMs = 400;
+
+            // Retry pressure signals from legacy API path.
+            if (! result.ok)
+            {
+                auto msg = result.errorMessage.toLowerCase();
+                if (msg.contains("429") || msg.contains("too many") || msg.contains("rate"))
+                    nextDelayMs = 900;
+                else if (msg.contains("could not connect") || msg.contains("timeout"))
+                    nextDelayMs = 600;
+            }
+
+            scheduleNext(nextDelayMs);
+        };
+
+        // Always check local/shared metadata first; only use online path on miss.
+        ApiService::getInstance().lookupSharedMetadataOnly(
+            current,
+            juce::String(current.artistName),
+            juce::String(current.songName),
+            [state, handleResult, current](ApiService::Result localResult)
+            {
+                if (state->owner == nullptr)
+                    return;
+
+                if (localResult.ok)
+                {
+                    handleResult(localResult);
+                    return;
+                }
+
+                ApiService::getInstance().searchArtistAndSong(
+                    current,
+                    juce::String(current.artistName),
+                    juce::String(current.songName),
+                    [handleResult](ApiService::Result remoteResult)
+                    {
+                        handleResult(remoteResult);
+                    });
+            });
+    };
+
+    scheduleNext(0);
 }
 
 void LibraryPage::startFolderChooser(bool appendMode)
@@ -512,6 +961,7 @@ void LibraryPage::startFolderChooser(bool appendMode)
             if (! result.isDirectory()) return;
 
             pathEditor_->setText(result.getFullPathName(), juce::dontSendNotification);
+            lastScanWasAppend_ = appendMode;
             setScanningState(true);
             progressValue_ = -1.0; // indeterminate while collecting files
 

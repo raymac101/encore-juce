@@ -91,6 +91,8 @@ private:
     void onAddSongs();          // Append scan of a chosen directory
     void onGetMetaData();       // Apply local metadata cache
     void onEditGenres();        // Genre editor (stub)
+    void fetchMetadataForImportedSongs(std::vector<size_t> songIndices,
+                       bool allowOnlineLookup = true);
 
     //==========================================================================
     // Helpers
@@ -151,6 +153,7 @@ private:
     std::vector<CdgSong>          songs_;
     LibraryScanner                scanner_;
     LibraryScanner::ScanStats     stats_;
+    bool                          lastScanWasAppend_ = false;
 
     // FileChooser must outlive the callback lambda
     std::shared_ptr<juce::FileChooser> fileChooser_;
