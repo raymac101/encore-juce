@@ -117,7 +117,7 @@ namespace AccessRightsUtil
             case UserRole::Admin:
                 return { AccessRight::Home, AccessRight::Search, AccessRight::Library,
                          AccessRight::Charts, AccessRight::Mixer, AccessRight::Settings, AccessRight::Profile,
-                         AccessRight::Ads, AccessRight::Playlist, AccessRight::ChangeVenue,
+                         AccessRight::Testing, AccessRight::Ads, AccessRight::Playlist, AccessRight::ChangeVenue,
                          AccessRight::RefreshQueue, AccessRight::NewVenue, AccessRight::SetAccess };
 
             case UserRole::Tester:

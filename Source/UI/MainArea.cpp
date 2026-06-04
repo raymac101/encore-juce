@@ -119,7 +119,13 @@ MainArea::MainArea()
         addChildComponent(sp.get());
         pages[static_cast<int>(NavPage::Settings)] = std::move(sp);
     }
-    addPage(NavPage::Testing,         lm.getText("page.testing"));
+    // Create real Testing page
+    {
+        auto tp = std::make_unique<TestingPage>();
+        testingPage = tp.get();
+        addChildComponent(tp.get());
+        pages[static_cast<int>(NavPage::Testing)] = std::move(tp);
+    }
     addPage(NavPage::Ads,             lm.getText("page.ads"));
     addPage(NavPage::Playlist,        lm.getText("page.playlist"));
     addPage(NavPage::VenueManagement, lm.getText("page.venue_management"));
@@ -215,6 +221,7 @@ void MainArea::updateAllText()
     if (libraryPage)  libraryPage->updateAllText();
     if (mixerPage)    mixerPage->updateAllText();
     if (settingsPage) settingsPage->updateAllText();
+    if (testingPage)  testingPage->updateAllText();
 }
 
 void MainArea::setAudioEngine(AudioEngine* engine)

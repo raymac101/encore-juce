@@ -586,7 +586,7 @@ void LibraryScanner::run()
 }
 
 //==============================================================================
-void LibraryScanner::+collectFiles(const juce::File& dir,
+void LibraryScanner::collectFiles(const juce::File& dir,
                                   std::vector<juce::File>& outFiles,
                                   int& outGroupCount)
 {

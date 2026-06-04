@@ -25,6 +25,77 @@
 #include "EditSingerModal.h"
 #include <cmath>
 #include <cstring>
+#include <algorithm>
+#include <condition_variable>
+#include <mutex>
+#include <numeric>
+#include <random>
+
+namespace
+{
+bool appendSongSync(const juce::String& venueId, const QueueItem& item, juce::String& errorOut)
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    bool ok = false;
+
+    QueueService::getInstance().appendSong(venueId, item,
+        [&](bool success, juce::String error)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            ok = success;
+            errorOut = std::move(error);
+            done = true;
+            cv.notify_one();
+        });
+
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]() { return done; });
+    return ok;
+}
+
+bool createRequestedSong(const juce::String& venueId, const QueueItem& item, juce::String& errorOut)
+{
+    auto fields = FirestoreClient::makeFields({
+        {"id",          FirestoreClient::stringValue(juce::String(item.id))},
+        {"profileId",   FirestoreClient::stringValue(juce::String(item.profileId))},
+        {"foxId",       FirestoreClient::stringValue(juce::String(item.foxId))},
+        {"deviceId",    FirestoreClient::stringValue(juce::String(item.deviceId))},
+        {"singerName",  FirestoreClient::stringValue(juce::String(item.singerName))},
+        {"avatar",      FirestoreClient::stringValue(juce::String(item.singerAvatar))},
+        {"song",        FirestoreClient::stringValue(juce::String(item.songName))},
+        {"songId",      FirestoreClient::stringValue(juce::String(item.songId))},
+        {"songVersion", FirestoreClient::stringValue(juce::String(item.songVersion))},
+        {"artist",      FirestoreClient::stringValue(juce::String(item.songArtist))},
+        {"duration",    FirestoreClient::integerValue(item.duration)},
+        {"pitch",       FirestoreClient::doubleValue(item.pitch)},
+        {"status",      FirestoreClient::stringValue(juce::String(item.status))},
+        {"order",       FirestoreClient::integerValue(item.order)},
+        {"songOrder",   FirestoreClient::integerValue(item.songOrder)},
+        {"time",        FirestoreClient::stringValue(juce::String(item.time))},
+        {"reason",      FirestoreClient::stringValue(juce::String(item.reason))},
+        {"action",      FirestoreClient::stringValue(juce::String(item.action))},
+        {"addedAlert",  FirestoreClient::booleanValue(false)},
+        {"singingAlert",FirestoreClient::booleanValue(false)},
+        {"nextAlert",   FirestoreClient::booleanValue(false)}
+    });
+
+    auto resp = FirestoreClient::getInstance().createDocument("venues/" + venueId + "/requested", fields);
+    const bool ok = resp.isObject();
+    if (!ok)
+        errorOut = "createDocument failed";
+    return ok;
+}
+
+int randomPitchSemitones(std::mt19937& rng, bool enabled)
+{
+    if (!enabled)
+        return 0;
+    std::uniform_int_distribution<int> dist(-6, 6);
+    return dist(rng);
+}
+}
 
 //==============================================================================
 // Simple semi-transparent overlay shown while a song is loading. It paints a
@@ -216,9 +287,9 @@ void MainComponent::setupUI()
         resized(); // Re-layout when BottomBar height changes
     };
     
-    // Set sample data for TopBar
+    // Set initial TopBar identity from signed-in host profile.
     topBar->setOnlineStatus(true); // Start with online status
-    topBar->setUserInfo("Demo User", juce::Image());
+    applyCurrentIdentityToUi();
 
     // BottomBar callbacks — drive the AudioEngine
     bottomBar->onReturnToZero = [this]() {
@@ -248,6 +319,23 @@ void MainComponent::setupUI()
 
         if (isNowPlaying)
         {
+            const bool hasLoadedMedia = (currentSongDuration > 0.01)
+                                     || (audioEngine->getTotalLength() > 0.01);
+
+            // If transport is pressed without a loaded track, pull the next
+            // playable singer/song from queue and preload it.
+            if (!hasLoadedMedia)
+            {
+                const bool queued = queueAndLoadNextSingerSong(true);
+                if (!queued)
+                {
+                    bottomBar->setPlaying(false);
+                    if (queueBar != nullptr)
+                        queueBar->setPlaying(false);
+                }
+                return;
+            }
+
             if (playStartTimeMs_ == 0)
                 playStartTimeMs_ = juce::Time::currentTimeMillis();
             audioEngine->play();
@@ -298,6 +386,7 @@ void MainComponent::setupUI()
     mainArea = std::make_unique<MainArea>();
     mainArea->setAudioEngine(audioEngine.get());
     addAndMakeVisible(mainArea.get());
+    wireTestingPageCallbacks();
 
     // Wire NavBar page selection to MainArea
     navBar->onPageSelected = [this](NavPage page) {
@@ -1111,6 +1200,62 @@ void MainComponent::setupUI()
         resized();
     };
 
+    // Persist queue ordering whenever the UI reorders singers locally.
+    queueBar->onReorder = [this](int /*from*/, int /*to*/)
+    {
+        if (queueBar == nullptr || activeVenueId_.isEmpty())
+            return;
+
+        const auto venueId = activeVenueId_;
+        const auto singersSnapshot = queueBar->getSingers();
+
+        juce::Thread::launch([venueId, singersSnapshot]()
+        {
+            auto docs = FirestoreClient::getInstance().listCollection("venues/" + venueId + "/queue", 1000);
+            std::unordered_map<std::string, juce::String> relPathByDocId;
+            relPathByDocId.reserve((size_t) docs.size());
+
+            for (auto& d : docs)
+            {
+                const auto fullName = d.getProperty("name", juce::var()).toString();
+                const auto marker = "/documents/";
+                const auto idx = fullName.indexOf(marker);
+                if (idx < 0)
+                    continue;
+
+                const auto relPath = fullName.substring(idx + (int) std::strlen(marker));
+                const auto docId = fullName.fromLastOccurrenceOf("/", false, false);
+                if (docId.isNotEmpty() && relPath.isNotEmpty())
+                    relPathByDocId[docId.toStdString()] = relPath;
+            }
+
+            int rotation = 0;
+            for (size_t i = 0; i < singersSnapshot.size(); ++i)
+            {
+                const auto& singer = singersSnapshot[i];
+                if (singer.isHost)
+                    continue;
+
+                const auto docId = juce::String(singer.id).trim();
+                if (docId.isEmpty())
+                    continue;
+
+                auto it = relPathByDocId.find(docId.toStdString());
+                if (it == relPathByDocId.end())
+                    continue;
+
+                auto fields = FirestoreClient::makeFields({
+                    { "order", FirestoreClient::integerValue((int) i) },
+                    { "rotationOrder", FirestoreClient::integerValue(rotation++) }
+                });
+
+                const auto patchPath = it->second
+                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder";
+                FirestoreClient::getInstance().patchDocument(patchPath, fields);
+            }
+        });
+    };
+
     queueBar->onPlaySinger = [this](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
         if (queueBar == nullptr) return;
@@ -1329,7 +1474,9 @@ void MainComponent::setupUI()
         }
 
         const int pitchSemis = juce::roundToInt(firstSong.pitch);
-        loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, /*autoStart*/ false);
+        const bool autoStartSelectedSinger = queueAutoStartRequested_;
+        queueAutoStartRequested_ = false;
+        loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, autoStartSelectedSinger);
     };
 
     queueBar->onPlayCurrent = [this]() {
@@ -1506,10 +1653,8 @@ void MainComponent::setupUI()
     queueBar->onCountdownFinished = [this]()
     {
         if (queueBar == nullptr) return;
-        // Advance to the next singer in the rotation (index 0 after now-playing
-        // is cleared is the next-up singer pushed to front during setNowPlaying)
-        if (!queueBar->getSingers().empty())
-            if (queueBar->onPlaySinger) queueBar->onPlaySinger(0);
+        // Advance to the next playable singer in the rotation.
+        queueAndLoadNextSingerSong(true);
     };
 
     // Queue starts empty until a venue is loaded; setVenueId() fetches
@@ -1564,7 +1709,8 @@ void MainComponent::setupUI()
     maintenanceToastLabel_ = std::make_unique<juce::Label>("maintenanceToast", "");
     maintenanceToastLabel_->setJustificationType(juce::Justification::centredLeft);
     maintenanceToastLabel_->setColour(juce::Label::textColourId, juce::Colours::white);
-    maintenanceToastLabel_->setColour(juce::Label::backgroundColourId, juce::Colour(0xff1f6f5f).withAlpha(0.94f));
+    // Keep this label transparent so it never paints as a solid bar.
+    maintenanceToastLabel_->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     maintenanceToastLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.0f)).boldened());
     maintenanceToastLabel_->setBorderSize(juce::BorderSize<int>(4, 12, 4, 12));
     maintenanceToastLabel_->setVisible(false);
@@ -1700,6 +1846,8 @@ void MainComponent::resized()
         const int toastW = juce::jmin(520, juce::jmax(280, getWidth() - 280));
         const int toastH = 34;
         maintenanceToastLabel_->setBounds(getWidth() - toastW - 16, topOffset + 10, toastW, toastH);
+        if (maintenanceToastLabel_->getText().trim().isEmpty())
+            maintenanceToastLabel_->setVisible(false);
         maintenanceToastLabel_->toFront(false);
     }
 
@@ -1899,7 +2047,8 @@ void MainComponent::runSongbookHealthCheckIfReady()
 
     int checked = 0;
     int missing = 0;
-    int macStyle = 0;
+    int unixStyle = 0;
+    int windowsStyle = 0;
 
     for (const auto& s : songs)
     {
@@ -1917,10 +2066,14 @@ void MainComponent::runSongbookHealthCheckIfReady()
         if (!juce::File(path).existsAsFile())
             ++missing;
 
-        if (path.startsWithIgnoreCase("/Users/")
-            || path.startsWithIgnoreCase("/Volumes/")
-            || path.startsWithIgnoreCase("/System/"))
-            ++macStyle;
+        if (path.startsWithChar('/') || path.startsWithIgnoreCase("~"))
+            ++unixStyle;
+
+        // Match common Windows absolute path formats (e.g. C:\foo, D:/bar)
+        if ((path.length() >= 3 && juce::CharacterFunctions::isLetter(path[0])
+                && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+            || path.startsWith("\\\\"))
+            ++windowsStyle;
 
         if (checked >= 120)
             break;
@@ -1930,11 +2083,18 @@ void MainComponent::runSongbookHealthCheckIfReady()
         return;
 
     const int missingPct = (missing * 100) / checked;
-    const int macPct = (macStyle * 100) / checked;
+    const int unixPct = (unixStyle * 100) / checked;
+    const int windowsPct = (windowsStyle * 100) / checked;
     const bool severeMissing = missingPct >= 70;
-    const bool likelyMacPaths = macPct >= 30;
+    bool likelyForeignPaths = false;
 
-    if (!severeMissing && !likelyMacPaths)
+   #if JUCE_WINDOWS
+    likelyForeignPaths = unixPct >= 30;
+   #else
+    likelyForeignPaths = windowsPct >= 30;
+   #endif
+
+    if (!severeMissing && !likelyForeignPaths)
         return;
 
     songbookHealthPromptShown_ = true;
@@ -2634,6 +2794,102 @@ void MainComponent::showLoadingOverlay(const juce::String& message, double progr
     loadingOverlay_->repaint();
 }
 
+bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad)
+{
+    if (queueBar == nullptr || !queueBar->onPlaySinger)
+        return false;
+
+    auto current = queueBar->getSingers();
+    if (current.empty())
+        return false;
+
+    // Rotate past singers with no songs and stop at the first playable singer.
+    // Process from the actual top of queue so queue order stays in sync with
+    // round order, including host/empty singers being moved to the tail.
+    const int maxAttempts = (int) current.size();
+    for (int attempt = 0; attempt < maxAttempts; ++attempt)
+    {
+        current = queueBar->getSingers();
+        if (current.empty())
+            return false;
+
+        const int frontIndex = 0;
+
+        if (! current[(size_t) frontIndex].songs.empty())
+        {
+            queueAutoStartRequested_ = autoStartAfterLoad;
+            queueBar->onPlaySinger(frontIndex);
+            return true;
+        }
+
+        const int endIndex = (int) current.size() - 1;
+        if (frontIndex >= endIndex)
+            return false;
+
+        auto rotated = current;
+        auto moved = rotated[(size_t) frontIndex];
+        rotated.erase(rotated.begin() + frontIndex);
+        rotated.push_back(std::move(moved));
+
+        int rotationOrder = 0;
+        for (size_t i = 0; i < rotated.size(); ++i)
+        {
+            rotated[i].order = (int) i;
+            if (!rotated[i].isHost)
+                rotated[i].rotationOrder = rotationOrder++;
+        }
+
+        queueBar->setSingers(rotated);
+        if (queueBar->onReorder)
+            queueBar->onReorder(frontIndex, endIndex);
+    }
+
+    queueAutoStartRequested_ = false;
+    return false;
+}
+
+std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singers>& queueSingers) const
+{
+    std::vector<Singers> merged = queueSingers;
+
+    if (!HostService::getInstance().hasCurrent())
+        return merged;
+
+    const auto h = HostService::getInstance().getCurrent();
+    Singers hostSinger;
+    hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
+    hostSinger.name   = ! h.stageName.empty() ? h.stageName
+                      : ! h.fullName.empty()  ? h.fullName
+                      : "Host";
+    hostSinger.avatar = h.avatarUrl;
+    hostSinger.isHost = true;
+    hostSinger.order  = -1;
+    hostSinger.rotationOrder = -1;
+
+    int preferredIndex = 0;
+    if (queueBar != nullptr)
+    {
+        const auto& current = queueBar->getSingers();
+        for (int i = 0; i < (int) current.size(); ++i)
+        {
+            if (!current[(size_t) i].isHost)
+                continue;
+
+            const auto existingHostId = juce::String(current[(size_t) i].id).trim();
+            if (existingHostId.isEmpty() || existingHostId == juce::String(hostSinger.id).trim())
+            {
+                preferredIndex = i;
+                break;
+            }
+        }
+    }
+
+    preferredIndex = juce::jlimit(0, (int) merged.size(), preferredIndex);
+    merged.insert(merged.begin() + preferredIndex, std::move(hostSinger));
+
+    return merged;
+}
+
 void MainComponent::updateLoadingOverlay(const juce::String& message, double progress)
 {
     if (loadingOverlay_)
@@ -2830,6 +3086,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                        0.05);
 
     activeVenueId_ = venueId;
+    applyCurrentIdentityToUi();
+    applyNavRoleForActiveVenue();
 
     if (venueId.isEmpty())
     {
@@ -3029,33 +3287,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         safe->queueBar->clearNowPlaying();
                     }
 
-                    // Prepend the signed-in host as a permanent first entry
-                    // in the queue. The host has no songs of their own — the
-                    // card just shows their avatar / stage name and is
-                    // rendered with a red border so it's visually distinct
-                    // as the round leader.
-                    std::vector<Singers> singersWithHost;
-                    if (HostService::getInstance().hasCurrent())
-                    {
-                        const auto h = HostService::getInstance().getCurrent();
-                        Singers hostSinger;
-                        hostSinger.id            = h.userId.empty() ? h.profileId : h.userId;
-                        hostSinger.name          = ! h.stageName.empty() ? h.stageName
-                                                 : ! h.fullName.empty()  ? h.fullName
-                                                 : "Host";
-                        hostSinger.avatar        = h.avatarUrl;
-                        hostSinger.isHost        = true;
-                        hostSinger.order         = -1;          // pinned to top
-                        hostSinger.rotationOrder = -1;
-                        // No songs.
-                        singersWithHost.push_back(std::move(hostSinger));
-                    }
-
-                    singersWithHost.insert(singersWithHost.end(),
-                                           snap.singers.begin(),
-                                           snap.singers.end());
-
-                    safe->queueBar->setSingers (singersWithHost);
+                    safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
 
                     // Start (or restart) the /requested polling pipeline so
                     // we route TAGG requests through autoApprove and into
@@ -3065,6 +3297,110 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         safe->startDeferredAudioServices(venueId, startupToken);
                 });
         });
+}
+
+void MainComponent::applyCurrentIdentityToUi()
+{
+    if (topBar == nullptr)
+        return;
+
+    juce::String displayName;
+    UserRole hostRole = UserRole::Host;
+
+    if (HostService::getInstance().hasCurrent())
+    {
+        const auto host = HostService::getInstance().getCurrent();
+        hostRole = host.role;
+
+        displayName = juce::String(host.stageName).trim();
+        if (displayName.isEmpty())
+            displayName = juce::String(host.fullName).trim();
+    }
+
+    if (displayName.isEmpty())
+    {
+        const auto& fc = FirestoreClient::getInstance();
+        displayName = fc.getDisplayName().trim();
+        if (displayName.isEmpty())
+            displayName = fc.getEmail().trim();
+    }
+
+    topBar->setUserInfo(displayName, juce::Image());
+
+    // If no venue is active yet, at least expose host-level rights.
+    if (navBar != nullptr && activeVenueId_.isEmpty())
+        navBar->setUserRole(hostRole);
+}
+
+void MainComponent::applyNavRoleForActiveVenue()
+{
+    if (navBar == nullptr)
+        return;
+
+    UserRole fallbackRole = UserRole::Host;
+    if (HostService::getInstance().hasCurrent())
+        fallbackRole = HostService::getInstance().getCurrent().role;
+
+    if (activeVenueId_.isEmpty())
+    {
+        navBar->setUserRole(fallbackRole);
+        return;
+    }
+
+    const auto venueId = activeVenueId_;
+    const auto userId = FirestoreClient::getInstance().getUserId().trim();
+    const auto userEmail = FirestoreClient::getInstance().getEmail().trim().toLowerCase();
+
+    if (userId.isEmpty() && userEmail.isEmpty())
+    {
+        navBar->setUserRole(fallbackRole);
+        return;
+    }
+
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Thread::launch([safe, venueId, userId, userEmail, fallbackRole]
+    {
+        UserRole resolvedRole = fallbackRole;
+        bool matchedAssociation = false;
+
+        auto docs = FirestoreClient::getInstance().listCollection("user-venue-lookup", 1000);
+        for (auto& d : docs)
+        {
+            if (FirestoreClient::readString(d, "venueId") != venueId)
+                continue;
+
+            const auto status = FirestoreClient::readString(d, "status").trim();
+            if (status.equalsIgnoreCase("removed"))
+                continue;
+            if (status.isNotEmpty() && !status.equalsIgnoreCase("active"))
+                continue;
+
+            const auto docUserId = FirestoreClient::readString(d, "userId").trim();
+            const auto email = FirestoreClient::readString(d, "userEmail").trim().toLowerCase();
+            const bool idMatch = userId.isNotEmpty() && docUserId == userId;
+            const bool emailMatch = userEmail.isNotEmpty() && email == userEmail;
+            if (!idMatch && !emailMatch)
+                continue;
+
+            auto role = FirestoreClient::readString(d, "role").trim();
+            if (role.equalsIgnoreCase("Enterprise Admin"))
+                role = "EnterpriseAdmin";
+
+            resolvedRole = AccessRightsUtil::stringToUserRole(role.toStdString());
+            matchedAssociation = true;
+            break;
+        }
+
+        juce::MessageManager::callAsync([safe, venueId, resolvedRole, matchedAssociation]()
+        {
+            if (safe == nullptr || safe->navBar == nullptr)
+                return;
+            if (safe->activeVenueId_ != venueId)
+                return;
+
+            safe->navBar->setUserRole(resolvedRole);
+        });
+    });
 }
 
 void MainComponent::refreshSettingsUsers()
@@ -3354,23 +3690,7 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
                 safe->queueBar->clearNowPlaying();
             }
 
-            std::vector<Singers> withHost;
-            if (HostService::getInstance().hasCurrent())
-            {
-                const auto h = HostService::getInstance().getCurrent();
-                Singers hostSinger;
-                hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
-                hostSinger.name   = ! h.stageName.empty() ? h.stageName
-                                  : ! h.fullName.empty()  ? h.fullName
-                                  : "Host";
-                hostSinger.avatar = h.avatarUrl;
-                hostSinger.isHost = true;
-                hostSinger.order  = -1;
-                hostSinger.rotationOrder = -1;
-                withHost.push_back (std::move (hostSinger));
-            }
-            withHost.insert (withHost.end(), snap.singers.begin(), snap.singers.end());
-            safe->queueBar->setSingers (withHost);
+            safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
         });
 }
 
@@ -3401,23 +3721,7 @@ void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
                 safe->queueBar->clearNowPlaying();
             }
 
-            std::vector<Singers> withHost;
-            if (HostService::getInstance().hasCurrent())
-            {
-                const auto h = HostService::getInstance().getCurrent();
-                Singers hostSinger;
-                hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
-                hostSinger.name   = ! h.stageName.empty() ? h.stageName
-                                  : ! h.fullName.empty()  ? h.fullName
-                                  : "Host";
-                hostSinger.avatar = h.avatarUrl;
-                hostSinger.isHost = true;
-                hostSinger.order  = -1;
-                hostSinger.rotationOrder = -1;
-                withHost.push_back (std::move (hostSinger));
-            }
-            withHost.insert (withHost.end(), snap.singers.begin(), snap.singers.end());
-            safe->queueBar->setSingers (withHost);
+            safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
         });
 }
 
@@ -3576,6 +3880,160 @@ void MainComponent::onIncomingDeleteRequest (const QueueItem& item)
             if (safe != nullptr)
                 safe->reloadQueueFromFirestore (venueId);
         });
+}
+
+void MainComponent::wireTestingPageCallbacks()
+{
+    if (mainArea == nullptr)
+        return;
+
+    auto* testing = mainArea->getTestingPage();
+    if (testing == nullptr)
+        return;
+
+    testing->onApplyResolution = [this](int width, int height)
+    {
+        if (auto* topLevel = findParentComponentOfClass<juce::TopLevelWindow>())
+        {
+            topLevel->setSize(width, height);
+            topLevel->centreWithSize(width, height);
+        }
+    };
+
+    testing->onCreateQueue = [this](const TestingPage::SeedOptions& options,
+                                    std::function<void(float)> onProgress,
+                                    std::function<void(bool, juce::String)> onDone)
+    {
+        seedTestingQueue(options, std::move(onProgress), std::move(onDone));
+    };
+}
+
+void MainComponent::seedTestingQueue(const TestingPage::SeedOptions& options,
+                                     std::function<void(float)> progressCallback,
+                                     std::function<void(bool, juce::String)> doneCallback)
+{
+    const auto venueId = activeVenueId_;
+    if (venueId.isEmpty())
+    {
+        if (doneCallback) doneCallback(false, "No active venue. Select a venue first.");
+        return;
+    }
+
+    const auto songs = mainArea != nullptr ? mainArea->getLibrarySongs()
+                                           : std::vector<CdgSong>{};
+    if (songs.empty())
+    {
+        if (doneCallback) doneCallback(false, "No library songs found. Import songs before creating test queue.");
+        return;
+    }
+
+    juce::Thread::launch([venueId, songs, options,
+                         progressCb = std::move(progressCallback),
+                         doneCb = std::move(doneCallback)]() mutable
+    {
+        std::mt19937 rng((unsigned int) juce::Time::getMillisecondCounter());
+
+        std::vector<int> singerTypes;
+        singerTypes.reserve((size_t) (options.numEncoreSingers + options.numMobileSingers));
+        singerTypes.insert(singerTypes.end(), (size_t) options.numEncoreSingers, 0); // Encore/manual
+        singerTypes.insert(singerTypes.end(), (size_t) options.numMobileSingers, 1); // Mobile/tagg
+
+        if (singerTypes.empty())
+        {
+            if (doneCb) doneCb(false, "Nothing to create. Increase singer counts above zero.");
+            return;
+        }
+
+        std::shuffle(singerTypes.begin(), singerTypes.end(), rng);
+
+        std::uniform_int_distribution<int> songsPerSingerDist(options.numSongsMin, options.numSongsMax);
+        std::uniform_int_distribution<int> songIndexDist(0, juce::jmax(0, (int) songs.size() - 1));
+
+        static const char* kIcons[] = {
+            "assets/icon/1064391.png", "assets/icon/1082581.png", "assets/icon/2015468.png",
+            "assets/icon/2345434.png", "assets/icon/2587741.png", "assets/icon/3214567.png",
+            "assets/icon/3457912.png", "assets/icon/3852556.png", "assets/icon/4568752.png",
+            "assets/icon/5238382.png", "assets/icon/6319385.png", "assets/icon/7463548.png",
+            "assets/icon/8032015.png", "assets/icon/8745632.png", "assets/icon/9517532.png"
+        };
+        constexpr int kIconCount = (int) (sizeof(kIcons) / sizeof(kIcons[0]));
+        std::uniform_int_distribution<int> iconIndexDist(0, kIconCount - 1);
+
+        int encoreCreated = 0;
+        int mobileCreated = 0;
+        int writeFailures = 0;
+
+        for (size_t i = 0; i < singerTypes.size(); ++i)
+        {
+            const bool isMobile = singerTypes[i] == 1;
+            const juce::String singerName = isMobile
+                ? ("MobileSinger" + juce::String(mobileCreated++))
+                : ("EncoreSinger" + juce::String(encoreCreated++));
+
+            const juce::String avatar = kIcons[iconIndexDist(rng)];
+            const int songCount = songsPerSingerDist(rng);
+
+            for (int s = 0; s < songCount; ++s)
+            {
+                const auto& song = songs[(size_t) songIndexDist(rng)];
+
+                juce::String version;
+                if (!song.version.empty())
+                    version = juce::String(song.version[0]);
+
+                const int semitones = randomPitchSemitones(rng, options.randomPitch);
+
+                QueueItem item;
+                item.id          = juce::Uuid().toString().toStdString();
+                item.profileId   = "";
+                item.foxId       = "";
+                item.deviceId    = isMobile ? "mobiletest" : "local";
+                item.singerName  = singerName.toStdString();
+                item.singerAvatar= avatar.toStdString();
+                item.songId      = song.id;
+                item.songName    = song.songName;
+                item.songArtist  = song.artistName;
+                item.songVersion = version.toStdString();
+                item.duration    = song.durationMS > 0 ? song.durationMS / 1000 : 240;
+                item.pitch       = (float) semitones;
+                item.key         = semitones;
+                item.status      = isMobile ? "new" : "approved";
+                item.order       = 0;
+                item.songOrder   = 0;
+                item.time        = "0:00";
+                item.reason      = "";
+                item.action      = "new";
+                item.dateAdded   = juce::Time::getCurrentTime().toMilliseconds();
+
+                juce::String err;
+                const bool ok = isMobile
+                    ? createRequestedSong(venueId, item, err)
+                    : appendSongSync(venueId, item, err);
+
+                if (!ok)
+                {
+                    ++writeFailures;
+                    DBG("[TestingPage] failed to write test queue item: " << err);
+                }
+            }
+
+            if (progressCb)
+                progressCb((float) (i + 1) / (float) singerTypes.size());
+        }
+
+        if (doneCb)
+        {
+            if (writeFailures == 0)
+            {
+                doneCb(true, "Created test singers and songs successfully.");
+            }
+            else
+            {
+                doneCb(false, "Finished with " + juce::String(writeFailures)
+                               + " write failures. Check logs for details.");
+            }
+        }
+    });
 }
 
 //==============================================================================

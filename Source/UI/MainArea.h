@@ -21,6 +21,7 @@
 #include "LibraryPage.h"
 #include "SettingsPage.h"
 #include "MixerPage.h"
+#include "TestingPage.h"
 #include "SongSelectionDialog.h"
 #include "SongEditDialog.h"
 #include "../Models/VenueItem.h"
@@ -99,6 +100,7 @@ private:
     LibraryPage*  libraryPage  = nullptr;
     MixerPage*    mixerPage    = nullptr;
     SettingsPage* settingsPage = nullptr;
+    TestingPage*  testingPage  = nullptr;
 
 public:
     /** Push a venue snapshot into the settings page (call from FirebaseManager callback). */
@@ -122,6 +124,9 @@ public:
     /** Direct access to the Home page so the app shell can push
         venue-side playlist data (Popular / Recommended) into its rows. */
     HomePage* getHomePage() const noexcept { return homePage; }
+
+    /** Direct access to the testing tool page. */
+    TestingPage* getTestingPage() const noexcept { return testingPage; }
 
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;

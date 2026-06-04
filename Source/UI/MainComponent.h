@@ -186,6 +186,12 @@ private:
     std::unordered_set<std::string> newSongIds_;
 
     void loadVenuePlaylists();
+    void applyCurrentIdentityToUi();
+    void wireTestingPageCallbacks();
+    void seedTestingQueue(const TestingPage::SeedOptions& options,
+                          std::function<void(float)> onProgress,
+                          std::function<void(bool, juce::String)> onDone);
+    void applyNavRoleForActiveVenue();
     void refreshSettingsUsers();
     void refreshSettingsInvitations();
     void refreshSettingsSessionStats();
@@ -228,11 +234,14 @@ private:
     void updateAudioStatusIndicator();
     void runSongbookHealthCheckIfReady();
     void showSongUnavailableMessage(const QueueItem& item);
+    bool queueAndLoadNextSingerSong(bool autoStartAfterLoad = false);
+    std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
 
     bool pendingSongbookHealthCheck_ = true;
     bool songbookHealthPromptShown_ = false;
     std::unique_ptr<juce::Label> maintenanceToastLabel_;
     int maintenanceToastToken_ = 0;
+    bool queueAutoStartRequested_ = false;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

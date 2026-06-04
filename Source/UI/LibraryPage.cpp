@@ -11,6 +11,7 @@
 #include "LibraryPage.h"
 #include "AddSongsDialog.h"
 #include "../Services/ApiService.h"
+#include "../Services/UserPreferences.h"
 #include "../Localization/LocalizationManager.h"
 
 #include <unordered_set>
@@ -171,6 +172,12 @@ LibraryPage::LibraryPage()
         // Persist to disk
         scanner_.saveSongbook(songs_);
 
+        // Persist the selected library root so startup can restore it and
+        // avoid prompting again once the user has fixed a path mismatch.
+        const auto selectedRoot = pathEditor_->getText().trim();
+        if (selectedRoot.isNotEmpty())
+            UserPreferences::getInstance().setLibraryPath(selectedRoot);
+
         // Path editor intentionally left unchanged — it shows the scan root
         // that the user selected, not an individual song's subdirectory.
 
@@ -223,13 +230,24 @@ void LibraryPage::loadSongbook()
         {
             juce::String savedPath = rootFile.loadFileAsString().trim();
             if (savedPath.isNotEmpty())
+            {
                 pathEditor_->setText(savedPath, juce::dontSendNotification);
+                UserPreferences::getInstance().setLibraryPath(savedPath);
+            }
         }
         else if (! songs_.empty() && ! songs_[0].filePath.empty())
         {
             // Legacy fallback — walk up until we reach a directory that looks like the root
             juce::File dir(juce::String(songs_[0].filePath[0]));
             pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
+            UserPreferences::getInstance().setLibraryPath(dir.getFullPathName());
+        }
+        else
+        {
+            // Final fallback: previously persisted preference.
+            const auto preferredPath = UserPreferences::getInstance().getLibraryPath().trim();
+            if (preferredPath.isNotEmpty())
+                pathEditor_->setText(preferredPath, juce::dontSendNotification);
         }
     }
 }
@@ -260,12 +278,22 @@ void LibraryPage::loadSongbookAsync()
             {
                 juce::String savedPath = rootFile.loadFileAsString().trim();
                 if (savedPath.isNotEmpty())
+                {
                     safeThis->pathEditor_->setText(savedPath, juce::dontSendNotification);
+                    UserPreferences::getInstance().setLibraryPath(savedPath);
+                }
             }
             else if (! safeThis->songs_.empty() && ! safeThis->songs_[0].filePath.empty())
             {
                 juce::File dir(juce::String(safeThis->songs_[0].filePath[0]));
                 safeThis->pathEditor_->setText(dir.getFullPathName(), juce::dontSendNotification);
+                UserPreferences::getInstance().setLibraryPath(dir.getFullPathName());
+            }
+            else
+            {
+                const auto preferredPath = UserPreferences::getInstance().getLibraryPath().trim();
+                if (preferredPath.isNotEmpty())
+                    safeThis->pathEditor_->setText(preferredPath, juce::dontSendNotification);
             }
 
             if (safeThis->onSongbookChanged)
@@ -961,6 +989,7 @@ void LibraryPage::startFolderChooser(bool appendMode)
             if (! result.isDirectory()) return;
 
             pathEditor_->setText(result.getFullPathName(), juce::dontSendNotification);
+            UserPreferences::getInstance().setLibraryPath(result.getFullPathName());
             lastScanWasAppend_ = appendMode;
             setScanningState(true);
             progressValue_ = -1.0; // indeterminate while collecting files
