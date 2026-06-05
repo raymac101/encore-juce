@@ -77,6 +77,14 @@ public:
                           const std::vector<QueueItem>& newSongs,
                           WriteCallback onDone = nullptr);
 
+    /** Persist the provided singer sequence as canonical queue order for
+        `venues/<venueId>/queue`. Writes both `order` and `rotationOrder`
+        for each matched singer doc so restarts/mobile clients restore the
+        exact same round-robin state. */
+    void persistSingerOrder(const juce::String& venueId,
+                            const std::vector<Singers>& orderedSingers,
+                            WriteCallback onDone = nullptr);
+
     //==============================================================================
     // Live watcher — polls `venues/<venueId>/queue` on a timer and fires
     // onChange (with the freshly-parsed Snapshot) whenever the contents

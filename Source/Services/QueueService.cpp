@@ -16,6 +16,7 @@
 #include "QueueService.h"
 #include "FirestoreClient.h"
 #include <algorithm>
+#include <unordered_map>
 
 QueueService& QueueService::getInstance()
 {
@@ -176,9 +177,15 @@ namespace
             all.push_back(std::move(s));
         }
 
-        // Sort by `order` (Angular's sortQueueByOrder).
+        // Sort by persisted order, with deterministic tie-breakers so
+        // duplicate/missing order values do not reshuffle singers on restart.
         std::sort(all.begin(), all.end(),
-                  [](const Singers& a, const Singers& b) { return a.order < b.order; });
+                  [](const Singers& a, const Singers& b)
+                  {
+                      if (a.order != b.order) return a.order < b.order;
+                      if (a.rotationOrder != b.rotationOrder) return a.rotationOrder < b.rotationOrder;
+                      return juce::String(a.name).toLowerCase() < juce::String(b.name).toLowerCase();
+                  });
 
         // Self-heal inconsistent ordering from older writes:
         // keep queue order contiguous and force a single unique tail marker.
@@ -588,6 +595,103 @@ void QueueService::patchSingerSongs(const juce::String& venueId,
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]
                 { onDone(ok, ok ? juce::String() : juce::String("PATCH failed")); });
+    });
+}
+
+void QueueService::persistSingerOrder(const juce::String& venueId,
+                                      const std::vector<Singers>& orderedSingers,
+                                      WriteCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, orderedSingers, onDone = std::move(onDone)]()
+    {
+        const auto collPath = "venues/" + venueId + "/queue";
+        auto docs = FirestoreClient::getInstance().listCollection(collPath, 300);
+
+        std::unordered_map<std::string, juce::String> relPathByDocId;
+        std::unordered_map<std::string, juce::String> relPathByName;
+        relPathByDocId.reserve((size_t) docs.size());
+        relPathByName.reserve((size_t) docs.size());
+
+        for (auto& d : docs)
+        {
+            const auto fullName = d.getProperty("name", juce::var()).toString();
+            const auto relPath  = relPathFromDocName(fullName);
+            const auto docId    = fullName.fromLastOccurrenceOf("/", false, false).trim();
+            const auto fields   = d.getProperty("fields", juce::var());
+            const auto name     = valueAsString(fieldByName(fields, "name")).trim().toLowerCase();
+
+            if (docId.isNotEmpty() && relPath.isNotEmpty())
+                relPathByDocId[docId.toStdString()] = relPath;
+            if (name.isNotEmpty() && relPath.isNotEmpty())
+                relPathByName[name.toStdString()] = relPath;
+        }
+
+        bool allOk = true;
+        int writeOrder = 0;
+        int patched = 0;
+
+        for (const auto& singer : orderedSingers)
+        {
+            if (singer.isHost)
+                continue;
+
+            juce::String relPath;
+
+            const auto docId = juce::String(singer.id).trim();
+            if (docId.isNotEmpty())
+            {
+                auto byId = relPathByDocId.find(docId.toStdString());
+                if (byId != relPathByDocId.end())
+                    relPath = byId->second;
+            }
+
+            if (relPath.isEmpty())
+            {
+                const auto key = juce::String(singer.name).trim().toLowerCase();
+                auto byName = relPathByName.find(key.toStdString());
+                if (byName != relPathByName.end())
+                    relPath = byName->second;
+            }
+
+            if (relPath.isNotEmpty())
+            {
+                auto fields = FirestoreClient::makeFields({
+                    { "order", FirestoreClient::integerValue(writeOrder) },
+                    { "rotationOrder", FirestoreClient::integerValue(writeOrder) }
+                });
+
+                const auto patchPath = relPath
+                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder";
+
+                const bool ok = FirestoreClient::getInstance().patchDocument(patchPath, fields);
+                allOk = allOk && ok;
+                ++patched;
+            }
+            else
+            {
+                allOk = false;
+            }
+
+            ++writeOrder;
+        }
+
+        DBG ("[Queue] persistSingerOrder singers=" << (int) orderedSingers.size()
+             << " patched=" << patched
+             << " ok=" << (allOk ? 1 : 0));
+
+        if (onDone)
+        {
+            juce::MessageManager::callAsync([onDone, allOk]
+            {
+                onDone(allOk, allOk ? juce::String() : juce::String("persistSingerOrder partial failure"));
+            });
+        }
     });
 }
 

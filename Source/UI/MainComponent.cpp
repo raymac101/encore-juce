@@ -1209,51 +1209,12 @@ void MainComponent::setupUI()
         const auto venueId = activeVenueId_;
         const auto singersSnapshot = queueBar->getSingers();
 
-        juce::Thread::launch([venueId, singersSnapshot]()
-        {
-            auto docs = FirestoreClient::getInstance().listCollection("venues/" + venueId + "/queue", 1000);
-            std::unordered_map<std::string, juce::String> relPathByDocId;
-            relPathByDocId.reserve((size_t) docs.size());
-
-            for (auto& d : docs)
+        QueueService::getInstance().persistSingerOrder(venueId, singersSnapshot,
+            [](bool ok, juce::String err)
             {
-                const auto fullName = d.getProperty("name", juce::var()).toString();
-                const auto marker = "/documents/";
-                const auto idx = fullName.indexOf(marker);
-                if (idx < 0)
-                    continue;
-
-                const auto relPath = fullName.substring(idx + (int) std::strlen(marker));
-                const auto docId = fullName.fromLastOccurrenceOf("/", false, false);
-                if (docId.isNotEmpty() && relPath.isNotEmpty())
-                    relPathByDocId[docId.toStdString()] = relPath;
-            }
-
-            int rotation = 0;
-            for (size_t i = 0; i < singersSnapshot.size(); ++i)
-            {
-                const auto& singer = singersSnapshot[i];
-                if (singer.isHost)
-                    continue;
-
-                const auto docId = juce::String(singer.id).trim();
-                if (docId.isEmpty())
-                    continue;
-
-                auto it = relPathByDocId.find(docId.toStdString());
-                if (it == relPathByDocId.end())
-                    continue;
-
-                auto fields = FirestoreClient::makeFields({
-                    { "order", FirestoreClient::integerValue((int) i) },
-                    { "rotationOrder", FirestoreClient::integerValue(rotation++) }
-                });
-
-                const auto patchPath = it->second
-                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder";
-                FirestoreClient::getInstance().patchDocument(patchPath, fields);
-            }
-        });
+                if (! ok)
+                    DBG("[Queue] persistSingerOrder failed: " << err);
+            });
     };
 
     queueBar->onPlaySinger = [this](int singerIndex) {
@@ -1640,6 +1601,19 @@ void MainComponent::setupUI()
         logPlayHistoryIfNeeded(true);
 
         if (queueBar == nullptr) return;
+        if (bottomBar != nullptr)
+            bottomBar->setPlaying(false);
+        queueBar->setPlaying(false);
+
+        // Always advance the round when a song ends so the next singer/song
+        // is ready. Auto Play controls whether it starts automatically.
+        if (! queueBar->isAutoPlayEnabled())
+        {
+            queueBar->stopCountdown();
+            queueAndLoadNextSingerSong(false);
+            return;
+        }
+
         if (queueBar->isAutoPlayEnabled())
         {
             int delay = queueBar->getDelaySec();
@@ -3288,6 +3262,15 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     }
 
                     safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
+
+                    // Ensure persisted queue order is canonical at startup so
+                    // relaunches and mobile clients resume the same round state.
+                    QueueService::getInstance().persistSingerOrder(vid, snap.singers,
+                        [](bool ok, juce::String err)
+                        {
+                            if (! ok)
+                                DBG("[Queue] startup persistSingerOrder failed: " << err);
+                        });
 
                     // Start (or restart) the /requested polling pipeline so
                     // we route TAGG requests through autoApprove and into
