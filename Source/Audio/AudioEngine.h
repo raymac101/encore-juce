@@ -24,6 +24,8 @@
 #include "PitchShifter.h"
 #include "../Services/UserPreferences.h"
 #include <array>
+#include <atomic>
+#include <mutex>
 
 //==============================================================================
 class AudioEngine : public juce::AudioSource,
@@ -168,7 +170,8 @@ private:
     juce::AudioDeviceManager              deviceManager;
     std::unique_ptr<juce::AudioSourcePlayer> audioSourcePlayer;
     juce::AudioFormatManager              formatManager;
-    bool initialized = false;
+    std::atomic<bool> initialized { false };
+    mutable std::mutex lifecycleMutex;
 
     //==========================================================================
     // Source chain

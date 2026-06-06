@@ -55,6 +55,7 @@ public:
     void setDurationSeconds(double seconds);
     void setPitch(int semitones);
     void setVolume(int volumeStep);
+    void setPlayEnabled(bool enabled);
 
     /** Replace the procedural waveform with real peaks. Values should be in
       [0.0, 1.0]. Pass an empty vector to clear waveform rendering and show

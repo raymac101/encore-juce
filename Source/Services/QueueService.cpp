@@ -187,13 +187,12 @@ namespace
                       return juce::String(a.name).toLowerCase() < juce::String(b.name).toLowerCase();
                   });
 
-        // Self-heal inconsistent ordering from older writes:
-        // keep queue order contiguous and force a single unique tail marker.
+        // Keep queue order contiguous for deterministic rendering, but preserve
+        // persisted round order from Firestore. Rewriting rotationOrder here
+        // would destroy the round anchor and move host placement to top-of-queue
+        // on app restart.
         for (size_t i = 0; i < all.size(); ++i)
-        {
             all[i].order = (int) i;
-            all[i].rotationOrder = (int) i;
-        }
 
         int nowIdx = -1;
         for (size_t i = 0; i < all.size(); ++i)
@@ -369,10 +368,12 @@ void QueueService::appendSong(const juce::String& venueId,
             songs.push_back(copy);
 
             const auto rel = relPathFromDocName(found.docName);
-            const auto maskedPath = rel + "?updateMask.fieldPaths=songs";
+            const auto maskedPath = rel + "?updateMask.fieldPaths=songs&updateMask.fieldPaths=strikes";
 
             juce::DynamicObject::Ptr fields = new juce::DynamicObject();
             fields->setProperty("songs", songsArrayValue(songs));
+            // Singer added a song again — clear accumulated skip strikes.
+            fields->setProperty("strikes", FirestoreClient::integerValue(0));
 
             const bool ok = FirestoreClient::getInstance()
                                 .patchDocument(maskedPath, juce::var(fields.get()));
@@ -423,7 +424,7 @@ void QueueService::appendSong(const juce::String& venueId,
         fields->setProperty("status",         FirestoreClient::stringValue("queued"));
         fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
         fields->setProperty("rotationOrder",  FirestoreClient::integerValue(maxOrder + 1));
-        fields->setProperty("strikes",        FirestoreClient::integerValue(-1));
+        fields->setProperty("strikes",        FirestoreClient::integerValue(0));
         fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
         fields->setProperty("songs",          songsArrayValue(initialSongs));
 
@@ -661,13 +662,18 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
 
             if (relPath.isNotEmpty())
             {
+                const int rotationToWrite = singer.rotationOrder >= 0
+                                          ? singer.rotationOrder
+                                          : writeOrder;
+
                 auto fields = FirestoreClient::makeFields({
                     { "order", FirestoreClient::integerValue(writeOrder) },
-                    { "rotationOrder", FirestoreClient::integerValue(writeOrder) }
+                    { "rotationOrder", FirestoreClient::integerValue(rotationToWrite) },
+                    { "strikes", FirestoreClient::integerValue(juce::jmax(0, singer.strikes)) }
                 });
 
                 const auto patchPath = relPath
-                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder";
+                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder&updateMask.fieldPaths=strikes";
 
                 const bool ok = FirestoreClient::getInstance().patchDocument(patchPath, fields);
                 allOk = allOk && ok;

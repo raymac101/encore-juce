@@ -95,6 +95,40 @@ int randomPitchSemitones(std::mt19937& rng, bool enabled)
     std::uniform_int_distribution<int> dist(-6, 6);
     return dist(rng);
 }
+
+int findHostIndexInQueue(const std::vector<Singers>& singers)
+{
+    for (int i = 0; i < (int) singers.size(); ++i)
+        if (singers[(size_t) i].isHost)
+            return i;
+    return -1;
+}
+
+void reindexQueueWithHostRoundAnchor(std::vector<Singers>& singers)
+{
+    for (int i = 0; i < (int) singers.size(); ++i)
+        singers[(size_t) i].order = i;
+
+    const int hostIndex = findHostIndexInQueue(singers);
+    if (hostIndex < 0)
+    {
+        int rot = 0;
+        for (int i = 0; i < (int) singers.size(); ++i)
+            singers[(size_t) i].rotationOrder = rot++;
+        return;
+    }
+
+    singers[(size_t) hostIndex].rotationOrder = -1;
+
+    int rot = 0;
+    const int n = (int) singers.size();
+    for (int step = 1; step < n; ++step)
+    {
+        const int i = (hostIndex + step) % n;
+        if (! singers[(size_t) i].isHost)
+            singers[(size_t) i].rotationOrder = rot++;
+    }
+}
 }
 
 //==============================================================================
@@ -291,6 +325,64 @@ void MainComponent::setupUI()
     topBar->setOnlineStatus(true); // Start with online status
     applyCurrentIdentityToUi();
 
+    // Shared transport-start helper.
+    // allowQueueFallback=true keeps the existing bottom-bar behavior
+    // (load next singer when nothing is loaded). Now-playing uses false.
+    auto startTransportPlayback = [this](bool allowQueueFallback)
+    {
+        if (! audioEngine)
+            return;
+
+        if (! audioEngine->isInitialized())
+            audioEngine->initialize();
+
+        if (! audioEngine->isInitialized())
+        {
+            if (bottomBar != nullptr)
+                bottomBar->setPlaying(false);
+            if (queueBar != nullptr)
+                queueBar->setPlaying(false);
+            updateAudioStatusIndicator();
+            return;
+        }
+
+        const bool hasLoadedMedia = (currentSongDuration > 0.01)
+                                 || (audioEngine->getTotalLength() > 0.01);
+
+        if (! hasLoadedMedia)
+        {
+            if (allowQueueFallback)
+            {
+                // First press with no loaded media should preload only.
+                const bool queued = queueAndLoadNextSingerSong(false);
+
+                if (bottomBar != nullptr)
+                    bottomBar->setPlaying(false);
+                if (queueBar != nullptr)
+                    queueBar->setPlaying(false);
+
+                juce::ignoreUnused(queued);
+            }
+            else
+            {
+                if (bottomBar != nullptr)
+                    bottomBar->setPlaying(false);
+                if (queueBar != nullptr)
+                    queueBar->setPlaying(false);
+            }
+            return;
+        }
+
+        if (playStartTimeMs_ == 0)
+            playStartTimeMs_ = juce::Time::currentTimeMillis();
+
+        audioEngine->play();
+        if (bottomBar != nullptr)
+            bottomBar->setPlaying(true);
+        if (queueBar != nullptr)
+            queueBar->setPlaying(true);
+    };
+
     // BottomBar callbacks — drive the AudioEngine
     bottomBar->onReturnToZero = [this]() {
         if (audioEngine) audioEngine->seekToPosition(0.0);
@@ -304,45 +396,18 @@ void MainComponent::setupUI()
         bottomBar->setPlaying(false);
     };
 
-    bottomBar->onPlayPause = [this](bool isNowPlaying) {
+    bottomBar->onPlayPause = [this, startTransportPlayback](bool isNowPlaying) {
         if (! audioEngine) return;
-
-        if (!audioEngine->isInitialized())
-            audioEngine->initialize();
-
-        if (!audioEngine->isInitialized())
-        {
-            bottomBar->setPlaying(false);
-            updateAudioStatusIndicator();
-            return;
-        }
 
         if (isNowPlaying)
         {
-            const bool hasLoadedMedia = (currentSongDuration > 0.01)
-                                     || (audioEngine->getTotalLength() > 0.01);
-
-            // If transport is pressed without a loaded track, pull the next
-            // playable singer/song from queue and preload it.
-            if (!hasLoadedMedia)
-            {
-                const bool queued = queueAndLoadNextSingerSong(true);
-                if (!queued)
-                {
-                    bottomBar->setPlaying(false);
-                    if (queueBar != nullptr)
-                        queueBar->setPlaying(false);
-                }
-                return;
-            }
-
-            if (playStartTimeMs_ == 0)
-                playStartTimeMs_ = juce::Time::currentTimeMillis();
-            audioEngine->play();
+            startTransportPlayback(true);
         }
         else
         {
             audioEngine->pause();
+            if (queueBar != nullptr)
+                queueBar->setPlaying(false);
         }
     };
 
@@ -1239,84 +1304,7 @@ void MainComponent::setupUI()
         localNowPlaying_    = singer;
         hasLocalNowPlaying_ = true;
 
-        // 2. Persist removal of this song from the singer's queue. Locally
-        //    we rebuild the singer list with the song stripped + the singer
-        //    moved to the bottom of the queue (advancing the round). Mirrors
-        //    Angular's `moveNextSingerToNowPlaying` -> `moveSingerToEnd`.
-        const auto venueId = activeVenueId_;
-        if (! venueId.isEmpty())
-        {
-            QueueService::getInstance().removeSong (venueId, firstSong, nullptr);
-        }
-
-        // 3. Local rotation/strikes logic — see Angular `moveSingerToEnd`
-        //    in queue-bar.component.ts.
-        std::vector<Singers> updated = list;
-        const bool hasHost = ! updated.empty() && updated.front().isHost;
-        if (singerIndex < (int) updated.size())
-        {
-            // Pop the song that's now playing.
-            if (! updated[(size_t) singerIndex].songs.empty())
-            {
-                updated[(size_t) singerIndex].songs.erase(
-                    updated[(size_t) singerIndex].songs.begin());
-                updated[(size_t) singerIndex].songsPerformed += 1;
-            }
-
-            auto& s = updated[(size_t) singerIndex];
-
-            bool moveToEnd = true;
-            bool removeSinger = false;
-            if (s.songs.empty())
-            {
-                // No more songs — apply a strike if the venue allows them.
-                if (activeVenueNumStrikes_ > 0 && s.strikes < activeVenueNumStrikes_)
-                {
-                    s.strikes += 1;
-                    moveToEnd = true;
-                }
-                else
-                {
-                    // Out of strikes (or strikes disabled) — drop the singer.
-                    moveToEnd  = false;
-                    removeSinger = true;
-                }
-            }
-
-            if (removeSinger)
-            {
-                const juce::String singerNameToRemove (s.name);
-                updated.erase (updated.begin() + singerIndex);
-                if (! venueId.isEmpty())
-                    QueueService::getInstance().deleteSinger (venueId, singerNameToRemove, nullptr);
-            }
-            else if (moveToEnd)
-            {
-                auto moved = updated[(size_t) singerIndex];
-                updated.erase (updated.begin() + singerIndex);
-                updated.push_back (moved);
-            }
-
-            // Re-number `order` and (non-host) `rotationOrder` so the
-            // round-leader / round-tail borders track the new positions.
-            int rot = 0;
-            for (size_t i = 0; i < updated.size(); ++i)
-            {
-                updated[i].order = (int) i;
-                if (! updated[i].isHost)
-                    updated[i].rotationOrder = rot++;
-            }
-        }
-
-        queueBar->setSingers(updated);
-
-        // 4. Persist the new order/rotation positions to Firestore (skip the
-        //    pinned host). Re-uses the `onReorder` callback which already
-        //    knows how to PATCH the queue collection.
-        if (queueBar->onReorder)
-            queueBar->onReorder (singerIndex, hasHost ? 1 : 0);
-
-        // 5. Resolve the song in the local library and load it WITHOUT
+        // 2. Resolve the song in the local library and load it WITHOUT
         //    auto-starting playback. The host presses play on the bottom
         //    bar transport or the now-playing avatar to start the track.
         if (mainArea == nullptr) return;
@@ -1440,9 +1428,10 @@ void MainComponent::setupUI()
         loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, autoStartSelectedSinger);
     };
 
-    queueBar->onPlayCurrent = [this]() {
-        if (queueBar == nullptr) return;
-        if (queueBar->onPlaySinger) queueBar->onPlaySinger(0);
+    queueBar->onPlayCurrent = [this, startTransportPlayback]() {
+        // Now-playing play button should only start transport for the
+        // currently loaded song and never advance/load the queue.
+        startTransportPlayback(false);
     };
 
     queueBar->onSongClicked = [this](int singerIdx, int /*songIdx*/) {
@@ -1494,10 +1483,13 @@ void MainComponent::setupUI()
     queueBar->onMoveSingerUp = [this](int singerIndex)
     {
         if (queueBar == nullptr) return;
+        const auto& singers = queueBar->getSingers();
+        const int hostIndex = findHostIndexInQueue(singers);
+        if (hostIndex >= 0 && singerIndex == hostIndex)
+            return;
         int targetIndex = singerIndex - 1;
-        // Don't displace a pinned host
-        if (!queueBar->getSingers().empty() && queueBar->getSingers().front().isHost)
-            targetIndex = juce::jmax(targetIndex, 1);
+        if (hostIndex >= 0 && singerIndex > hostIndex)
+            targetIndex = juce::jmax(targetIndex, hostIndex + 1);
         if (targetIndex < 0 || targetIndex >= singerIndex) return;
         queueBar->moveSinger(singerIndex, targetIndex);
         if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
@@ -1506,7 +1498,13 @@ void MainComponent::setupUI()
     queueBar->onMoveSingerDown = [this](int singerIndex)
     {
         if (queueBar == nullptr) return;
+        const auto& singers = queueBar->getSingers();
+        const int hostIndex = findHostIndexInQueue(singers);
+        if (hostIndex >= 0 && singerIndex == hostIndex)
+            return;
         int targetIndex = singerIndex + 1;
+        if (hostIndex >= 0 && singerIndex < hostIndex)
+            targetIndex = juce::jmin(targetIndex, hostIndex - 1);
         if (targetIndex >= (int) queueBar->getSingers().size()) return;
         queueBar->moveSinger(singerIndex, targetIndex);
         if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
@@ -1531,10 +1529,12 @@ void MainComponent::setupUI()
 
         // Re-insert locally at front or back
         auto singers = queueBar->getSingers();
+        const int hostIndex = findHostIndexInQueue(singers);
         if (toFront)
-            singers.insert(singers.begin() + (singers.empty() || !singers.front().isHost ? 0 : 1), cs);
+            singers.insert(singers.begin() + (hostIndex >= 0 ? hostIndex + 1 : 0), cs);
         else
             singers.push_back(cs);
+        reindexQueueWithHostRoundAnchor(singers);
         queueBar->setSingers(singers);
 
         // Persist new order
@@ -1601,6 +1601,55 @@ void MainComponent::setupUI()
         logPlayHistoryIfNeeded(true);
 
         if (queueBar == nullptr) return;
+        const auto venueId = activeVenueId_;
+
+        // Remove the finished song from the singer's queue item now that it
+        // has actually completed, then move the singer to the end of the
+        // round with any remaining songs.
+        if (hasLocalNowPlaying_ && !localNowPlaying_.songs.empty())
+        {
+            auto singers = queueBar->getSingers();
+            int singerIndex = -1;
+            for (int i = 0; i < (int) singers.size(); ++i)
+            {
+                if (juce::String(singers[(size_t) i].id).trim() == juce::String(localNowPlaying_.id).trim()
+                    || juce::String(singers[(size_t) i].name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
+                {
+                    singerIndex = i;
+                    break;
+                }
+            }
+
+            if (singerIndex >= 0)
+            {
+                auto finishedSinger = singers[(size_t) singerIndex];
+                if (! finishedSinger.songs.empty())
+                {
+                    QueueItem finishedItem;
+                    finishedItem.id          = currentSong.id;
+                    finishedItem.songId      = currentSong.id;
+                    finishedItem.songName    = currentSong.songName;
+                    finishedItem.songArtist  = currentSong.artistName;
+                    finishedItem.singerName  = finishedSinger.name;
+                    finishedItem.singerAvatar= finishedSinger.avatar;
+
+                    finishedSinger.songs.erase(finishedSinger.songs.begin());
+                    finishedSinger.songsPerformed += 1;
+
+                    if (! venueId.isEmpty())
+                        QueueService::getInstance().removeSong(venueId, finishedItem, nullptr);
+                }
+
+                singers.erase(singers.begin() + singerIndex);
+                singers.push_back(finishedSinger);
+                reindexQueueWithHostRoundAnchor(singers);
+                queueBar->setSingers(singers);
+
+                if (queueBar->onReorder)
+                    queueBar->onReorder(singerIndex, (int) singers.size() - 1);
+            }
+        }
+
         if (bottomBar != nullptr)
             bottomBar->setPlaying(false);
         queueBar->setPlaying(false);
@@ -2773,6 +2822,7 @@ bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad)
     if (queueBar == nullptr || !queueBar->onPlaySinger)
         return false;
 
+    const auto venueId = activeVenueId_;
     auto current = queueBar->getSingers();
     if (current.empty())
         return false;
@@ -2797,25 +2847,42 @@ bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad)
         }
 
         const int endIndex = (int) current.size() - 1;
-        if (frontIndex >= endIndex)
-            return false;
 
         auto rotated = current;
         auto moved = rotated[(size_t) frontIndex];
         rotated.erase(rotated.begin() + frontIndex);
-        rotated.push_back(std::move(moved));
 
-        int rotationOrder = 0;
-        for (size_t i = 0; i < rotated.size(); ++i)
+        bool removedForStrikes = false;
+        if (! moved.isHost)
         {
-            rotated[i].order = (int) i;
-            if (!rotated[i].isHost)
-                rotated[i].rotationOrder = rotationOrder++;
+            const int currentStrikes = juce::jmax(0, moved.strikes);
+            const int nextStrikes = currentStrikes + 1;
+
+            if (activeVenueNumStrikes_ > 0 && nextStrikes >= activeVenueNumStrikes_)
+            {
+                removedForStrikes = true;
+                if (! venueId.isEmpty())
+                {
+                    QueueService::getInstance().deleteSinger(
+                        venueId,
+                        juce::String(moved.name),
+                        nullptr);
+                }
+            }
+            else
+            {
+                moved.strikes = nextStrikes;
+            }
         }
+
+        if (! removedForStrikes)
+            rotated.push_back(std::move(moved));
+
+        reindexQueueWithHostRoundAnchor(rotated);
 
         queueBar->setSingers(rotated);
         if (queueBar->onReorder)
-            queueBar->onReorder(frontIndex, endIndex);
+            queueBar->onReorder(frontIndex, removedForStrikes ? frontIndex : endIndex);
     }
 
     queueAutoStartRequested_ = false;
@@ -2840,7 +2907,7 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
     hostSinger.order  = -1;
     hostSinger.rotationOrder = -1;
 
-    int preferredIndex = 0;
+    int preferredIndex = -1;
     if (queueBar != nullptr)
     {
         const auto& current = queueBar->getSingers();
@@ -2855,6 +2922,30 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
                 preferredIndex = i;
                 break;
             }
+        }
+    }
+
+    // First load path (no host currently in the visible queue): place the
+    // host at the start of the current round, not necessarily at queue index 0.
+    if (preferredIndex < 0)
+    {
+        if (! merged.empty())
+        {
+            int minRotation = INT_MAX;
+            int minRotationIndex = 0;
+            for (int i = 0; i < (int) merged.size(); ++i)
+            {
+                if (merged[(size_t) i].rotationOrder < minRotation)
+                {
+                    minRotation = merged[(size_t) i].rotationOrder;
+                    minRotationIndex = i;
+                }
+            }
+            preferredIndex = minRotationIndex;
+        }
+        else
+        {
+            preferredIndex = 0;
         }
     }
 
@@ -2882,6 +2973,8 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
     updateLoadingOverlay("Starting audio engine...", 0.92);
     audioStartupInProgress_ = true;
     audioStartupComplete_ = false;
+    if (bottomBar != nullptr)
+        bottomBar->setPlayEnabled(false);
 
     juce::MessageManager::callAsync([safeThis, venueId, startupToken]()
     {
@@ -2925,6 +3018,8 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             safeThis->audioStartupInProgress_ = false;
             safeThis->audioStartupComplete_ = safeThis->audioEngine != nullptr
                                             && safeThis->audioEngine->isInitialized();
+            if (safeThis->bottomBar != nullptr)
+                safeThis->bottomBar->setPlayEnabled(safeThis->audioStartupComplete_);
 
             DBG("[AudioStartup] Deferred audio init finished in " + juce::String(initMs, 1)
                 + " ms; lyric window setup in " + juce::String(lyricMs, 1) + " ms");

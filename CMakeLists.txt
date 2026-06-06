@@ -129,6 +129,23 @@ if(PkgConfig_FOUND)
     pkg_check_modules(RUBBERBAND rubberband)
 endif()
 if(NOT RUBBERBAND_FOUND)
+    # Allow Windows builds to discover vcpkg-installed libraries even when
+    # VCPKG_ROOT is not defined in the environment.
+    set(VCPKG_ROOT_HINTS "$ENV{VCPKG_ROOT}" "D:/vcpkg" "C:/vcpkg")
+    set(VCPKG_INCLUDE_HINTS)
+    set(VCPKG_LIBRARY_HINTS)
+    foreach(_vcpkg_root IN LISTS VCPKG_ROOT_HINTS)
+        if(_vcpkg_root)
+            list(APPEND VCPKG_INCLUDE_HINTS
+                "${_vcpkg_root}/installed/x64-windows/include"
+                "${_vcpkg_root}/installed/x64-windows-static/include")
+            list(APPEND VCPKG_LIBRARY_HINTS
+                "${_vcpkg_root}/installed/x64-windows/lib"
+                "${_vcpkg_root}/installed/x64-windows/debug/lib"
+                "${_vcpkg_root}/installed/x64-windows-static/lib")
+        endif()
+    endforeach()
+
     if(APPLE)
         execute_process(COMMAND brew --prefix rubberband
                         OUTPUT_VARIABLE RUBBERBAND_BREW_PREFIX
@@ -137,12 +154,10 @@ if(NOT RUBBERBAND_FOUND)
     endif()
     find_path(RUBBERBAND_INCLUDE_DIR rubberband/RubberBandStretcher.h
               HINTS ${RUBBERBAND_BREW_PREFIX}/include
-                    $ENV{VCPKG_ROOT}/installed/x64-windows/include
-                    $ENV{VCPKG_ROOT}/installed/x64-windows-static/include)
+                    ${VCPKG_INCLUDE_HINTS})
     find_library(RUBBERBAND_LIBRARY NAMES rubberband
                  HINTS ${RUBBERBAND_BREW_PREFIX}/lib
-                       $ENV{VCPKG_ROOT}/installed/x64-windows/lib
-                       $ENV{VCPKG_ROOT}/installed/x64-windows-static/lib)
+                       ${VCPKG_LIBRARY_HINTS})
     if(NOT RUBBERBAND_INCLUDE_DIR OR NOT RUBBERBAND_LIBRARY)
         message(FATAL_ERROR "Rubber Band Library not found. Install with `brew install rubberband` (macOS) or `vcpkg install rubberband` (Windows).")
     endif()
@@ -156,7 +171,35 @@ endif()
 target_link_libraries(EncoreJUCE      PRIVATE ${RUBBERBAND_LIBRARIES})
 
 # SQLite3 — used by SongDatabase. macOS ships with system sqlite3.
-find_package(SQLite3 REQUIRED)
+find_package(SQLite3 QUIET)
+if(NOT SQLite3_FOUND)
+    set(SQLITE_VCPKG_ROOT_HINTS "$ENV{VCPKG_ROOT}" "D:/vcpkg" "C:/vcpkg")
+    set(SQLITE_VCPKG_INCLUDE_HINTS)
+    set(SQLITE_VCPKG_LIBRARY_HINTS)
+    foreach(_sqlite_vcpkg_root IN LISTS SQLITE_VCPKG_ROOT_HINTS)
+        if(_sqlite_vcpkg_root)
+            list(APPEND SQLITE_VCPKG_INCLUDE_HINTS
+                "${_sqlite_vcpkg_root}/installed/x64-windows/include"
+                "${_sqlite_vcpkg_root}/installed/x64-windows-static/include")
+            list(APPEND SQLITE_VCPKG_LIBRARY_HINTS
+                "${_sqlite_vcpkg_root}/installed/x64-windows/lib"
+                "${_sqlite_vcpkg_root}/installed/x64-windows/debug/lib"
+                "${_sqlite_vcpkg_root}/installed/x64-windows-static/lib")
+        endif()
+    endforeach()
+
+    find_path(SQLite3_INCLUDE_DIR sqlite3.h HINTS ${SQLITE_VCPKG_INCLUDE_HINTS})
+    find_library(SQLite3_LIBRARY NAMES sqlite3 HINTS ${SQLITE_VCPKG_LIBRARY_HINTS})
+
+    if(SQLite3_INCLUDE_DIR AND SQLite3_LIBRARY)
+        add_library(SQLite3::SQLite3 UNKNOWN IMPORTED)
+        set_target_properties(SQLite3::SQLite3 PROPERTIES
+            IMPORTED_LOCATION "${SQLite3_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SQLite3_INCLUDE_DIR}")
+    else()
+        message(FATAL_ERROR "SQLite3 not found. Install with your package manager or `vcpkg install sqlite3` (Windows).")
+    endif()
+endif()
 target_link_libraries(EncoreJUCE PRIVATE SQLite3::SQLite3)
 
 # Copy assets to output directory

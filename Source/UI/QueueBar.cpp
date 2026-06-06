@@ -58,6 +58,42 @@ static juce::Image loadAvatarFromAssets(const juce::String& avatarPath)
     return {};
 }
 
+static int findHostIndex(const std::vector<Singers>& singers)
+{
+    for (int i = 0; i < (int) singers.size(); ++i)
+        if (singers[(size_t) i].isHost)
+            return i;
+    return -1;
+}
+
+// Keep queue order contiguous and make the host the anchor at the start of
+// the round by assigning rotationOrder from the singer immediately after host.
+static void reindexQueueWithHostRoundAnchor(std::vector<Singers>& singers)
+{
+    for (int i = 0; i < (int) singers.size(); ++i)
+        singers[(size_t) i].order = i;
+
+    const int hostIndex = findHostIndex(singers);
+    if (hostIndex < 0)
+    {
+        int rot = 0;
+        for (int i = 0; i < (int) singers.size(); ++i)
+            singers[(size_t) i].rotationOrder = rot++;
+        return;
+    }
+
+    singers[(size_t) hostIndex].rotationOrder = -1;
+
+    int rot = 0;
+    const int n = (int) singers.size();
+    for (int step = 1; step < n; ++step)
+    {
+        const int i = (hostIndex + step) % n;
+        if (! singers[(size_t) i].isHost)
+            singers[(size_t) i].rotationOrder = rot++;
+    }
+}
+
 //==============================================================================
 // ExpandArrowButton
 QueueBar::ExpandArrowButton::ExpandArrowButton()
@@ -462,19 +498,6 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         g.fillEllipse(cx - dotR, midY + gap - dotR, dotR * 2.f, dotR * 2.f);
     }
 
-    // Strikes (if no songs)
-    if (singer.songs.empty() && singer.strikes > 0)
-    {
-        g.setColour(juce::Colour(0xffdb3d40));
-        g.setFont(juce::Font(12.f));
-        juce::String strikeStr;
-        for (int s = 0; s < singer.strikes; ++s)
-            strikeStr += "X ";
-        g.drawText(strikeStr.trimEnd(), bounds.reduced(4),
-                   juce::Justification::centredLeft, true);
-        return;
-    }
-
     // Name area – top half (bounds already has menu column removed)
     auto nameArea = bounds.removeFromTop(bounds.getHeight() / 2).reduced(4, 0);
     g.setColour(juce::Colour(0xffe4e4e4));
@@ -513,6 +536,17 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
             g.drawText(juce::String(singer.songs[(size_t)i].songName),
                        chipRect, juce::Justification::centredLeft, true);
         }
+    }
+    else if (singer.strikes > 0)
+    {
+        // Keep singer name visible; show skip strikes in the chip lane.
+        g.setColour(juce::Colour(0xffdb3d40));
+        g.setFont(juce::Font(12.f).boldened());
+        juce::String strikeStr;
+        for (int s = 0; s < singer.strikes; ++s)
+            strikeStr += "X ";
+        g.drawText(strikeStr.trimEnd(), songArea,
+                   juce::Justification::centredLeft, true);
     }
 }
 
@@ -990,26 +1024,23 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
 
-    // Host is pinned to position 0 — refuse to move the host or to displace
-    // the host out of the first slot.
+    const int hostIndex = findHostIndex(singers);
+
+    // Host cannot be moved. Non-host singers also cannot be dropped into the
+    // host slot or across the host boundary (keeps round anchor stable).
     if (singers[(size_t)fromIndex].isHost) return;
-    if (! singers.empty() && singers.front().isHost && toIndex == 0) return;
+    if (hostIndex >= 0)
+    {
+        if (toIndex == hostIndex) return;
+        if (fromIndex < hostIndex && toIndex > hostIndex) return;
+        if (fromIndex > hostIndex && toIndex < hostIndex) return;
+    }
 
     auto singer = singers[(size_t)fromIndex];
     singers.erase(singers.begin() + fromIndex);
     singers.insert(singers.begin() + toIndex, singer);
 
-    // Reindex `order` for every singer, and `rotationOrder` for the
-    // non-host singers (the host stays at -1 / unchanged). The first/last
-    // round borders are computed from rotationOrder, so this is what makes
-    // the red "last in round" border follow a manual reorder.
-    int rot = 0;
-    for (int i = 0; i < (int)singers.size(); ++i)
-    {
-        singers[(size_t)i].order = i;
-        if (! singers[(size_t)i].isHost)
-            singers[(size_t)i].rotationOrder = rot++;
-    }
+    reindexQueueWithHostRoundAnchor(singers);
 
     rebuildSingerRows();
     resized();
@@ -1063,20 +1094,56 @@ void QueueBar::rebuildSingerRows()
         listContent.removeChildComponent(row);
     singerRows.clear();
 
-    // Determine first/last in round across NON-HOST singers only. The host
-    // is the round leader (green border) and isn't part of the
-    // first/last-of-round colouring. If there are no non-host singers in
-    // the queue (i.e. nobody has submitted a song yet) then no row gets
-    // the red "last in round" border.
+    // Determine first/last in round across NON-HOST singers only.
+    // The host is the round leader (green border).
     int firstRotation = INT_MAX;
     int lastRotation  = INT_MIN;
     int nonHostCount  = 0;
+    int hostIndex     = -1;
     for (auto& s : singers)
     {
-        if (s.isHost) continue;
+        if (s.isHost)
+        {
+            hostIndex = (int) (&s - singers.data());
+            continue;
+        }
         ++nonHostCount;
         if (s.rotationOrder < firstRotation) firstRotation = s.rotationOrder;
         if (s.rotationOrder > lastRotation)  lastRotation  = s.rotationOrder;
+    }
+
+    // Round-tail rule: the singer immediately before host in circular queue
+    // order is the end of round (red). This matches KJ expectations even when
+    // the host is not at visual index 0.
+    int roundTailIndex = -1;
+    if (nonHostCount > 0)
+    {
+        if (hostIndex >= 0)
+        {
+            const int n = (int) singers.size();
+            for (int step = 1; step < n; ++step)
+            {
+                const int idx = (hostIndex - step + n) % n;
+                if (! singers[(size_t) idx].isHost)
+                {
+                    roundTailIndex = idx;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Fallback when no host row exists in the list.
+            for (int i = 0; i < (int) singers.size(); ++i)
+            {
+                if (! singers[(size_t) i].isHost
+                    && singers[(size_t) i].rotationOrder == lastRotation)
+                {
+                    roundTailIndex = i;
+                    break;
+                }
+            }
+        }
     }
 
     for (int i = 0; i < (int)singers.size(); ++i)
@@ -1087,8 +1154,7 @@ void QueueBar::rebuildSingerRows()
         row->isHost  = singers[(size_t)i].isHost;
         row->isFirst = (! row->isHost) && nonHostCount > 0
                      && (singers[(size_t)i].rotationOrder == firstRotation);
-        row->isLast  = (! row->isHost) && nonHostCount > 1
-                     && (singers[(size_t)i].rotationOrder == lastRotation);
+        row->isLast  = (! row->isHost) && (i == roundTailIndex);
         row->avatarImage = loadAvatarFromAssets(juce::String(singers[(size_t)i].avatar));
 
         row->isNewlyAdded = singers[(size_t)i].isNewlyAdded;
@@ -1261,8 +1327,13 @@ void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
             ++toIndex;
     }
 
-    const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
-    if (hasHost) toIndex = juce::jmax (toIndex, 1);
+    const int hostIndex = findHostIndex(owner.singers);
+    if (hostIndex >= 0)
+    {
+        if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
+        else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
+        if (toIndex == hostIndex) toIndex = fromIndex;
+    }
     toIndex = juce::jlimit (0, (int) owner.singers.size(), toIndex);
 
     // Convert the slot index into a Y coordinate. Insertion line is drawn
@@ -1312,8 +1383,13 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 
         int toIndex = col * rowsPerColumn + row;
 
-        const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
-        if (hasHost) toIndex = juce::jmax (toIndex, 1);
+        const int hostIndex = findHostIndex(owner.singers);
+        if (hostIndex >= 0)
+        {
+            if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
+            else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
+            if (toIndex == hostIndex) toIndex = fromIndex;
+        }
         toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
 
         dropIndicatorY = -1;
@@ -1340,8 +1416,13 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
             ++toIndex;
     }
 
-    const bool hasHost = ! owner.singers.empty() && owner.singers.front().isHost;
-    if (hasHost) toIndex = juce::jmax (toIndex, 1);
+    const int hostIndex = findHostIndex(owner.singers);
+    if (hostIndex >= 0)
+    {
+        if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
+        else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
+        if (toIndex == hostIndex) toIndex = fromIndex;
+    }
     toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
 
     dropIndicatorY = -1;

@@ -496,6 +496,13 @@ void BottomBar::setVolume(int volumeStep)
     volumeSlider.updateText();
 }
 
+void BottomBar::setPlayEnabled(bool enabled)
+{
+    playPauseButton.setEnabled(enabled);
+    playPauseButton.setAlpha(enabled ? 1.0f : 0.45f);
+    repaint();
+}
+
 void BottomBar::timerCallback()
 {
     if (externalProgressControl_ || !isPlaying)

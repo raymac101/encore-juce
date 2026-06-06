@@ -27,6 +27,8 @@ AudioEngine::~AudioEngine()
 
 void AudioEngine::initialize()
 {
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+
     if (initialized)
         return;
 
@@ -43,6 +45,8 @@ void AudioEngine::initialize()
 
 void AudioEngine::shutdown()
 {
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+
     if (!initialized)
         return;
 
