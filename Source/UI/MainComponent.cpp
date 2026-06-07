@@ -348,8 +348,9 @@ void MainComponent::setupUI()
 
         const bool hasLoadedMedia = (currentSongDuration > 0.01)
                                  || (audioEngine->getTotalLength() > 0.01);
+        const bool videoLoaded = (lyricWindow_ != nullptr && lyricWindow_->isVideoActive());
 
-        if (! hasLoadedMedia)
+        if (! hasLoadedMedia && ! videoLoaded)
         {
             if (allowQueueFallback)
             {
@@ -376,7 +377,14 @@ void MainComponent::setupUI()
         if (playStartTimeMs_ == 0)
             playStartTimeMs_ = juce::Time::currentTimeMillis();
 
-        audioEngine->play();
+        if (videoLoaded)
+            lyricWindow_->playVideo();
+        else
+            audioEngine->play();
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setForceIdleScreen(false);
+
         if (bottomBar != nullptr)
             bottomBar->setPlaying(true);
         if (queueBar != nullptr)
@@ -385,15 +393,26 @@ void MainComponent::setupUI()
 
     // BottomBar callbacks — drive the AudioEngine
     bottomBar->onReturnToZero = [this]() {
-        if (audioEngine) audioEngine->seekToPosition(0.0);
+        if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+            lyricWindow_->seekVideo(0.0);
+        else if (audioEngine)
+            audioEngine->seekToPosition(0.0);
         bottomBar->setProgress(0.0f);
     };
 
     bottomBar->onStopAndReturnToZero = [this]() {
         logPlayHistoryIfNeeded(false); // logs only if played > 30 s
-        if (audioEngine) audioEngine->stop();
+        if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+        {
+            lyricWindow_->pauseVideo();
+            lyricWindow_->seekVideo(0.0);
+        }
+        else if (audioEngine)
+            audioEngine->stop();
         bottomBar->setProgress(0.0f);
         bottomBar->setPlaying(false);
+        if (queueBar != nullptr)
+            queueBar->setPlaying(false);
     };
 
     bottomBar->onPlayPause = [this, startTransportPlayback](bool isNowPlaying) {
@@ -405,22 +424,35 @@ void MainComponent::setupUI()
         }
         else
         {
-            audioEngine->pause();
+            if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+                lyricWindow_->pauseVideo();
+            else
+                audioEngine->pause();
             if (queueBar != nullptr)
                 queueBar->setPlaying(false);
         }
     };
 
     bottomBar->onJumpToEnd = [this]() {
-        if (audioEngine && audioEngine->getTotalLength() > 0.25)
+        if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive() && lyricWindow_->getVideoDuration() > 0.25)
+            lyricWindow_->seekVideo(lyricWindow_->getVideoDuration() - 0.25);
+        else if (audioEngine && audioEngine->getTotalLength() > 0.25)
             audioEngine->seekToPosition(audioEngine->getTotalLength() - 0.25);
     };
 
     bottomBar->onSeek = [this](float newProgress) {
-        if (! audioEngine) return;
-        double total = audioEngine->getTotalLength();
+        if (! audioEngine && (lyricWindow_ == nullptr || ! lyricWindow_->isVideoActive())) return;
+        double total = (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+            ? lyricWindow_->getVideoDuration()
+            : audioEngine->getTotalLength();
         if (total > 0.0)
-            audioEngine->seekToPosition(total * (double) juce::jlimit(0.0f, 1.0f, newProgress));
+        {
+            const auto pos = total * (double) juce::jlimit(0.0f, 1.0f, newProgress);
+            if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+                lyricWindow_->seekVideo(pos);
+            else
+                audioEngine->seekToPosition(pos);
+        }
     };
 
     bottomBar->onPitchChanged = [this](int semitones) {
@@ -2771,7 +2803,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         self->audioEngine->stop();
 
         if (self->lyricWindow_ == nullptr
-            || ! self->lyricWindow_->loadVideo (audioFile))
+            || ! self->lyricWindow_->loadVideo (audioFile, autoStart))
         {
             DBG("loadAndPlaySong: video load failed: " + audioFile.getFullPathName());
             self->hideLoadingOverlay();

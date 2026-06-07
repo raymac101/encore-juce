@@ -36,7 +36,25 @@ public:
         juce::String mimeType;
         int durationSec = 10;
 
-        bool isVideo() const noexcept { return mimeType.startsWithIgnoreCase ("video/"); }
+        bool isVideo() const noexcept
+        {
+            const auto type = mimeType.trim().toLowerCase();
+            if (type.startsWith ("video/"))
+                return true;
+
+            // Some metadata sources store loose hints like "mp4" or
+            // "application/octet-stream" for video ads.
+            if (type.contains ("mp4") || type.contains ("m4v") || type.contains ("mov")
+                || type.contains ("webm") || type.contains ("quicktime"))
+                return true;
+
+            const auto lowerName = name.toLowerCase();
+            const auto lowerUrl  = url.toLowerCase();
+            return lowerName.endsWith (".mp4") || lowerName.endsWith (".m4v")
+                || lowerName.endsWith (".mov") || lowerName.endsWith (".webm")
+                || lowerUrl.contains (".mp4") || lowerUrl.contains (".m4v")
+                || lowerUrl.contains (".mov") || lowerUrl.contains (".webm");
+        }
     };
 
     LyricDisplayComponent();
@@ -49,14 +67,23 @@ public:
         to clear back to the idle screen. */
     void loadCDG (const juce::File& cdgFile);
 
-    /** Load and start playing an MP4/M4V/MOV video. The video is rendered
-        full-screen on this component and provides its own audio. Pass an
-        invalid juce::File (or call stopVideo()) to return to the CDG/idle
-        view. */
-    bool loadVideo (const juce::File& videoFile);
+    /** Load an MP4/M4V/MOV video for rendering on this component. When
+        autoPlay is false, the media is preloaded and remains paused until
+        playVideo() is called. Pass an invalid juce::File (or call
+        stopVideo()) to return to the CDG/idle view. */
+    bool loadVideo (const juce::File& videoFile, bool autoPlay = true);
 
     /** Stops video playback (if any) and releases the underlying decoder. */
     void stopVideo();
+
+    /** Start/resume loaded video playback. */
+    void playVideo();
+
+    /** Pause loaded video playback, preserving current position. */
+    void pauseVideo();
+
+    /** Seek loaded video to an absolute position in seconds. */
+    void seekVideo (double positionSeconds);
 
     /** True while a video is loaded and playing. */
     bool isVideoActive() const;

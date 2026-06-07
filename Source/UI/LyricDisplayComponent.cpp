@@ -240,11 +240,19 @@ void LyricDisplayComponent::setQueuePreview (const std::vector<QueuePreviewEntry
 void LyricDisplayComponent::setForceIdleScreen (bool shouldForce)
 {
     forceIdleScreen_ = shouldForce;
+
+    if (videoComponent_ != nullptr && videoComponent_->isVideoOpen())
+    {
+        videoComponent_->setVisible (! shouldForce);
+        if (! shouldForce)
+            layoutVideoBounds();
+    }
+
     repaint();
 }
 
 //==============================================================================
-bool LyricDisplayComponent::loadVideo (const juce::File& videoFile)
+bool LyricDisplayComponent::loadVideo (const juce::File& videoFile, bool autoPlay)
 {
     // Switching to video clears any CDG that was active.
     decoder_.clear();
@@ -275,7 +283,13 @@ bool LyricDisplayComponent::loadVideo (const juce::File& videoFile)
 
     layoutVideoBounds();
     videoComponent_->setVisible (true);
-    videoComponent_->play();
+    if (autoPlay)
+        videoComponent_->play();
+    else
+    {
+        videoComponent_->stop();
+        videoComponent_->setPlayPosition (0.0);
+    }
     repaint();
     return true;
 }
@@ -289,6 +303,28 @@ void LyricDisplayComponent::stopVideo()
         videoComponent_->setVisible (false);
     }
     repaint();
+}
+
+void LyricDisplayComponent::playVideo()
+{
+    if (videoComponent_ != nullptr && videoComponent_->isVideoOpen())
+    {
+        videoComponent_->setVisible (true);
+        layoutVideoBounds();
+        videoComponent_->play();
+    }
+}
+
+void LyricDisplayComponent::pauseVideo()
+{
+    if (videoComponent_ != nullptr && videoComponent_->isVideoOpen())
+        videoComponent_->stop();
+}
+
+void LyricDisplayComponent::seekVideo (double positionSeconds)
+{
+    if (videoComponent_ != nullptr && videoComponent_->isVideoOpen())
+        videoComponent_->setPlayPosition (juce::jmax (0.0, positionSeconds));
 }
 
 bool LyricDisplayComponent::isVideoActive() const
@@ -323,7 +359,7 @@ void LyricDisplayComponent::timerCallback()
     {
         // The next song may be preloaded while transport is stopped. Keep the
         // idle screen visible until playback actually starts again.
-        if (isVideoActive() || (audioEngine_ != nullptr && audioEngine_->isPlaying()))
+        if (audioEngine_ != nullptr && audioEngine_->isPlaying())
             forceIdleScreen_ = false;
     }
 
@@ -432,7 +468,7 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
 
     // The VideoComponent (when active) paints itself as a child component, so
     // skip CDG/idle painting and only draw the overlays on top.
-    if (! isVideoActive())
+    if (forceIdleScreen_ || ! isVideoActive())
     {
         if (decoder_.isLoaded())
             paintCdg (g, getContentRenderArea (getPrimaryRenderArea (area, false)));

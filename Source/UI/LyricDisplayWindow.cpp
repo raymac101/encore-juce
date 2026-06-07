@@ -123,15 +123,33 @@ void LyricDisplayWindow::setForceIdleScreen (bool shouldForce)
         display_->setForceIdleScreen (shouldForce);
 }
 
-bool LyricDisplayWindow::loadVideo (const juce::File& videoFile)
+bool LyricDisplayWindow::loadVideo (const juce::File& videoFile, bool autoPlay)
 {
-    return display_ != nullptr && display_->loadVideo (videoFile);
+    return display_ != nullptr && display_->loadVideo (videoFile, autoPlay);
 }
 
 void LyricDisplayWindow::stopVideo()
 {
     if (display_ != nullptr)
         display_->stopVideo();
+}
+
+void LyricDisplayWindow::playVideo()
+{
+    if (display_ != nullptr)
+        display_->playVideo();
+}
+
+void LyricDisplayWindow::pauseVideo()
+{
+    if (display_ != nullptr)
+        display_->pauseVideo();
+}
+
+void LyricDisplayWindow::seekVideo (double positionSeconds)
+{
+    if (display_ != nullptr)
+        display_->seekVideo (positionSeconds);
 }
 
 bool LyricDisplayWindow::isVideoActive() const
