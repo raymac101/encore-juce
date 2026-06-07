@@ -277,6 +277,52 @@ void UserPreferences::setNightlyCleanupHour(int hour)
 }
 
 //==============================================================================
+float UserPreferences::getTrailingSilenceThresholdDb() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: -50 dBFS. Clamp to sane range for simple UI controls.
+    auto db = (float) (double) root_.getProperty("trailingSilenceThresholdDb", juce::var(-50.0));
+    return juce::jlimit(-80.0f, -20.0f, db);
+}
+
+void UserPreferences::setTrailingSilenceThresholdDb(float db)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("trailingSilenceThresholdDb", juce::jlimit(-80.0f, -20.0f, db));
+    save();
+}
+
+int UserPreferences::getLyricAdTransitionLeadSeconds() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: 7 seconds before audible end.
+    int s = (int) root_.getProperty("lyricAdTransitionLeadSeconds", juce::var(7));
+    return juce::jlimit(1, 30, s);
+}
+
+void UserPreferences::setLyricAdTransitionLeadSeconds(int seconds)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricAdTransitionLeadSeconds", juce::jlimit(1, 30, seconds));
+    save();
+}
+
+int UserPreferences::getLyricVenueCodeBarHeightPercent() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: 11% (roughly previous 1/9 behavior).
+    int p = (int) root_.getProperty("lyricVenueCodeBarHeightPercent", juce::var(11));
+    return juce::jlimit(6, 20, p);
+}
+
+void UserPreferences::setLyricVenueCodeBarHeightPercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricVenueCodeBarHeightPercent", juce::jlimit(6, 20, percent));
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);

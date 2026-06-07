@@ -31,6 +31,10 @@ public:
     /** Convenience passthrough to the component. */
     void loadCDG (const juce::File& cdgFile);
 
+    void setVenueContext (const juce::String& venueId, const juce::String& venueName);
+    void setQueuePreview (const std::vector<LyricDisplayComponent::QueuePreviewEntry>& entries);
+    void setForceIdleScreen (bool shouldForce);
+
     /** Loads an MP4/M4V/MOV video for full-screen playback on the lyric
         display. Audio is provided by the video itself — the AudioEngine is
         not used in this mode. Returns true on success. */

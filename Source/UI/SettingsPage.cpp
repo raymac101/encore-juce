@@ -426,6 +426,9 @@ public:
         initFieldLabel(lblShowOnline_,       lm.getText("settings.lbl_show_online"));
         initFieldLabel(lblShowOnlineEncore_, lm.getText("settings.lbl_show_online_encore"));
         initFieldLabel(lblShowMemory_,       lm.getText("settings.lbl_show_memory"));
+        initFieldLabel(lblSilenceThreshold_, lm.getText("settings.lbl_silence_threshold"));
+        initFieldLabel(lblLyricAdLead_,      lm.getText("settings.lbl_lyric_ad_lead"));
+        initFieldLabel(lblLyricCodeBarHeight_, lm.getText("settings.lbl_lyric_code_bar_height"));
 
         initCombo(cbLyricsBg_);
         cbLyricsBg_.addItem(lm.getText("settings.bg_none"),     1);
@@ -501,6 +504,54 @@ public:
         tbShowMemory_.onStateChange = [this]() {
             owner_.venue_.showMemoryStats = tbShowMemory_.getToggleState();
             owner_.notifyChanged();
+        };
+
+        initCombo(cbSilenceThreshold_);
+        cbSilenceThreshold_.addItem("-35 dB", 1);
+        cbSilenceThreshold_.addItem("-40 dB", 2);
+        cbSilenceThreshold_.addItem("-45 dB", 3);
+        cbSilenceThreshold_.addItem("-50 dB", 4);
+        cbSilenceThreshold_.addItem("-55 dB", 5);
+        cbSilenceThreshold_.addItem("-60 dB", 6);
+        cbSilenceThreshold_.addItem("-65 dB", 7);
+        cbSilenceThreshold_.addItem("-70 dB", 8);
+        {
+            const auto db = UserPreferences::getInstance().getTrailingSilenceThresholdDb();
+            int id = 4;
+            if (db > -37.5f) id = 1;
+            else if (db > -42.5f) id = 2;
+            else if (db > -47.5f) id = 3;
+            else if (db > -52.5f) id = 4;
+            else if (db > -57.5f) id = 5;
+            else if (db > -62.5f) id = 6;
+            else if (db > -67.5f) id = 7;
+            else id = 8;
+            cbSilenceThreshold_.setSelectedId(id, juce::dontSendNotification);
+        }
+        cbSilenceThreshold_.onChange = [this]() {
+            constexpr float values[] = { -35.0f, -40.0f, -45.0f, -50.0f, -55.0f, -60.0f, -65.0f, -70.0f };
+            const int idx = juce::jlimit(0, 7, cbSilenceThreshold_.getSelectedId() - 1);
+            UserPreferences::getInstance().setTrailingSilenceThresholdDb(values[idx]);
+        };
+
+        initCombo(cbLyricAdLead_);
+        for (int s = 3; s <= 15; ++s)
+            cbLyricAdLead_.addItem(juce::String(s) + " s", s - 2);
+        cbLyricAdLead_.setSelectedId(
+            juce::jlimit(1, 13, UserPreferences::getInstance().getLyricAdTransitionLeadSeconds() - 2),
+            juce::dontSendNotification);
+        cbLyricAdLead_.onChange = [this]() {
+            UserPreferences::getInstance().setLyricAdTransitionLeadSeconds(cbLyricAdLead_.getSelectedId() + 2);
+        };
+
+        initCombo(cbLyricCodeBarHeight_);
+        for (int p = 8; p <= 16; ++p)
+            cbLyricCodeBarHeight_.addItem(juce::String(p) + "%", p - 7);
+        cbLyricCodeBarHeight_.setSelectedId(
+            juce::jlimit(1, 9, UserPreferences::getInstance().getLyricVenueCodeBarHeightPercent() - 7),
+            juce::dontSendNotification);
+        cbLyricCodeBarHeight_.onChange = [this]() {
+            UserPreferences::getInstance().setLyricVenueCodeBarHeightPercent(cbLyricCodeBarHeight_.getSelectedId() + 7);
         };
 
         // ── Section 6: Session Management ────────────────────────────────────
@@ -759,6 +810,9 @@ public:
         toggleRow(lblShowOnline_,       tbShowOnline_);
         toggleRow(lblShowOnlineEncore_, tbShowOnlineEncore_);
         toggleRow(lblShowMemory_,       tbShowMemory_);
+        comboRow(lblSilenceThreshold_,  cbSilenceThreshold_);
+        comboRow(lblLyricAdLead_,       cbLyricAdLead_);
+        comboRow(lblLyricCodeBarHeight_, cbLyricCodeBarHeight_);
         cardEnd(cs);
         y += kSectionGap;
 
@@ -834,6 +888,9 @@ public:
         lblShowOnline_.setText(lm.getText("settings.lbl_show_online"),          juce::dontSendNotification);
         lblShowOnlineEncore_.setText(lm.getText("settings.lbl_show_online_encore"), juce::dontSendNotification);
         lblShowMemory_.setText(lm.getText("settings.lbl_show_memory"),          juce::dontSendNotification);
+        lblSilenceThreshold_.setText(lm.getText("settings.lbl_silence_threshold"), juce::dontSendNotification);
+        lblLyricAdLead_.setText(lm.getText("settings.lbl_lyric_ad_lead"), juce::dontSendNotification);
+        lblLyricCodeBarHeight_.setText(lm.getText("settings.lbl_lyric_code_bar_height"), juce::dontSendNotification);
 
         secSession_.setText(lm.getText("settings.sec_session"),              juce::dontSendNotification);
         lblSongsToday_.setText(lm.getText("settings.lbl_songs_today"),       juce::dontSendNotification);
@@ -1035,6 +1092,10 @@ private:
     juce::ToggleButton tbRepeat_,       tbAutoApprove_;
     juce::Label        lblShowOnline_,  lblShowOnlineEncore_, lblShowMemory_;
     juce::ToggleButton tbShowOnline_,   tbShowOnlineEncore_,  tbShowMemory_;
+    juce::Label        lblSilenceThreshold_, lblLyricAdLead_;
+    juce::ComboBox     cbSilenceThreshold_, cbLyricAdLead_;
+    juce::Label        lblLyricCodeBarHeight_;
+    juce::ComboBox     cbLyricCodeBarHeight_;
 
     // Section 6: Session
     juce::Label      secSession_;

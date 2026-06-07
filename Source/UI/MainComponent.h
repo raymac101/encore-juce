@@ -172,6 +172,7 @@ private:
     bool audioStartupComplete_ = false;
 
     juce::String activeVenueId_;
+    juce::String activeVenueName_;
     bool queueExpanded_ = false;
 
     // Cached venue config — populated from VenueService::loadVenue and used
@@ -236,6 +237,9 @@ private:
     void showSongUnavailableMessage(const QueueItem& item);
     bool queueAndLoadNextSingerSong(bool autoStartAfterLoad = false);
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
+    void syncLyricIdlePreview(const std::vector<Singers>& singers);
+    std::vector<LyricDisplayComponent::QueuePreviewEntry>
+    buildLyricQueuePreview(const std::vector<Singers>& singers) const;
 
     bool pendingSongbookHealthCheck_ = true;
     bool songbookHealthPromptShown_ = false;

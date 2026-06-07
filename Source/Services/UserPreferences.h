@@ -66,6 +66,20 @@ public:
     int  getNightlyCleanupHour() const;
     void setNightlyCleanupHour(int hour);
 
+    //--- Lyric ad timing / silence detection ---------------------------------
+    // dBFS threshold used when scanning for trailing silence (typically -35..-70).
+    float getTrailingSilenceThresholdDb() const;
+    void setTrailingSilenceThresholdDb(float db);
+
+    // Seconds before detected audible end when lyric ads should transition in.
+    int  getLyricAdTransitionLeadSeconds() const;
+    void setLyricAdTransitionLeadSeconds(int seconds);
+
+    // Height of the lyric lower-third venue-code bar as a percent of screen
+    // height (default 11%).
+    int  getLyricVenueCodeBarHeightPercent() const;
+    void setLyricVenueCodeBarHeightPercent(int percent);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

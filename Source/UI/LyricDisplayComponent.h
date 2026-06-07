@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <vector>
 #include "../CDG/CDGDecoder.h"
 
 class AudioEngine;
@@ -21,6 +22,23 @@ class LyricDisplayComponent  : public juce::Component,
                                private juce::Timer
 {
 public:
+    struct QueuePreviewEntry
+    {
+        juce::String singerName;
+        juce::String songName;
+        juce::String artistName;
+    };
+
+    struct AdEntry
+    {
+        juce::String name;
+        juce::String url;
+        juce::String mimeType;
+        int durationSec = 10;
+
+        bool isVideo() const noexcept { return mimeType.startsWithIgnoreCase ("video/"); }
+    };
+
     LyricDisplayComponent();
     ~LyricDisplayComponent() override;
 
@@ -58,6 +76,16 @@ public:
     /** Optional venue code to display bottom-third, matching the Angular UI. */
     void setVenueCode (const juce::String& code) { venueCode_ = code; repaint(); }
 
+    /** Venue context used by the idle split-screen panel and ad source path. */
+    void setVenueContext (const juce::String& venueId, const juce::String& venueName);
+
+    /** Push the next singers shown in the idle split-screen panel. */
+    void setQueuePreview (const std::vector<QueuePreviewEntry>& entries);
+
+    /** Forces idle rendering even when a song is preloaded. The flag clears
+        automatically when playback resumes. */
+    void setForceIdleScreen (bool shouldForce);
+
     /** Override the idle-screen logo with a venue-specific image. Pass an
         invalid image to revert to the bundled Encore logo. */
     void setVenueLogo (const juce::Image& logo);
@@ -67,11 +95,29 @@ public:
     void resized() override;
 
 private:
+
     void timerCallback() override;
     void paintIdle    (juce::Graphics& g, juce::Rectangle<int> area);
     void paintCdg     (juce::Graphics& g, juce::Rectangle<int> area);
+    void paintAdPanel (juce::Graphics& g, juce::Rectangle<int> area, bool addFrame);
     void paintOverlay (juce::Graphics& g, juce::Rectangle<int> area);
     void layoutVideoBounds();
+    void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
+    void updateAdPanelAnimation (bool idleMode);
+
+    double getPlaybackPositionSeconds() const;
+    double getPlaybackDurationSeconds() const;
+    int getAdPanelWidth (juce::Rectangle<int> area, bool idleMode) const;
+    int getVenueCodeBarHeight (juce::Rectangle<int> area) const;
+    juce::Rectangle<int> getContentRenderArea (juce::Rectangle<int> area) const;
+    juce::Rectangle<int> getPrimaryRenderArea (juce::Rectangle<int> area, bool idleMode) const;
+    juce::Rectangle<int> getAdRenderArea (juce::Rectangle<int> area, bool idleMode) const;
+
+    void refreshAdsAsync (bool force = false);
+    void applyAds (std::vector<AdEntry> ads);
+    void advanceIdleAd (bool force = false);
+    void stopIdleAdVideo();
+    void showIdleAdVideo (const AdEntry& ad);
 
     AudioEngine* audioEngine_ = nullptr;
 
@@ -86,8 +132,23 @@ private:
     juce::String nextSong_;
     juce::String nextArtist_;
     juce::String venueCode_;
+    juce::String venueId_;
+    juce::String venueName_;
 
     juce::Image  logoImage_;
+
+    std::vector<QueuePreviewEntry> queuePreview_;
+
+    std::vector<AdEntry> ads_;
+    int currentAdIndex_ = -1;
+    int adRemainingMs_ = 0;
+    int adRefreshCountdownFrames_ = 0;
+    float adPanelVisibility_ = 1.0f;
+    float adPanelTarget_ = 1.0f;
+    juce::Image currentAdImage_;
+
+    std::unique_ptr<juce::VideoComponent> idleAdVideoComponent_;
+    bool forceIdleScreen_ = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayComponent)
 };

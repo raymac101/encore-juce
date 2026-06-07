@@ -54,6 +54,11 @@ public:
     bool   isPaused()            const noexcept { return paused.load(); }
     double getCurrentPosition()  const noexcept { return currentPosition.load(); }
     double getTotalLength()      const noexcept { return totalLength.load(); }
+    /**
+      Estimated end of audible content in seconds. This trims trailing
+      silence by scanning backward from file-end at load time.
+    */
+    double getAudibleEndPosition() const noexcept { return audibleEndPosition.load(); }
 
     //==========================================================================
     // Pitch and tempo  (thread-safe — may be called from any thread)
@@ -253,6 +258,7 @@ private:
     std::atomic<bool>   paused          { false };
     std::atomic<double> currentPosition { 0.0 };
     std::atomic<double> totalLength     { 0.0 };
+    std::atomic<double> audibleEndPosition { 0.0 };
 
     //==========================================================================
     // Analysis

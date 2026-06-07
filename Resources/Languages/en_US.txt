@@ -323,6 +323,9 @@ settings.lbl_lyrics_bg=Lyrics Background:
 settings.lbl_show_online=Show Online Songs (Tagg):
 settings.lbl_show_online_encore=Show Online Songs (Encore):
 settings.lbl_show_memory=Show Memory Stats:
+settings.lbl_silence_threshold=Silence Detection Threshold:
+settings.lbl_lyric_ad_lead=Ad Transition Lead Time:
+settings.lbl_lyric_code_bar_height=Lyric Code Bar Height:
 
 # Session buttons
 settings.btn_clear_recent=CLEAR RECENTLY PLAYED

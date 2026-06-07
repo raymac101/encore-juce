@@ -1364,7 +1364,9 @@ void MainComponent::setupUI()
                                     {
                                         safe->queueBar->clearNowPlaying();
                                         safe->queueBar->setPlaying(false);
-                                        safe->queueBar->setSingers(safe->composeQueueWithHost({}));
+                                        auto resetQueue = safe->composeQueueWithHost({});
+                                        safe->queueBar->setSingers(resetQueue);
+                                        safe->syncLyricIdlePreview(resetQueue);
                                     }
 
                                     safe->reloadQueueFromFirestore(venueId);
@@ -1701,6 +1703,9 @@ void MainComponent::setupUI()
     audioEngine->onSongFinished = [this]()
     {
         logPlayHistoryIfNeeded(true);
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setForceIdleScreen (true);
 
         if (queueBar == nullptr) return;
         const auto venueId = activeVenueId_;
@@ -3057,6 +3062,44 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
     return merged;
 }
 
+std::vector<LyricDisplayComponent::QueuePreviewEntry>
+MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
+{
+    std::vector<LyricDisplayComponent::QueuePreviewEntry> preview;
+    preview.reserve (3);
+
+    for (const auto& singer : singers)
+    {
+        if (singer.isHost)
+            continue;
+
+        LyricDisplayComponent::QueuePreviewEntry entry;
+        entry.singerName = juce::String (singer.name);
+
+        if (! singer.songs.empty())
+        {
+            const auto& song = singer.songs.front();
+            entry.songName = juce::String (song.songName);
+            entry.artistName = juce::String (song.songArtist);
+        }
+
+        preview.push_back (std::move (entry));
+        if ((int) preview.size() >= 3)
+            break;
+    }
+
+    return preview;
+}
+
+void MainComponent::syncLyricIdlePreview(const std::vector<Singers>& singers)
+{
+    if (lyricWindow_ == nullptr)
+        return;
+
+    lyricWindow_->setVenueContext (activeVenueId_, activeVenueName_);
+    lyricWindow_->setQueuePreview (buildLyricQueuePreview (singers));
+}
+
 void MainComponent::updateLoadingOverlay(const juce::String& message, double progress)
 {
     if (loadingOverlay_)
@@ -3111,10 +3154,14 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
 
             if (auto* d = safeThis->lyricWindow_ != nullptr ? safeThis->lyricWindow_->getDisplay() : nullptr)
             {
+                d->setVenueContext (safeThis->activeVenueId_, safeThis->activeVenueName_);
                 if (safeThis->pendingVenueCode_.isNotEmpty())
                     d->setVenueCode(safeThis->pendingVenueCode_);
                 if (safeThis->pendingVenueLogo_.isValid())
                     d->setVenueLogo(safeThis->pendingVenueLogo_);
+
+                if (safeThis->queueBar != nullptr)
+                    safeThis->syncLyricIdlePreview (safeThis->queueBar->getSingers());
             }
 
             safeThis->audioStartupInProgress_ = false;
@@ -3262,13 +3309,13 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
 
     if (venueId.isEmpty())
     {
+        activeVenueName_.clear();
         pendingVenueCode_.clear();
         pendingVenueLogo_ = {};
         if (queueBar != nullptr)
             queueBar->setVenueInfo ("No Venue", "");
         if (lyricWindow_ != nullptr)
-            if (auto* d = lyricWindow_->getDisplay())
-                d->setVenueCode ({});
+            lyricWindow_->setVenueContext ({}, {});
         ArchiveService::getInstance().stopNightlyCleanup();
         hideLoadingOverlay();
         return;
@@ -3301,6 +3348,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             const juce::String code (v.code);
             const juce::String logoUrl (v.logoUrl);
 
+            safe->activeVenueName_ = name;
             safe->pendingVenueCode_ = code;
 
             safe->activeVenueNumStrikes_ = v.numStrikes;
@@ -3320,8 +3368,11 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                 safe->queueBar->setVenueInfo (name, code);
 
             if (safe->lyricWindow_ != nullptr)
+            {
+                safe->lyricWindow_->setVenueContext (venueId, name);
                 if (auto* d = safe->lyricWindow_->getDisplay())
                     d->setVenueCode (code);
+            }
 
             // Push the full venue snapshot into the Settings page so the admin
             // can edit any field. Saves are routed through MainArea's
@@ -3870,7 +3921,9 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
                 safe->queueBar->clearNowPlaying();
             }
 
-            safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
+            auto composed = safe->composeQueueWithHost (snap.singers);
+            safe->queueBar->setSingers (composed);
+            safe->syncLyricIdlePreview (composed);
         });
 }
 
@@ -3901,7 +3954,9 @@ void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
                 safe->queueBar->clearNowPlaying();
             }
 
-            safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
+            auto composed = safe->composeQueueWithHost (snap.singers);
+            safe->queueBar->setSingers (composed);
+            safe->syncLyricIdlePreview (composed);
         });
 }
 

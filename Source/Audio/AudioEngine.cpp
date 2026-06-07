@@ -9,6 +9,55 @@
 #include "AudioEngine.h"
 #include <cmath>
 
+namespace
+{
+double estimateAudibleEndSeconds (juce::AudioFormatReader& reader, float silenceThresholdDb)
+{
+    const auto totalSamples = reader.lengthInSamples;
+    if (totalSamples <= 0 || reader.sampleRate <= 0.0)
+        return 0.0;
+
+    constexpr int kBlock = 16384;
+    const float silenceThreshold = juce::Decibels::decibelsToGain (
+        juce::jlimit (-80.0f, -20.0f, silenceThresholdDb));
+
+    const int channels = juce::jlimit (1, 2, (int) reader.numChannels);
+    juce::AudioBuffer<float> buffer (channels, kBlock);
+
+    juce::int64 endExclusive = totalSamples;
+
+    while (endExclusive > 0)
+    {
+        const juce::int64 start = juce::jmax<juce::int64> (0, endExclusive - kBlock);
+        const int count = (int) (endExclusive - start);
+
+        buffer.clear();
+        if (! reader.read (&buffer, 0, count, start, true, channels > 1))
+            break;
+
+        for (int i = count - 1; i >= 0; --i)
+        {
+            float peak = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                peak = juce::jmax (peak, std::abs (buffer.getSample (ch, i)));
+
+            if (peak > silenceThreshold)
+            {
+                const juce::int64 lastAudibleSample = start + i;
+                const double seconds = (double) (lastAudibleSample + 1) / reader.sampleRate;
+                return juce::jlimit (0.0,
+                                     (double) totalSamples / reader.sampleRate,
+                                     seconds);
+            }
+        }
+
+        endExclusive = start;
+    }
+
+    return 0.0;
+}
+}
+
 //==============================================================================
 AudioEngine::AudioEngine()
 {
@@ -200,6 +249,11 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
     pitchShifter.reset();
 
     totalLength     = reader->lengthInSamples / reader->sampleRate;
+    audibleEndPosition = estimateAudibleEndSeconds (
+        *reader,
+        UserPreferences::getInstance().getTrailingSilenceThresholdDb());
+    if (audibleEndPosition.load() <= 0.0)
+        audibleEndPosition = totalLength.load();
     currentPosition = 0.0;
 
     cdgLoaded = cdgFile.exists();
@@ -213,7 +267,8 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
         audioSourcePlayer->setSource(this);
 
     DBG("loadSong: loaded " + audioFile.getFileName()
-        + "  (" + juce::String(totalLength.load(), 1) + " s)");
+        + "  (" + juce::String(totalLength.load(), 1) + " s, audible end "
+        + juce::String(audibleEndPosition.load(), 1) + " s)");
     return true;
 }
 
@@ -261,6 +316,7 @@ void AudioEngine::stop()
     playing         = false;
     paused          = false;
     currentPosition = 0.0;
+    audibleEndPosition = 0.0;
     masterCompOutputMeter = 0.0f;
     masterLimiterReductionMeter = 0.0f;
 }

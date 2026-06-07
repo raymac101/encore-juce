@@ -104,6 +104,25 @@ void LyricDisplayWindow::loadCDG (const juce::File& cdgFile)
         display_->loadCDG (cdgFile);
 }
 
+void LyricDisplayWindow::setVenueContext (const juce::String& venueId,
+                                          const juce::String& venueName)
+{
+    if (display_ != nullptr)
+        display_->setVenueContext (venueId, venueName);
+}
+
+void LyricDisplayWindow::setQueuePreview (const std::vector<LyricDisplayComponent::QueuePreviewEntry>& entries)
+{
+    if (display_ != nullptr)
+        display_->setQueuePreview (entries);
+}
+
+void LyricDisplayWindow::setForceIdleScreen (bool shouldForce)
+{
+    if (display_ != nullptr)
+        display_->setForceIdleScreen (shouldForce);
+}
+
 bool LyricDisplayWindow::loadVideo (const juce::File& videoFile)
 {
     return display_ != nullptr && display_->loadVideo (videoFile);
