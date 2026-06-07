@@ -1,4 +1,5 @@
 #include "TestingPage.h"
+#include "../Localization/LocalizationManager.h"
 
 namespace
 {
@@ -15,23 +16,25 @@ namespace
 TestingPage::TestingPage()
     : progressBar_(progressValue_)
 {
-    titleLabel_.setText("TESTING", juce::dontSendNotification);
+    auto& lm = LocalizationManager::getInstance();
+
+    titleLabel_.setText(lm.getText("testing.title"), juce::dontSendNotification);
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(28.0f)).boldened());
 
     currentResolutionLabel_.setJustificationType(juce::Justification::centredLeft);
     currentResolutionLabel_.setFont(juce::Font(juce::FontOptions().withHeight(16.0f)));
 
-    resolutionBox_.setTextWhenNothingSelected("Select resolution");
+    resolutionBox_.setTextWhenNothingSelected(lm.getText("testing.select_resolution"));
     populateResolutionDropdown();
 
-    applyResolutionButton_.setButtonText("Apply Resolution");
+    applyResolutionButton_.setButtonText(lm.getText("testing.apply_resolution"));
     applyResolutionButton_.addListener(this);
 
-    mobileLabel_.setText("Number of Mobile (Tagg) singers:", juce::dontSendNotification);
-    encoreLabel_.setText("Number of Encore (manual) singers:", juce::dontSendNotification);
-    songsMinLabel_.setText("Songs per singer (min):", juce::dontSendNotification);
-    songsMaxLabel_.setText("Songs per singer (max):", juce::dontSendNotification);
-    pitchLabel_.setText("Use random pitch changes (-6..+6):", juce::dontSendNotification);
+    mobileLabel_.setText(lm.getText("testing.mobile_singers"), juce::dontSendNotification);
+    encoreLabel_.setText(lm.getText("testing.encore_singers"), juce::dontSendNotification);
+    songsMinLabel_.setText(lm.getText("testing.songs_min"), juce::dontSendNotification);
+    songsMaxLabel_.setText(lm.getText("testing.songs_max"), juce::dontSendNotification);
+    pitchLabel_.setText(lm.getText("testing.random_pitch"), juce::dontSendNotification);
 
     configureNumericSlider(mobileSlider_, 0, 100, 5);
     configureNumericSlider(encoreSlider_, 0, 100, 5);
@@ -40,7 +43,7 @@ TestingPage::TestingPage()
 
     randomPitchToggle_.setToggleState(false, juce::dontSendNotification);
 
-    createQueueButton_.setButtonText("Create Queue");
+    createQueueButton_.setButtonText(lm.getText("testing.create_queue"));
     createQueueButton_.addListener(this);
 
     progressTextLabel_.setText("", juce::dontSendNotification);
@@ -69,7 +72,7 @@ TestingPage::TestingPage()
     if (resolutionBox_.getNumItems() > 0)
         resolutionBox_.setSelectedId((int) ScreenSize::FHD + 1, juce::dontSendNotification);
 
-    currentResolutionLabel_.setText("Current window: " + currentWindowResolutionText(),
+    currentResolutionLabel_.setText(lm.getText("testing.current_window") + currentWindowResolutionText(),
                                     juce::dontSendNotification);
 }
 
@@ -127,13 +130,24 @@ void TestingPage::resized()
     area.removeFromTop(6);
     progressTextLabel_.setBounds(area.removeFromTop(24));
 
-    currentResolutionLabel_.setText("Current window: " + currentWindowResolutionText(),
+    currentResolutionLabel_.setText(LocalizationManager::getInstance().getText("testing.current_window") + currentWindowResolutionText(),
                                     juce::dontSendNotification);
 }
 
 void TestingPage::updateAllText()
 {
-    // Intentionally English for now; this page is a developer/testing tool.
+    auto& lm = LocalizationManager::getInstance();
+    titleLabel_.setText(lm.getText("testing.title"), juce::dontSendNotification);
+    resolutionBox_.setTextWhenNothingSelected(lm.getText("testing.select_resolution"));
+    applyResolutionButton_.setButtonText(lm.getText("testing.apply_resolution"));
+    mobileLabel_.setText(lm.getText("testing.mobile_singers"), juce::dontSendNotification);
+    encoreLabel_.setText(lm.getText("testing.encore_singers"), juce::dontSendNotification);
+    songsMinLabel_.setText(lm.getText("testing.songs_min"), juce::dontSendNotification);
+    songsMaxLabel_.setText(lm.getText("testing.songs_max"), juce::dontSendNotification);
+    pitchLabel_.setText(lm.getText("testing.random_pitch"), juce::dontSendNotification);
+    createQueueButton_.setButtonText(lm.getText("testing.create_queue"));
+    currentResolutionLabel_.setText(lm.getText("testing.current_window") + currentWindowResolutionText(),
+                                    juce::dontSendNotification);
 }
 
 void TestingPage::buttonClicked(juce::Button* button)
@@ -233,7 +247,7 @@ void TestingPage::triggerCreateQueue()
     progressValue_ = 0.0;
     progressBar_.setVisible(true);
     createQueueButton_.setEnabled(false);
-    progressTextLabel_.setText("Creating test queue...", juce::dontSendNotification);
+    progressTextLabel_.setText(LocalizationManager::getInstance().getText("testing.creating_queue"), juce::dontSendNotification);
 
     const auto options = readOptions();
     juce::Component::SafePointer<TestingPage> safe(this);
@@ -247,7 +261,7 @@ void TestingPage::triggerCreateQueue()
                 if (safe == nullptr) return;
                 safe->progressValue_ = juce::jlimit(0.0, 1.0, (double) progress);
                 const int pct = (int) std::round(safe->progressValue_ * 100.0);
-                safe->progressTextLabel_.setText(juce::String(pct) + "% complete", juce::dontSendNotification);
+                safe->progressTextLabel_.setText(juce::String(pct) + LocalizationManager::getInstance().getText("testing.percent_complete"), juce::dontSendNotification);
             });
         },
         [safe](bool ok, juce::String message)
@@ -261,8 +275,8 @@ void TestingPage::triggerCreateQueue()
                 safe->progressTextLabel_.setText(message, juce::dontSendNotification);
 
                 juce::AlertWindow::showMessageBoxAsync(
-                    ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
-                    ok ? "Testing Queue Created" : "Testing Queue Error",
+                        ok ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+                        ok ? LocalizationManager::getInstance().getText("testing.queue_created") : LocalizationManager::getInstance().getText("testing.queue_error"),
                     message);
             });
         });

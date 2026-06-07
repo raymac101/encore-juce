@@ -95,6 +95,58 @@ static void reindexQueueWithHostRoundAnchor(std::vector<Singers>& singers)
 }
 
 //==============================================================================
+// Loads a <symbol> from assets/images/sprite.svg and wraps it in a standalone
+// <svg> so JUCE can render it as a Drawable.
+static std::unique_ptr<juce::Drawable> loadSpriteSymbolDrawable(const juce::String& symbolId,
+                                                                const juce::String& fillHexColour)
+{
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                      .getParentDirectory();
+
+    auto spriteFile = appDir.getChildFile("assets/images/sprite.svg");
+    if (!spriteFile.existsAsFile())
+        return {};
+
+    std::unique_ptr<juce::XmlElement> root(juce::XmlDocument::parse(spriteFile));
+    if (root == nullptr)
+        return {};
+
+    auto* defs = root->getChildByName("defs");
+    if (defs == nullptr)
+        return {};
+
+    juce::XmlElement* symbol = nullptr;
+    forEachXmlChildElement(*defs, child)
+    {
+        if (child->hasTagName("symbol") && child->getStringAttribute("id") == symbolId)
+        {
+            symbol = child;
+            break;
+        }
+    }
+
+    if (symbol == nullptr)
+        return {};
+
+    juce::XmlElement svg("svg");
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    svg.setAttribute("viewBox", symbol->getStringAttribute("viewBox", "0 0 20 20"));
+    svg.setAttribute("fill", fillHexColour);
+
+    forEachXmlChildElement(*symbol, child)
+        svg.addChildElement(new juce::XmlElement(*child));
+
+    return juce::Drawable::createFromSVG(svg);
+}
+
+static juce::Drawable* getStrikeDrawable()
+{
+    static std::unique_ptr<juce::Drawable> strikeDrawable =
+        loadSpriteSymbolDrawable("icon-squared-cross", "#db3d40");
+    return strikeDrawable.get();
+}
+
+//==============================================================================
 // ExpandArrowButton
 QueueBar::ExpandArrowButton::ExpandArrowButton()
     : juce::Button("expandArrow")
@@ -507,8 +559,57 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         displayName += " " + getMicIcons(singer.songsPerformed);
     g.drawText(displayName, nameArea, juce::Justification::centredLeft, true);
 
-    // Song chips (bottom half, up to 5)
+    // Song chips / strikes area (bottom half)
     auto songArea = bounds.reduced(4, 0);
+    if (singer.songs.empty() && singer.strikes > 0)
+    {
+        if (auto* strikeDrawable = getStrikeDrawable())
+        {
+            auto strikeArea = songArea.toFloat();
+            const float rowH = strikeArea.getHeight();
+            const float iconSize = juce::jlimit(14.0f, 22.0f, rowH * 0.85f);
+            const float gap = juce::jmax(4.0f, iconSize * 0.28f);
+            float x = strikeArea.getX();
+            const float y = strikeArea.getCentreY() - iconSize * 0.5f;
+
+            const float perIconWidth = iconSize + gap;
+            const int maxFit = juce::jmax(1, (int) std::floor((strikeArea.getWidth() + gap) / perIconWidth));
+            const int drawCount = juce::jmin(singer.strikes, maxFit);
+
+            for (int s = 0; s < drawCount; ++s)
+            {
+                strikeDrawable->drawWithin(
+                    g,
+                    juce::Rectangle<float>(x, y, iconSize, iconSize),
+                    juce::RectanglePlacement::centred,
+                    1.0f);
+
+                x += iconSize + gap;
+            }
+
+            if (singer.strikes > drawCount)
+            {
+                g.setColour(juce::Colour(0xffdb3d40).withAlpha(0.9f));
+                g.setFont(juce::Font(juce::jmax(10.0f, iconSize * 0.75f)));
+                g.drawText("+" + juce::String(singer.strikes - drawCount),
+                           juce::Rectangle<int>((int) x, (int) y, (int) (strikeArea.getRight() - x), (int) iconSize),
+                           juce::Justification::centredLeft,
+                           false);
+            }
+        }
+        else
+        {
+            g.setColour(juce::Colour(0xffdb3d40));
+            g.setFont(juce::Font(12.f));
+            juce::String strikeStr;
+            for (int s = 0; s < singer.strikes; ++s)
+                strikeStr += "X ";
+            g.drawText(strikeStr.trimEnd(), songArea,
+                       juce::Justification::centredLeft, true);
+        }
+        return;
+    }
+
     int chipCount = juce::jmin((int)singer.songs.size(), 5);
     if (chipCount > 0)
     {
@@ -682,6 +783,8 @@ void QueueBar::SingerRow::mouseUp(const juce::MouseEvent& e)
 //==============================================================================
 QueueBar::QueueBar()
 {
+    auto& lm = LocalizationManager::getInstance();
+
     // Now-playing card
     nowPlayingCard = std::make_unique<NowPlayingCard>();
     nowPlayingCard->onPlayClicked        = [this]() { if (onPlayCurrent)              onPlayCurrent();              };
@@ -697,7 +800,7 @@ QueueBar::QueueBar()
     addAndMakeVisible(listViewport);
 
     expandButton = std::make_unique<ExpandArrowButton>();
-    expandButton->setTooltip("Expand queue");
+    expandButton->setTooltip(lm.getText("queue.expand_queue"));
     expandButton->onClick = [this]()
     {
         setExpanded(!expandedMode);
@@ -1081,7 +1184,8 @@ void QueueBar::setExpanded(bool shouldExpand)
     expandedMode = shouldExpand;
     if (expandButton)
         expandButton->setExpanded(expandedMode);
-    expandButton->setTooltip(expandedMode ? "Collapse queue" : "Expand queue");
+    expandButton->setTooltip(expandedMode ? LocalizationManager::getInstance().getText("queue.collapse_queue")
+                                          : LocalizationManager::getInstance().getText("queue.expand_queue"));
     resized();
     repaint();
 }
@@ -1200,9 +1304,9 @@ void QueueBar::updateStatusLabels()
             totalSec += song.duration;
     }
 
-    singerCountLabel->setText("# singers: " + juce::String(numSingers),
+    singerCountLabel->setText(LocalizationManager::getInstance().getText("queue.singers_prefix") + juce::String(numSingers),
                               juce::dontSendNotification);
-    songCountLabel->setText("# songs: " + juce::String(numSongs),
+    songCountLabel->setText(LocalizationManager::getInstance().getText("queue.songs_prefix") + juce::String(numSongs),
                             juce::dontSendNotification);
 
     int hrs = totalSec / 3600;
@@ -1212,7 +1316,7 @@ void QueueBar::updateStatusLabels()
         timeStr = juce::String(hrs) + "h " + juce::String(mins) + "m";
     else
         timeStr = juce::String(mins) + " min";
-    totalTimeLabel->setText("Time: " + timeStr, juce::dontSendNotification);
+    totalTimeLabel->setText(LocalizationManager::getInstance().getText("queue.time_prefix") + timeStr, juce::dontSendNotification);
 }
 
 //==============================================================================
@@ -1226,7 +1330,7 @@ void QueueBar::startCountdown(int seconds)
         if (onCountdownFinished) onCountdownFinished();
         return;
     }
-    countdownLabel->setText("Next in " + juce::String(countdownSecondsLeft) + "...",
+    countdownLabel->setText(LocalizationManager::getInstance().getText("queue.next_in") + juce::String(countdownSecondsLeft) + "...",
                             juce::dontSendNotification);
     countdownLabel->setVisible(true);
     startTimer(1000);
@@ -1249,7 +1353,7 @@ void QueueBar::timerCallback()
     }
     else
     {
-        countdownLabel->setText("Next in " + juce::String(countdownSecondsLeft) + "...",
+        countdownLabel->setText(LocalizationManager::getInstance().getText("queue.next_in") + juce::String(countdownSecondsLeft) + "...",
                                 juce::dontSendNotification);
     }
 }

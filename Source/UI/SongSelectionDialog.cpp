@@ -8,6 +8,7 @@
 
 #include "SongSelectionDialog.h"
 #include "../Services/ImageCache.h"
+#include "../Localization/LocalizationManager.h"
 
 namespace
 {
@@ -47,10 +48,12 @@ namespace
 SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     : song_(song)
 {
+    auto& lm = LocalizationManager::getInstance();
+
     setSize(kDialogWidth, kDialogHeight);
 
     // Title
-    titleLabel_.setText("Song Selection", juce::dontSendNotification);
+    titleLabel_.setText(lm.getText("song_selection.title"), juce::dontSendNotification);
     titleLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextColour));
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(22.0f)).boldened());
     addAndMakeVisible(titleLabel_);
@@ -63,9 +66,9 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     addAndMakeVisible(closeButton_);
 
     // Song / artist
-    styleField(songFieldLabel_,    "Song:");
+    styleField(songFieldLabel_,    lm.getText("song_selection.song"));
     styleValue(songValueLabel_,    juce::String(song_.songName));
-    styleField(artistFieldLabel_,  "Artist:");
+    styleField(artistFieldLabel_,  lm.getText("song_selection.artist"));
     styleValue(artistValueLabel_,  juce::String(song_.artistName));
     addAndMakeVisible(songFieldLabel_);
     addAndMakeVisible(songValueLabel_);
@@ -73,10 +76,10 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     addAndMakeVisible(artistValueLabel_);
 
     // Singer
-    styleField(singerFieldLabel_, "Singer's Name:");
+    styleField(singerFieldLabel_, lm.getText("song_selection.singer_name"));
     addAndMakeVisible(singerFieldLabel_);
 
-    singerEditor_.setTextToShowWhenEmpty("Unknown (default)", juce::Colour(kMutedColour));
+    singerEditor_.setTextToShowWhenEmpty(lm.getText("song_selection.unknown_default"), juce::Colour(kMutedColour));
     singerEditor_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(kPanelColour));
     singerEditor_.setColour(juce::TextEditor::textColourId,       juce::Colour(kTextColour));
     singerEditor_.setColour(juce::TextEditor::outlineColourId,    juce::Colour(kBorderColour));
@@ -85,7 +88,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     addAndMakeVisible(singerEditor_);
 
     // Version dropdown
-    styleField(versionFieldLabel_, "Song Version:");
+    styleField(versionFieldLabel_, lm.getText("song_selection.song_version"));
     addAndMakeVisible(versionFieldLabel_);
 
     versionBox_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(kPanelColour));
@@ -98,7 +101,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     int count = (int) std::max(versions.size(), codes.size());
     if (count == 0)
     {
-        versionBox_.addItem("Default", 1);
+        versionBox_.addItem(lm.getText("song_selection.default_version"), 1);
     }
     else
     {
@@ -109,7 +112,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
             juce::String text = code.isNotEmpty() && ver.isNotEmpty()
                                     ? code + " - " + ver
                                     : (code.isNotEmpty() ? code : ver);
-            if (text.isEmpty()) text = "Version " + juce::String(i + 1);
+            if (text.isEmpty()) text = lm.getText("song_selection.version_prefix") + juce::String(i + 1);
             versionBox_.addItem(text, i + 1);
         }
     }
@@ -117,7 +120,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     addAndMakeVisible(versionBox_);
 
     // Pitch
-    styleField(pitchFieldLabel_, "Change Pitch:");
+    styleField(pitchFieldLabel_, lm.getText("song_selection.change_pitch"));
     addAndMakeVisible(pitchFieldLabel_);
 
     auto stylePitchBtn = [](juce::TextButton& b) {
@@ -141,7 +144,7 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     pitchValueLabel_.setFont(juce::Font(juce::FontOptions().withHeight(18.0f)).boldened());
     addAndMakeVisible(pitchValueLabel_);
 
-    pitchUnitLabel_.setText("semitones", juce::dontSendNotification);
+    pitchUnitLabel_.setText(lm.getText("song_selection.semitones"), juce::dontSendNotification);
     pitchUnitLabel_.setColour(juce::Label::textColourId, juce::Colour(kMutedColour));
     pitchUnitLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
     addAndMakeVisible(pitchUnitLabel_);
@@ -149,22 +152,22 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     updatePitchLabel();
 
     // Action buttons (order matches Angular modal)
-    cancelButton_.setButtonText("Cancel");
+    cancelButton_.setButtonText(lm.getText("button.cancel"));
     styleActionButton(cancelButton_, juce::Colour(kPanelColour), juce::Colour(kTextColour));
     cancelButton_.onClick = [this]() { closeWithResult(SongSelectionResult::Action::Cancelled); };
     addAndMakeVisible(cancelButton_);
 
-    playNextButton_.setButtonText("Play Next");
+    playNextButton_.setButtonText(lm.getText("song_selection.play_next"));
     styleActionButton(playNextButton_, juce::Colour(kPanelColour), juce::Colour(kAccentColour));
     playNextButton_.onClick = [this]() { closeWithResult(SongSelectionResult::Action::PlayNext); };
     addAndMakeVisible(playNextButton_);
 
-    playNowButton_.setButtonText("Play Now");
+    playNowButton_.setButtonText(lm.getText("song_selection.play_now"));
     styleActionButton(playNowButton_, juce::Colour(kAccentColour).withAlpha(0.25f), juce::Colour(kAccentColour));
     playNowButton_.onClick = [this]() { closeWithResult(SongSelectionResult::Action::PlayNow); };
     addAndMakeVisible(playNowButton_);
 
-    addToQueueButton_.setButtonText("Add to Queue");
+    addToQueueButton_.setButtonText(lm.getText("song_selection.add_to_queue"));
     styleActionButton(addToQueueButton_, juce::Colour(kAccentColour), juce::Colour(0xff0d1527));
     addToQueueButton_.onClick = [this]() { closeWithResult(SongSelectionResult::Action::AddToQueue); };
     addAndMakeVisible(addToQueueButton_);
@@ -212,6 +215,7 @@ void SongSelectionDialog::closeWithResult(SongSelectionResult::Action action)
 //==============================================================================
 void SongSelectionDialog::paint(juce::Graphics& g)
 {
+    auto& lm = LocalizationManager::getInstance();
     auto r = getLocalBounds().toFloat();
 
     // Background card
@@ -245,7 +249,7 @@ void SongSelectionDialog::paint(juce::Graphics& g)
     {
         g.setColour(juce::Colour(kMutedColour));
         g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
-        g.drawText("No artwork", art, juce::Justification::centred);
+        g.drawText(lm.getText("song_selection.no_artwork"), art, juce::Justification::centred);
     }
 }
 
@@ -324,7 +328,7 @@ void SongSelectionDialog::launch(juce::Component* parent,
 
     juce::DialogWindow::LaunchOptions opts;
     opts.content.setOwned(content.release());
-    opts.dialogTitle                   = "Song Selection";
+    opts.dialogTitle                   = LocalizationManager::getInstance().getText("song_selection.title");
     opts.dialogBackgroundColour        = juce::Colour(kBgColour);
     opts.componentToCentreAround       = parent;
     opts.escapeKeyTriggersCloseButton  = true;

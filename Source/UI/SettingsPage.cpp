@@ -57,6 +57,8 @@ public:
 
     explicit UserRowComponent(const SettingsPage::VenueUser& user)
     {
+        auto& lm = LocalizationManager::getInstance();
+
         nameLabel_.setText(user.email, juce::dontSendNotification);
         nameLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.f)).boldened());
         nameLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
@@ -67,7 +69,7 @@ public:
         emailLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
         addAndMakeVisible(emailLabel_);
 
-        statusBadge_.setText(user.active ? "ACTIVE" : "INACTIVE", juce::dontSendNotification);
+        statusBadge_.setText(user.active ? lm.getText("settings.active") : lm.getText("settings.inactive"), juce::dontSendNotification);
         statusBadge_.setFont(juce::Font(juce::FontOptions().withHeight(10.f)).boldened());
         statusBadge_.setColour(juce::Label::textColourId,       juce::Colours::white);
         statusBadge_.setColour(juce::Label::backgroundColourId, juce::Colour(user.active ? kTagActive : kBtnNormal));
@@ -84,18 +86,31 @@ public:
             roleCol = 0xff7a4fa3;
         else if (normalizedRole == "EnterpriseAdmin")
             roleCol = 0xff9a7a1a;
-        roleBadge_.setText(user.role.toUpperCase(), juce::dontSendNotification);
+        juce::String roleDisplay;
+        if (normalizedRole == "Basic")
+            roleDisplay = lm.getText("settings.role_basic");
+        else if (normalizedRole == "Host")
+            roleDisplay = lm.getText("settings.role_host");
+        else if (normalizedRole == "Admin")
+            roleDisplay = lm.getText("settings.role_admin");
+        else if (normalizedRole == "Tester")
+            roleDisplay = lm.getText("settings.role_tester");
+        else if (normalizedRole == "EnterpriseAdmin")
+            roleDisplay = lm.getText("settings.role_enterprise_admin");
+        else
+            roleDisplay = user.role.toUpperCase();
+        roleBadge_.setText(roleDisplay, juce::dontSendNotification);
         roleBadge_.setFont(juce::Font(juce::FontOptions().withHeight(10.f)).boldened());
         roleBadge_.setColour(juce::Label::textColourId,       juce::Colours::white);
         roleBadge_.setColour(juce::Label::backgroundColourId, juce::Colour(roleCol));
         roleBadge_.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(roleBadge_);
 
-        roleCombo_.addItem("Basic",            1);
-        roleCombo_.addItem("Host",             2);
-        roleCombo_.addItem("Admin",            3);
-        roleCombo_.addItem("Tester",           4);
-        roleCombo_.addItem("Enterprise Admin", 5);
+        roleCombo_.addItem(lm.getText("settings.role_basic"),            1);
+        roleCombo_.addItem(lm.getText("settings.role_host"),             2);
+        roleCombo_.addItem(lm.getText("settings.role_admin"),            3);
+        roleCombo_.addItem(lm.getText("settings.role_tester"),           4);
+        roleCombo_.addItem(lm.getText("settings.role_enterprise_admin"), 5);
         if (normalizedRole == "Basic")
             roleCombo_.setSelectedId(1, juce::dontSendNotification);
         else if (normalizedRole == "Host")
@@ -125,8 +140,8 @@ public:
             btn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
             addAndMakeVisible(btn);
         };
-        makeBtn(btnDeactivate_, "DEACTIVATE", kBtnNormal);
-        makeBtn(btnRemove_,     "REMOVE",     kBtnDanger);
+        makeBtn(btnDeactivate_, lm.getText("settings.btn_deactivate"), kBtnNormal);
+        makeBtn(btnRemove_,     lm.getText("settings.btn_remove"),     kBtnDanger);
         btnDeactivate_.onClick = [this]() { if (onDeactivate) onDeactivate(); };
         btnRemove_.onClick     = [this]() { if (onRemove)     onRemove(); };
     }
@@ -168,13 +183,15 @@ public:
 
     explicit InvitationRowComponent(const SettingsPage::PendingInvitation& invite)
     {
+        auto& lm = LocalizationManager::getInstance();
+
         emailLabel_.setText(invite.email, juce::dontSendNotification);
         emailLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.f)).boldened());
         emailLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
         addAndMakeVisible(emailLabel_);
 
         const auto expires = invite.expirationDate.toString(true, true);
-        const auto statusText = invite.expired ? "Expired" : "Expires " + expires;
+        const auto statusText = invite.expired ? lm.getText("settings.expired") : lm.getText("settings.expires_prefix") + expires;
         statusLabel_.setText(statusText, juce::dontSendNotification);
         statusLabel_.setFont(juce::Font(juce::FontOptions().withHeight(12.f)));
         statusLabel_.setColour(juce::Label::textColourId,
@@ -188,7 +205,7 @@ public:
         roleBadge_.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(roleBadge_);
 
-        btnRevoke_.setButtonText("REVOKE");
+        btnRevoke_.setButtonText(lm.getText("settings.btn_revoke"));
         btnRevoke_.setColour(juce::TextButton::buttonColourId, juce::Colour(kBtnDanger));
         btnRevoke_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
         btnRevoke_.onClick = [this]() {
@@ -293,7 +310,8 @@ public:
             auto code = edManualCode_.getText().trim().toUpperCase();
             if (code.length() != 6) {
                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                    "Invalid Code", "Please enter exactly 6 letters.");
+                    LocalizationManager::getInstance().getText("settings.invalid_code_title"),
+                    LocalizationManager::getInstance().getText("settings.invalid_code_body"));
                 return;
             }
             if (owner_.onSetVenueCode) owner_.onSetVenueCode(code);
@@ -315,7 +333,8 @@ public:
             auto code = edEmergCode_.getText().trim().toUpperCase();
             if (code.length() != 6) {
                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                    "Invalid Code", "Please enter exactly 6 letters.");
+                    LocalizationManager::getInstance().getText("settings.invalid_code_title"),
+                    LocalizationManager::getInstance().getText("settings.invalid_code_body"));
                 return;
             }
             if (owner_.onSetEmergencyCode) owner_.onSetEmergencyCode(code);
@@ -348,13 +367,13 @@ public:
         userListPanel_ = std::make_unique<juce::Component>();
         addAndMakeVisible(*userListPanel_);
 
-        initFieldLabel(lblPendingInvitesHeader_, "Pending Invitations");
+        initFieldLabel(lblPendingInvitesHeader_, lm.getText("settings.pending_invitations"));
         lblPendingInvitesHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
         lblPendingInvitesHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
         inviteListPanel_ = std::make_unique<juce::Component>();
         addAndMakeVisible(*inviteListPanel_);
 
-        initFieldLabel(lblExpiredInvitesHeader_, "Expired Invitations");
+        initFieldLabel(lblExpiredInvitesHeader_, lm.getText("settings.expired_invitations"));
         lblExpiredInvitesHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
         lblExpiredInvitesHeader_.setColour(juce::Label::textColourId, juce::Colour(kTextPrimary));
         expiredInviteListPanel_ = std::make_unique<juce::Component>();
@@ -375,7 +394,7 @@ public:
         initButton(btnDefaultLogo_, lm.getText("settings.btn_default_logo"), kBtnNormal);
         btnBrowseLogo_.onClick = [this]() {
             fc_ = std::make_unique<juce::FileChooser>(
-                "Select Logo Image",
+                LocalizationManager::getInstance().getText("settings.select_logo_image"),
                 juce::File::getSpecialLocation(juce::File::userHomeDirectory),
                 "*.png;*.jpg;*.jpeg;*.gif");
             fc_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -524,7 +543,8 @@ public:
         btnEndSession_.onClick  = [this]() { onEndSession(); };
         btnViewArchive_.onClick = [this]() {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
-                "Archive History", "Archive history viewer coming soon.");
+                LocalizationManager::getInstance().getText("settings.archive_history_title"),
+                LocalizationManager::getInstance().getText("settings.archive_history_body"));
         };
     }
 

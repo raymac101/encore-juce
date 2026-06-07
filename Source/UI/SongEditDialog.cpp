@@ -8,6 +8,7 @@
 
 #include "SongEditDialog.h"
 #include "../Services/ImageCache.h"
+#include "../Localization/LocalizationManager.h"
 
 namespace
 {
@@ -56,9 +57,11 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     : song_(song)
     , initial_(pls)
 {
+    auto& lm = LocalizationManager::getInstance();
+
     setSize(kDialogWidth, kDialogHeight);
 
-    titleLabel_.setText("Edit Song", juce::dontSendNotification);
+    titleLabel_.setText(lm.getText("song_edit.title"), juce::dontSendNotification);
     titleLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextColour));
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(22.0f)).boldened());
     addAndMakeVisible(titleLabel_);
@@ -74,7 +77,7 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
                                      | juce::RectanglePlacement::onlyReduceInSize);
     addAndMakeVisible(artworkImage_);
 
-    artworkPlaceholder_.setText("No artwork", juce::dontSendNotification);
+    artworkPlaceholder_.setText(lm.getText("song_edit.no_artwork"), juce::dontSendNotification);
     artworkPlaceholder_.setColour(juce::Label::textColourId, juce::Colour(kMutedColour));
     artworkPlaceholder_.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
     artworkPlaceholder_.setJustificationType(juce::Justification::centred);
@@ -83,43 +86,43 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     refreshArtwork(juce::String(song_.imageUrl));
 
     // ── Row: Artist [⇄] Song ─────────────────────────────────────────────────
-    styleField(artistFieldLabel_, "Artist");
+    styleField(artistFieldLabel_, lm.getText("song_edit.artist"));
     addAndMakeVisible(artistFieldLabel_);
-    styleEditor(artistEditor_, "Artist name");
+    styleEditor(artistEditor_, lm.getText("song_edit.artist_name"));
     artistEditor_.setText(juce::String(song_.artistName), juce::dontSendNotification);
     addAndMakeVisible(artistEditor_);
 
     swapButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(kPanelColour));
     swapButton_.setColour(juce::TextButton::textColourOnId,  juce::Colour(kAccentColour));
     swapButton_.setColour(juce::TextButton::textColourOffId, juce::Colour(kAccentColour));
-    swapButton_.setTooltip("Swap Artist and Song");
+    swapButton_.setTooltip(lm.getText("song_edit.swap_artist_song"));
     swapButton_.onClick = [this]() { doSwap(); };
     addAndMakeVisible(swapButton_);
 
-    styleField(songFieldLabel_, "Song");
+    styleField(songFieldLabel_, lm.getText("song_edit.song"));
     addAndMakeVisible(songFieldLabel_);
-    styleEditor(songEditor_, "Song title");
+    styleEditor(songEditor_, lm.getText("song_edit.song_title"));
     songEditor_.setText(juce::String(song_.songName), juce::dontSendNotification);
     addAndMakeVisible(songEditor_);
 
     // ── Row: Song ID (read-only)   Release Date ──────────────────────────────
-    styleField(songIdFieldLabel_, "Song ID");
+    styleField(songIdFieldLabel_, lm.getText("song_edit.song_id"));
     addAndMakeVisible(songIdFieldLabel_);
     styleEditor(songIdEditor_, "", /*readOnly*/ true);
     songIdEditor_.setText(juce::String(song_.id), juce::dontSendNotification);
     songIdEditor_.setColour(juce::TextEditor::textColourId, juce::Colour(kMutedColour));
     addAndMakeVisible(songIdEditor_);
 
-    styleField(releaseFieldLabel_, "Release Date");
+    styleField(releaseFieldLabel_, lm.getText("song_edit.release_date"));
     addAndMakeVisible(releaseFieldLabel_);
-    styleEditor(releaseEditor_, "YYYY-MM-DD or YYYY");
+    styleEditor(releaseEditor_, lm.getText("song_edit.release_hint"));
     releaseEditor_.setText(juce::String(song_.releaseDate), juce::dontSendNotification);
     addAndMakeVisible(releaseEditor_);
 
     // ── Row: Version   Tempo ─────────────────────────────────────────────────
-    styleField(versionFieldLabel_, "Version");
+    styleField(versionFieldLabel_, lm.getText("song_edit.version"));
     addAndMakeVisible(versionFieldLabel_);
-    styleEditor(versionEditor_, "e.g. Male, Female");
+    styleEditor(versionEditor_, lm.getText("song_edit.version_hint"));
     {
         juce::String joined;
         for (size_t i = 0; i < song_.version.size(); ++i)
@@ -131,7 +134,7 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     }
     addAndMakeVisible(versionEditor_);
 
-    styleField(tempoFieldLabel_, "Tempo (BPM)");
+    styleField(tempoFieldLabel_, lm.getText("song_edit.tempo"));
     addAndMakeVisible(tempoFieldLabel_);
     styleEditor(tempoEditor_, "0-300");
     tempoEditor_.setInputRestrictions(4, "0123456789.");
@@ -140,22 +143,22 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     addAndMakeVisible(tempoEditor_);
 
     // ── Row: Key   Duration ──────────────────────────────────────────────────
-    styleField(keyFieldLabel_, "Key");
+    styleField(keyFieldLabel_, lm.getText("song_edit.key"));
     addAndMakeVisible(keyFieldLabel_);
-    styleEditor(keyEditor_, "C, Am, F#");
+    styleEditor(keyEditor_, lm.getText("song_edit.key_hint"));
     keyEditor_.setText(juce::String(song_.keySignature), juce::dontSendNotification);
     addAndMakeVisible(keyEditor_);
 
-    styleField(durationFieldLabel_, "Duration (mm:ss)");
+    styleField(durationFieldLabel_, lm.getText("song_edit.duration"));
     addAndMakeVisible(durationFieldLabel_);
     styleEditor(durationEditor_, "3:45");
     durationEditor_.setText(formatDuration(song_.durationMS), juce::dontSendNotification);
     addAndMakeVisible(durationEditor_);
 
     // ── Genres ───────────────────────────────────────────────────────────────
-    styleField(genresFieldLabel_, "Genres (comma-separated)");
+    styleField(genresFieldLabel_, lm.getText("song_edit.genres"));
     addAndMakeVisible(genresFieldLabel_);
-    styleEditor(genresEditor_, "Pop, Rock, Country");
+    styleEditor(genresEditor_, lm.getText("song_edit.genres_hint"));
     {
         juce::String joined;
         for (size_t i = 0; i < song_.genres.size(); ++i)
@@ -168,14 +171,14 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     addAndMakeVisible(genresEditor_);
 
     // ── Image URL ────────────────────────────────────────────────────────────
-    styleField(imageFieldLabel_, "Album Art URL");
+    styleField(imageFieldLabel_, lm.getText("song_edit.album_art_url"));
     addAndMakeVisible(imageFieldLabel_);
-    styleEditor(imageEditor_, "https://...");
+    styleEditor(imageEditor_, lm.getText("song_edit.album_art_hint"));
     imageEditor_.setText(juce::String(song_.imageUrl), juce::dontSendNotification);
     addAndMakeVisible(imageEditor_);
 
     // ── Playlist toggles ─────────────────────────────────────────────────────
-    styleField(playlistsLabel_, "Add to Playlists");
+    styleField(playlistsLabel_, lm.getText("song_edit.add_to_playlists"));
     addAndMakeVisible(playlistsLabel_);
 
     styleToggle(addToNewToggle_);
@@ -195,7 +198,7 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
     statusLabel_.setText("", juce::dontSendNotification);
     addAndMakeVisible(statusLabel_);
 
-    getMetadataButton_.setButtonText("Get Metadata");
+    getMetadataButton_.setButtonText(lm.getText("song_edit.get_metadata"));
     getMetadataButton_.setColour(juce::TextButton::buttonColourId,
                                   juce::Colour(kAccentColour).withAlpha(0.18f));
     getMetadataButton_.setColour(juce::TextButton::textColourOnId,  juce::Colour(kAccentColour));
@@ -211,17 +214,17 @@ SongEditDialog::SongEditDialog(const CdgSong& song, InitialPlaylists pls)
         b.setColour(juce::TextButton::textColourOffId, fg);
     };
 
-    deleteButton_.setButtonText("Delete Song");
+    deleteButton_.setButtonText(lm.getText("song_edit.delete_song"));
     styleAction(deleteButton_, juce::Colour(kDangerColour).withAlpha(0.85f), juce::Colours::white);
     deleteButton_.onClick = [this]() { doDelete(); };
     addAndMakeVisible(deleteButton_);
 
-    cancelButton_.setButtonText("Cancel");
+    cancelButton_.setButtonText(lm.getText("button.cancel"));
     styleAction(cancelButton_, juce::Colour(kPanelColour), juce::Colour(kTextColour));
     cancelButton_.onClick = [this]() { closeWith(SongEditResult::Action::Cancel); };
     addAndMakeVisible(cancelButton_);
 
-    saveButton_.setButtonText("Save");
+    saveButton_.setButtonText(lm.getText("button.save"));
     styleAction(saveButton_, juce::Colour(kAccentColour), juce::Colour(0xff0d1527));
     saveButton_.onClick = [this]() { closeWith(SongEditResult::Action::Save); };
     addAndMakeVisible(saveButton_);
@@ -280,18 +283,19 @@ void SongEditDialog::doSwap()
 
 void SongEditDialog::doGetMetadata()
 {
+    auto& lm = LocalizationManager::getInstance();
     const auto artist = artistEditor_.getText().trim();
     const auto song   = songEditor_.getText().trim();
 
     if (artist.isEmpty() || song.isEmpty())
     {
-        setStatus("Enter both artist and song name first.", juce::Colour(kStatusWarnBg));
+        setStatus(lm.getText("song_edit.enter_artist_song"), juce::Colour(kStatusWarnBg));
         return;
     }
 
     if (! onFetchMetadata)
     {
-        setStatus("Metadata service not configured (Spotify API not wired up yet).",
+        setStatus(lm.getText("song_edit.metadata_not_configured"),
                   juce::Colour(kStatusWarnBg));
         return;
     }
@@ -299,7 +303,7 @@ void SongEditDialog::doGetMetadata()
     busy_ = true;
     getMetadataButton_.setEnabled(false);
     saveButton_.setEnabled(false);
-    setStatus("Fetching metadata...", juce::Colour(kPanelColour));
+    setStatus(lm.getText("song_edit.fetching_metadata"), juce::Colour(kPanelColour));
 
     juce::Component::SafePointer<SongEditDialog> self (this);
     onFetchMetadata(artist, song,
@@ -314,7 +318,7 @@ void SongEditDialog::doGetMetadata()
 
                 if (! ok)
                 {
-                    self->setStatus(message.isNotEmpty() ? message : juce::String("Metadata lookup failed."),
+                    self->setStatus(message.isNotEmpty() ? message : LocalizationManager::getInstance().getText("song_edit.metadata_failed"),
                                     juce::Colour(kStatusErrBg));
                     return;
                 }
@@ -376,8 +380,8 @@ void SongEditDialog::doGetMetadata()
                 }
 
                 juce::String baseMsg = changed > 0
-                    ? juce::String("Updated ") + juce::String(changed) + " field(s)."
-                    : juce::String("No useful metadata returned.");
+                    ? LocalizationManager::getInstance().getText("song_edit.updated_fields_prefix") + juce::String(changed) + LocalizationManager::getInstance().getText("song_edit.updated_fields_suffix")
+                    : LocalizationManager::getInstance().getText("song_edit.no_useful_metadata");
                 if (message.isNotEmpty())
                     baseMsg << " " << message;
 
@@ -391,17 +395,17 @@ void SongEditDialog::doDelete()
 {
     const juce::String artist = artistEditor_.getText().trim();
     const juce::String title  = songEditor_.getText().trim();
-    const juce::String msg = "Delete this song from the library?\n\n"
-                             "Artist: " + artist + "\n"
-                             "Song: " + title + "\n\n"
-                             "This action cannot be undone.";
+    auto& lm = LocalizationManager::getInstance();
+    const juce::String msg = lm.getText("song_edit.delete_confirm_body")
+                             .replace("{artist}", artist)
+                             .replace("{song}", title);
 
     juce::AlertWindow::showOkCancelBox(
         juce::MessageBoxIconType::WarningIcon,
-        "Delete Song",
+        lm.getText("song_edit.delete_confirm_title"),
         msg,
-        "Delete",
-        "Cancel",
+        lm.getText("song_edit.delete_confirm_delete"),
+        lm.getText("button.cancel"),
         nullptr,
         juce::ModalCallbackFunction::create(
             [safe = juce::Component::SafePointer<SongEditDialog>(this)](int result)

@@ -52,6 +52,7 @@ nav.venue_management=Venue Mgmt
 nav.queue=Queue
 nav.songs=Songs
 nav.genres=GENRES:
+nav.settings=Settings
 
 # ── Top bar ──────────────────────────────────────────────────────────────────
 topbar.key=KEY
@@ -91,17 +92,23 @@ status.ready=Ready
 status.loading=Loading...
 status.connected=Connected
 status.disconnected=Disconnected
+status.initializing=Initializing...
+status.language_changed=Language changed.
+status.dual_screen_detected=Dual screen detected.
+status.reconnecting=Reconnecting...
 
 # ── Generic buttons ──────────────────────────────────────────────────────────
 button.ok=OK
 button.cancel=Cancel
 button.close=Close
+button.save=Save
 
 # ── Language names (shown in pickers) ────────────────────────────────────────
 language.english=English
 language.spanish=Español
 language.french=Français
 language.german=Deutsch
+settings.language=Language
 
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Now Singing:
@@ -109,6 +116,111 @@ queue.clear_queue=Clear Queue
 queue.queue_label=Queue
 queue.auto_play=Auto Play
 queue.delay_label=Delay (sec):
+queue.clear.no_venue_title=No Active Venue
+queue.clear.no_venue_body=Please select a venue before clearing the queue.
+queue.clear.confirm_title=Clear Queue
+queue.clear.confirm_body=This will permanently delete all queued singers and pending requests for this venue.\n\nThe host will remain pinned at the top with no songs.\n\nContinue?
+queue.clear.confirm_delete=Delete Queue
+queue.clear.clearing=Clearing queue...
+queue.clear.failed_title=Clear Queue Failed
+queue.clear.failed_singers_body=Could not delete queue singers: 
+queue.clear.partial_title=Queue Cleared With Warning
+queue.clear.partial_body=Queue singers were deleted, but pending requests could not be fully deleted: 
+queue.clear.cleared=Queue cleared.
+queue.expand_queue=Expand queue
+queue.collapse_queue=Collapse queue
+queue.singers_prefix=# singers: 
+queue.songs_prefix=# songs: 
+queue.time_prefix=Time: 
+queue.next_in=Next in 
+
+# ── Testing page ───────────────────────────────────────────────────────────
+testing.title=TESTING
+testing.select_resolution=Select resolution
+testing.apply_resolution=Apply Resolution
+testing.mobile_singers=Number of Mobile (Tagg) singers:
+testing.encore_singers=Number of Encore (manual) singers:
+testing.songs_min=Songs per singer (min):
+testing.songs_max=Songs per singer (max):
+testing.random_pitch=Use random pitch changes (-6..+6):
+testing.create_queue=Create Queue
+testing.current_window=Current window: 
+testing.creating_queue=Creating test queue...
+testing.percent_complete=% complete
+testing.queue_created=Testing Queue Created
+testing.queue_error=Testing Queue Error
+
+# ── Song selection dialog ───────────────────────────────────────────────────
+song_selection.title=Song Selection
+song_selection.song=Song:
+song_selection.artist=Artist:
+song_selection.singer_name=Singer's Name:
+song_selection.unknown_default=Unknown (default)
+song_selection.song_version=Song Version:
+song_selection.default_version=Default
+song_selection.version_prefix=Version 
+song_selection.change_pitch=Change Pitch:
+song_selection.semitones=semitones
+song_selection.play_next=Play Next
+song_selection.play_now=Play Now
+song_selection.add_to_queue=Add to Queue
+song_selection.no_artwork=No artwork
+
+# ── Song edit dialog ───────────────────────────────────────────────────────
+song_edit.title=Edit Song
+song_edit.no_artwork=No artwork
+song_edit.artist=Artist
+song_edit.artist_name=Artist name
+song_edit.swap_artist_song=Swap Artist and Song
+song_edit.song=Song
+song_edit.song_title=Song title
+song_edit.song_id=Song ID
+song_edit.release_date=Release Date
+song_edit.release_hint=YYYY-MM-DD or YYYY
+song_edit.version=Version
+song_edit.version_hint=e.g. Male, Female
+song_edit.tempo=Tempo (BPM)
+song_edit.key=Key
+song_edit.key_hint=C, Am, F#
+song_edit.duration=Duration (mm:ss)
+song_edit.genres=Genres (comma-separated)
+song_edit.genres_hint=Pop, Rock, Country
+song_edit.album_art_url=Album Art URL
+song_edit.album_art_hint=https://...
+song_edit.add_to_playlists=Add to Playlists
+song_edit.get_metadata=Get Metadata
+song_edit.delete_song=Delete Song
+song_edit.enter_artist_song=Enter both artist and song name first.
+song_edit.metadata_not_configured=Metadata service not configured (Spotify API not wired up yet).
+song_edit.fetching_metadata=Fetching metadata...
+song_edit.metadata_failed=Metadata lookup failed.
+song_edit.updated_fields_prefix=Updated 
+song_edit.updated_fields_suffix= field(s).
+song_edit.no_useful_metadata=No useful metadata returned.
+song_edit.delete_confirm_title=Delete Song
+song_edit.delete_confirm_body=Delete this song from the library?\n\nArtist: {artist}\nSong: {song}\n\nThis action cannot be undone.
+song_edit.delete_confirm_delete=Delete
+
+# ── Settings extras ─────────────────────────────────────────────────────────
+settings.active=ACTIVE
+settings.inactive=INACTIVE
+settings.role_basic=Basic
+settings.role_host=Host
+settings.role_admin=Admin
+settings.role_tester=Tester
+settings.role_enterprise_admin=Enterprise Admin
+settings.btn_deactivate=DEACTIVATE
+settings.btn_remove=REMOVE
+settings.expired=Expired
+settings.expires_prefix=Expires 
+settings.btn_revoke=REVOKE
+settings.pending_invitations=Pending Invitations
+settings.expired_invitations=Expired Invitations
+settings.invalid_code_title=Invalid Code
+settings.invalid_code_body=Please enter exactly 6 letters.
+settings.select_logo_image=Select Logo Image
+settings.archive_history_title=Archive History
+settings.archive_history_body=Archive history viewer coming soon.
 
 # ── Application menu bar ─────────────────────────────────────────────────────
 menu.window=Window

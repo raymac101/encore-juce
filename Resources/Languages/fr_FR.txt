@@ -102,6 +102,10 @@ language.english=English
 language.spanish=Español
 language.french=Français
 language.german=Deutsch
+nav.settings=Paramètres
+nav.venue_management=Gestion des lieux
+button.save=Enregistrer
+settings.language=Langue
 
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Chante actuellement :
@@ -109,6 +113,17 @@ queue.clear_queue=Vider la file
 queue.queue_label=File d'attente
 queue.auto_play=Lecture auto
 queue.delay_label=Délai (sec) :
+queue.clear.no_venue_title=Aucun lieu actif
+queue.clear.no_venue_body=Veuillez sélectionner un lieu avant de vider la file.
+queue.clear.confirm_title=Vider la file
+queue.clear.confirm_body=Cela supprimera définitivement tous les chanteurs en file et les demandes en attente pour ce lieu.\n\nL'hôte restera épinglé en haut sans chansons.\n\nContinuer ?
+queue.clear.confirm_delete=Supprimer la file
+queue.clear.clearing=Vidage de la file...
+queue.clear.failed_title=Échec du vidage de la file
+queue.clear.failed_singers_body=Impossible de supprimer les chanteurs de la file : 
+queue.clear.partial_title=File vidée avec avertissement
+queue.clear.partial_body=Les chanteurs de la file ont été supprimés, mais les demandes en attente n'ont pas toutes pu être supprimées : 
+queue.clear.cleared=File vidée.
 
 # ── Application menu bar ─────────────────────────────────────────────────────
 menu.window=Fenêtre

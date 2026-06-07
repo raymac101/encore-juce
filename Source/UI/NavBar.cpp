@@ -266,10 +266,10 @@ void NavBar::buildMenuItems()
         { NavPage::Library,  lm.getText("nav.library"),  {}, AccessRight::Library  },
         { NavPage::Charts,   lm.getText("nav.charts"),   {}, AccessRight::Charts   },
         { NavPage::Mixer,    lm.getText("nav.mixer"),    {}, AccessRight::Mixer    },
-        { NavPage::Settings, lm.getText("nav.setup"),    {}, AccessRight::Settings },
+        { NavPage::Settings, lm.getText("nav.settings"), {}, AccessRight::Settings },
         { NavPage::Testing,  lm.getText("nav.testing"),  {}, AccessRight::Testing  },
         { NavPage::Ads,      lm.getText("nav.ads"),      {}, AccessRight::Ads      },
-        { NavPage::VenueManagement, lm.getText("nav.locations"), {}, AccessRight::VenueManagement },
+        { NavPage::VenueManagement, lm.getText("nav.venue_management"), {}, AccessRight::VenueManagement },
     };
 }
 

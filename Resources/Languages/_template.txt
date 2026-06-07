@@ -109,6 +109,17 @@ queue.clear_queue=Clear Queue
 queue.queue_label=Queue
 queue.auto_play=Auto Play
 queue.delay_label=Delay (sec):
+queue.clear.no_venue_title=No Active Venue
+queue.clear.no_venue_body=Please select a venue before clearing the queue.
+queue.clear.confirm_title=Clear Queue
+queue.clear.confirm_body=This will permanently delete all queued singers and pending requests for this venue.\n\nThe host will remain pinned at the top with no songs.\n\nContinue?
+queue.clear.confirm_delete=Delete Queue
+queue.clear.clearing=Clearing queue...
+queue.clear.failed_title=Clear Queue Failed
+queue.clear.failed_singers_body=Could not delete queue singers: 
+queue.clear.partial_title=Queue Cleared With Warning
+queue.clear.partial_body=Queue singers were deleted, but pending requests could not be fully deleted: 
+queue.clear.cleared=Queue cleared.
 
 # ── Application menu bar ─────────────────────────────────────────────────────
 menu.window=Window

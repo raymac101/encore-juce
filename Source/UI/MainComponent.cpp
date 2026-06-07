@@ -1282,6 +1282,108 @@ void MainComponent::setupUI()
             });
     };
 
+    queueBar->onClearQueue = [this]()
+    {
+        auto& lm = LocalizationManager::getInstance();
+        const auto noVenueTitle = lm.getText("queue.clear.no_venue_title");
+        const auto noVenueBody = lm.getText("queue.clear.no_venue_body");
+        const auto confirmTitle = lm.getText("queue.clear.confirm_title");
+        const auto confirmBody = lm.getText("queue.clear.confirm_body");
+        const auto deleteButton = lm.getText("queue.clear.confirm_delete");
+        const auto cancelButton = lm.getText("button.cancel");
+        const auto clearingText = lm.getText("queue.clear.clearing");
+        const auto failedTitle = lm.getText("queue.clear.failed_title");
+        const auto failedSingersBody = lm.getText("queue.clear.failed_singers_body");
+        const auto partialTitle = lm.getText("queue.clear.partial_title");
+        const auto partialBody = lm.getText("queue.clear.partial_body");
+        const auto clearedText = lm.getText("queue.clear.cleared");
+
+        if (activeVenueId_.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon,
+                noVenueTitle,
+                noVenueBody);
+            return;
+        }
+
+        juce::AlertWindow::showOkCancelBox(
+            juce::AlertWindow::WarningIcon,
+            confirmTitle,
+            confirmBody,
+            deleteButton,
+            cancelButton,
+            this,
+            juce::ModalCallbackFunction::create(
+                [safe = juce::Component::SafePointer<MainComponent>(this),
+                 clearingText,
+                 failedTitle,
+                 failedSingersBody,
+                 partialTitle,
+                 partialBody,
+                 clearedText](int result)
+                {
+                    if (safe == nullptr || result == 0)
+                        return;
+                    if (safe->activeVenueId_.isEmpty())
+                        return;
+
+                    const auto venueId = safe->activeVenueId_;
+                    safe->showMaintenanceToast(clearingText);
+
+                    VenueService::getInstance().deleteAllSingersFromQueue(
+                        venueId,
+                        [safe, venueId, failedTitle, failedSingersBody, partialTitle, partialBody, clearedText](bool queueOk, juce::String queueErr)
+                        {
+                            if (safe == nullptr)
+                                return;
+
+                            if (! queueOk)
+                            {
+                                juce::AlertWindow::showMessageBoxAsync(
+                                    juce::MessageBoxIconType::WarningIcon,
+                                    failedTitle,
+                                    failedSingersBody + queueErr);
+                                return;
+                            }
+
+                            VenueService::getInstance().deleteAllSongsFromRequested(
+                                venueId,
+                                [safe, venueId, partialTitle, partialBody, clearedText](bool reqOk, juce::String reqErr)
+                                {
+                                    if (safe == nullptr)
+                                        return;
+
+                                    if (safe->audioEngine)
+                                        safe->audioEngine->stop();
+
+                                    safe->localNowPlaying_ = {};
+                                    safe->hasLocalNowPlaying_ = false;
+
+                                    if (safe->queueBar != nullptr)
+                                    {
+                                        safe->queueBar->clearNowPlaying();
+                                        safe->queueBar->setPlaying(false);
+                                        safe->queueBar->setSingers(safe->composeQueueWithHost({}));
+                                    }
+
+                                    safe->reloadQueueFromFirestore(venueId);
+
+                                    if (! reqOk)
+                                    {
+                                        juce::AlertWindow::showMessageBoxAsync(
+                                            juce::MessageBoxIconType::WarningIcon,
+                                            partialTitle,
+                                            partialBody + reqErr);
+                                        return;
+                                    }
+
+                                    safe->showMaintenanceToast(clearedText);
+                                });
+                        });
+                }));
+    };
+
     queueBar->onPlaySinger = [this](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
         if (queueBar == nullptr) return;

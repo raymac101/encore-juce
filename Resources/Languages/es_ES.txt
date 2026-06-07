@@ -132,3 +132,20 @@ status.connecting=Conectando...
 status.connected=Conectado
 status.offline=Desconectado
 status.error=Error
+nav.settings=Configuración
+nav.venue_management=Gestión de locales
+button.save=Guardar
+settings.language=Idioma
+
+# Cola
+queue.clear.no_venue_title=No hay local activo
+queue.clear.no_venue_body=Selecciona un local antes de vaciar la cola.
+queue.clear.confirm_title=Vaciar cola
+queue.clear.confirm_body=Esto eliminará de forma permanente todos los cantantes en cola y las solicitudes pendientes de este local.\n\nEl anfitrión seguirá fijado arriba sin canciones.\n\n¿Continuar?
+queue.clear.confirm_delete=Eliminar cola
+queue.clear.clearing=Vaciando la cola...
+queue.clear.failed_title=No se pudo vaciar la cola
+queue.clear.failed_singers_body=No se pudieron eliminar los cantantes de la cola: 
+queue.clear.partial_title=Cola vaciada con advertencia
+queue.clear.partial_body=Se eliminaron los cantantes de la cola, pero no se pudieron borrar todas las solicitudes pendientes: 
+queue.clear.cleared=Cola vaciada.
