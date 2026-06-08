@@ -132,7 +132,11 @@ private:
         bars are updated, but playback is left paused — used by the queue
         flow where the host presses play on the now-singing avatar (or the
         bottom-bar transport) to actually start the track. */
-    void loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones, bool autoStart = true);
+    void loadAndPlaySong(const CdgSong& song,
+                         int versionIndex,
+                         int pitchSemitones,
+                         bool autoStart = true,
+                         std::function<void(bool)> onDone = nullptr);
 
     /** Show / hide a full-window loading overlay. */
     void showLoadingOverlay(const juce::String& message, double progress = -1.0);
@@ -235,6 +239,9 @@ private:
     void updateAudioStatusIndicator();
     void runSongbookHealthCheckIfReady();
     void showSongUnavailableMessage(const QueueItem& item);
+    void showSongLoadFailedMessage(const juce::String& songName,
+                                   const juce::String& reason,
+                                   const juce::String& path = {});
     bool queueAndLoadNextSingerSong(bool autoStartAfterLoad = false);
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);

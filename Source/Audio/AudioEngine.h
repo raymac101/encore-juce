@@ -45,6 +45,7 @@ public:
     // Playback
     bool loadSong(const juce::File& audioFile,
                   const juce::File& cdgFile = juce::File{});
+    void unloadSong();
     void play();
     void pause();
     void stop();

@@ -386,6 +386,10 @@ void LyricDisplayComponent::timerCallback()
             {
                 if (idleAdVideoComponent_ != nullptr && idleAdVideoComponent_->isVideoOpen())
                 {
+                    // Some backends can reset volume when media state changes,
+                    // so enforce visual-only ads during playback.
+                    idleAdVideoComponent_->setAudioVolume (0.0f);
+
                     const auto dur = idleAdVideoComponent_->getVideoDuration();
                     const auto pos = idleAdVideoComponent_->getPlayPosition();
                     if (dur > 0.2 && pos >= dur - 0.1)
@@ -914,6 +918,9 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
         addAndMakeVisible (idleAdVideoComponent_.get());
     }
 
+    // Ad videos are visual-only on lyric display.
+    idleAdVideoComponent_->setAudioVolume (0.0f);
+
     auto r = idleAdVideoComponent_->load (juce::URL (ad.url));
     if (r.failed())
     {
@@ -921,6 +928,9 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
         stopIdleAdVideo();
         return;
     }
+
+    // Re-apply mute after load in case decoder initialization reset it.
+    idleAdVideoComponent_->setAudioVolume (0.0f);
 
     layoutIdleAdVideoBounds (getLocalBounds());
     idleAdVideoComponent_->setVisible (true);

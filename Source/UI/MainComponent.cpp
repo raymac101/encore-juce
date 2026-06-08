@@ -33,6 +33,129 @@
 
 namespace
 {
+bool writeZipEntryToFile(juce::ZipFile& zip, int index, const juce::File& target)
+{
+    auto input = zip.createStreamForEntry(index);
+    if (input == nullptr)
+        return false;
+
+    target.getParentDirectory().createDirectory();
+    auto output = target.createOutputStream();
+    if (output == nullptr)
+        return false;
+
+    output->writeFromInputStream(*input, -1);
+    output->flush();
+    return true;
+}
+
+bool extractZipMediaFiles(const juce::File& zipFile,
+                          juce::File& audioOut,
+                          juce::File& cdgOut,
+                          juce::String& errorOut)
+{
+    if (! zipFile.existsAsFile())
+    {
+        errorOut = "ZIP archive not found.";
+        return false;
+    }
+
+    juce::ZipFile zip(zipFile);
+    if (zip.getNumEntries() <= 0)
+    {
+        errorOut = "ZIP archive is empty or unreadable.";
+        return false;
+    }
+
+    static const juce::StringArray audioExts { ".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a" };
+
+    int audioIndex = -1;
+    int audioRank = std::numeric_limits<int>::max();
+    juce::String audioStem;
+    int firstCdgIndex = -1;
+    int matchingCdgIndex = -1;
+
+    for (int i = 0; i < zip.getNumEntries(); ++i)
+    {
+        auto* entry = zip.getEntry(i);
+        if (entry == nullptr)
+            continue;
+
+        const auto entryName = juce::File(entry->filename).getFileName();
+        if (entryName.isEmpty())
+            continue;
+
+        const auto ext = juce::File(entryName).getFileExtension().toLowerCase();
+        const auto stem = juce::File(entryName).getFileNameWithoutExtension().toLowerCase();
+
+        if (ext == ".cdg")
+        {
+            if (firstCdgIndex < 0)
+                firstCdgIndex = i;
+            if (audioStem.isNotEmpty() && stem == audioStem && matchingCdgIndex < 0)
+                matchingCdgIndex = i;
+            continue;
+        }
+
+        const int rank = audioExts.indexOf(ext);
+        if (rank >= 0 && rank < audioRank)
+        {
+            audioIndex = i;
+            audioRank = rank;
+            audioStem = stem;
+            if (firstCdgIndex >= 0)
+            {
+                auto* firstCdgEntry = zip.getEntry(firstCdgIndex);
+                if (firstCdgEntry != nullptr)
+                {
+                    const auto firstCdgStem = juce::File(firstCdgEntry->filename).getFileNameWithoutExtension().toLowerCase();
+                    if (firstCdgStem == audioStem)
+                        matchingCdgIndex = firstCdgIndex;
+                }
+            }
+        }
+    }
+
+    if (audioIndex < 0)
+    {
+        errorOut = "ZIP archive does not contain a supported audio file.";
+        return false;
+    }
+
+    const auto cacheRoot = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getChildFile("EncoreKaraoke")
+        .getChildFile("zip-cache")
+        .getChildFile(zipFile.getFileNameWithoutExtension() + "-" + juce::String::toHexString(zipFile.getFullPathName().hashCode()));
+    cacheRoot.createDirectory();
+
+    auto* audioEntry = zip.getEntry(audioIndex);
+    if (audioEntry == nullptr)
+    {
+        errorOut = "ZIP archive audio entry is unreadable.";
+        return false;
+    }
+
+    audioOut = cacheRoot.getChildFile(juce::File(audioEntry->filename).getFileName());
+    if (! writeZipEntryToFile(zip, audioIndex, audioOut))
+    {
+        errorOut = "Failed to extract audio file from ZIP archive.";
+        return false;
+    }
+
+    const int cdgIndex = matchingCdgIndex >= 0 ? matchingCdgIndex : firstCdgIndex;
+    if (cdgIndex >= 0)
+    {
+        if (auto* cdgEntry = zip.getEntry(cdgIndex))
+        {
+            cdgOut = cacheRoot.getChildFile(juce::File(cdgEntry->filename).getFileName());
+            if (! writeZipEntryToFile(zip, cdgIndex, cdgOut))
+                cdgOut = juce::File{};
+        }
+    }
+
+    return true;
+}
+
 bool appendSongSync(const juce::String& venueId, const QueueItem& item, juce::String& errorOut)
 {
     std::mutex mutex;
@@ -325,10 +448,195 @@ void MainComponent::setupUI()
     topBar->setOnlineStatus(true); // Start with online status
     applyCurrentIdentityToUi();
 
+    auto loadSingerIntoNowPlaying = [this](const Singers& singer, bool autoStart) -> bool
+    {
+        if (singer.songs.empty())
+        {
+            DBG("Play singer: no songs in queue");
+            return false;
+        }
+
+        const auto firstSong = singer.songs.front();
+
+        if (mainArea == nullptr)
+            return false;
+
+        const auto& library = mainArea->getLibrarySongs();
+        const juce::String wantId     = juce::String(firstSong.songId).trim();
+        const juce::String wantName   = juce::String(firstSong.songName).trim().toLowerCase();
+        const juce::String wantArtist = juce::String(firstSong.songArtist).trim().toLowerCase();
+
+        const CdgSong* match = nullptr;
+        for (const auto& s : library)
+        {
+            if (! wantId.isEmpty() && juce::String(s.id).trim() == wantId)
+            {
+                match = &s;
+                break;
+            }
+        }
+
+        if (match == nullptr && wantId.isNotEmpty())
+        {
+            for (const auto& s : library)
+            {
+                for (const auto& code : s.code)
+                {
+                    if (juce::String(code).trim().equalsIgnoreCase(wantId))
+                    {
+                        match = &s;
+                        break;
+                    }
+                }
+                if (match != nullptr)
+                    break;
+            }
+        }
+
+        if (match == nullptr)
+        {
+            for (const auto& s : library)
+            {
+                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
+                const juce::String libArtist = juce::String(s.artistName).trim().toLowerCase();
+
+                const bool nameMatches = (libName == wantName);
+                const bool artistMatches = wantArtist.isEmpty() || (libArtist == wantArtist);
+
+                if (nameMatches && artistMatches)
+                {
+                    match = &s;
+                    break;
+                }
+            }
+        }
+
+        if (match == nullptr && wantName.isNotEmpty())
+        {
+            for (const auto& s : library)
+            {
+                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
+                if (libName.contains(wantName) || wantName.contains(libName))
+                {
+                    match = &s;
+                    break;
+                }
+            }
+        }
+
+        CdgSong dbMatch;
+        if (match == nullptr)
+        {
+            SongDatabase db;
+            if (db.open())
+            {
+                if (wantId.isNotEmpty())
+                    dbMatch = db.getById(wantId);
+
+                if (dbMatch.id.empty() && wantName.isNotEmpty())
+                {
+                    const juce::String query = wantArtist.isNotEmpty()
+                        ? (wantName + " " + wantArtist)
+                        : wantName;
+
+                    auto hits = db.searchPrefix(query, 40);
+                    if (!hits.empty())
+                        dbMatch = hits.front();
+                }
+            }
+
+            if (!dbMatch.id.empty())
+                match = &dbMatch;
+        }
+
+        if (match == nullptr)
+        {
+            DBG("Play singer: no library match for '" << juce::String(firstSong.songName)
+                << "' by '" << juce::String(firstSong.songArtist) << "'");
+
+            if (queueBar != nullptr)
+                queueBar->clearNowPlaying();
+            localNowPlaying_ = {};
+            hasLocalNowPlaying_ = false;
+
+            if (bottomBar != nullptr)
+                bottomBar->setPlaying(false);
+
+            showSongUnavailableMessage(firstSong);
+            return false;
+        }
+
+        int resolvedVersionIndex = 0;
+        const juce::String wantedVersion = juce::String(firstSong.songVersion).trim();
+        if (wantedVersion.isNotEmpty() && !match->version.empty())
+        {
+            for (size_t vi = 0; vi < match->version.size(); ++vi)
+            {
+                if (juce::String(match->version[vi]).trim().equalsIgnoreCase(wantedVersion))
+                {
+                    resolvedVersionIndex = (int) vi;
+                    break;
+                }
+            }
+        }
+
+        const int pitchSemis = juce::roundToInt(firstSong.pitch);
+
+        loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, autoStart,
+                        [this, singer](bool ok)
+                        {
+                            if (! ok)
+                            {
+                                if (queueBar != nullptr)
+                                    queueBar->clearNowPlaying();
+                                localNowPlaying_ = {};
+                                hasLocalNowPlaying_ = false;
+
+                                if (bottomBar != nullptr)
+                                    bottomBar->setPlaying(false);
+                                if (queueBar != nullptr)
+                                    queueBar->setPlaying(false);
+                                return;
+                            }
+
+                            if (queueBar != nullptr)
+                                queueBar->setNowPlaying(singer);
+                            localNowPlaying_ = singer;
+                            hasLocalNowPlaying_ = true;
+                        });
+        return true;
+    };
+
+    auto clearLocalNowPlayingState = [this]()
+    {
+        localNowPlaying_ = {};
+        hasLocalNowPlaying_ = false;
+    };
+
+    auto clearLoadedPlaybackState = [this]()
+    {
+        currentSong = {};
+        currentSongImageUrl.clear();
+        currentSongDuration = 0.0;
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->stopVideo();
+
+        if (audioEngine != nullptr)
+            audioEngine->unloadSong();
+
+        if (bottomBar != nullptr)
+        {
+            bottomBar->setDurationSeconds(0.0);
+            bottomBar->setProgress(0.0f);
+            bottomBar->setWaveformSamples({});
+        }
+    };
+
     // Shared transport-start helper.
     // allowQueueFallback=true keeps the existing bottom-bar behavior
     // (load next singer when nothing is loaded). Now-playing uses false.
-    auto startTransportPlayback = [this](bool allowQueueFallback)
+    auto startTransportPlayback = [this, loadSingerIntoNowPlaying](bool allowQueueFallback)
     {
         if (! audioEngine)
             return;
@@ -352,6 +660,12 @@ void MainComponent::setupUI()
 
         if (! hasLoadedMedia && ! videoLoaded)
         {
+            if (hasLocalNowPlaying_ && ! localNowPlaying_.songs.empty())
+            {
+                if (loadSingerIntoNowPlaying(localNowPlaying_, true))
+                    return;
+            }
+
             if (allowQueueFallback)
             {
                 // First press with no loaded media should preload only.
@@ -528,15 +842,30 @@ void MainComponent::setupUI()
         else if (!r.song.version.empty())
             versionLabel = juce::String(r.song.version[0]);
 
-        // Build the QueueItem from the dialog result.  For KJ-added singers
-        // we deliberately leave profileId empty — using the host's own UID
-        // would cause a 409 Conflict on the second add, since Firestore won't
-        // create two docs at the same path.  Mobile requests, in contrast,
-        // carry the singer's real auth UID in profileId.
+        // Build the QueueItem from the dialog result.
+        // QueueService applies a canonical doc-ID policy:
+        // - auth singers use auth UID (`profileId`)
+        // - manual singers use deterministic `manual-*` IDs.
+        // When the signed-in host adds songs for themselves, pass their auth UID.
+        const juce::String authUid = FirestoreClient::getInstance().getUserId().trim();
+
+        juce::String hostStageName;
+        juce::String hostFullName;
+        if (HostService::getInstance().hasCurrent())
+        {
+            const auto h = HostService::getInstance().getCurrent();
+            hostStageName = juce::String(h.stageName).trim();
+            hostFullName = juce::String(h.fullName).trim();
+        }
+
+        const bool singerLooksLikeHost = authUid.isNotEmpty()
+            && (singerName.trim().equalsIgnoreCase(hostStageName)
+             || singerName.trim().equalsIgnoreCase(hostFullName));
+
         QueueItem item;
         item.id          = juce::Uuid().toString().toStdString();
         item.deviceId    = "local";
-        item.profileId   = "";   // empty -> Firestore auto-generates doc ID
+        item.profileId   = singerLooksLikeHost ? authUid.toStdString() : "";
         item.singerName  = singerName.toStdString();
         item.songId      = r.song.id;
         item.songName    = r.song.songName;
@@ -1418,150 +1747,16 @@ void MainComponent::setupUI()
                 }));
     };
 
-    queueBar->onPlaySinger = [this](int singerIndex) {
+    queueBar->onPlaySinger = [this, loadSingerIntoNowPlaying](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
         if (queueBar == nullptr) return;
         const auto& list = queueBar->getSingers();
         if (singerIndex < 0 || singerIndex >= (int) list.size()) return;
 
         const auto singer = list[(size_t) singerIndex];
-        if (singer.songs.empty())
-        {
-            DBG("Play singer: no songs in queue");
-            return;
-        }
-        const auto firstSong = singer.songs.front();
-
-        // 1. Show the singer on the now-singing card. Also store a local
-        //    copy as the source of truth — Firestore has no concept of
-        //    "now playing" on this side, so the watcher poll would
-        //    otherwise clear the card on its next tick.
-        queueBar->setNowPlaying(singer);
-        localNowPlaying_    = singer;
-        hasLocalNowPlaying_ = true;
-
-        // 2. Resolve the song in the local library and load it WITHOUT
-        //    auto-starting playback. The host presses play on the bottom
-        //    bar transport or the now-playing avatar to start the track.
-        if (mainArea == nullptr) return;
-        const auto& library = mainArea->getLibrarySongs();
-        const juce::String wantId     = juce::String(firstSong.songId).trim();
-        const juce::String wantName   = juce::String(firstSong.songName).trim().toLowerCase();
-        const juce::String wantArtist = juce::String(firstSong.songArtist).trim().toLowerCase();
-
-        const CdgSong* match = nullptr;
-        for (const auto& s : library)
-        {
-            if (! wantId.isEmpty() && juce::String(s.id).trim() == wantId)
-            {
-                match = &s;
-                break;
-            }
-        }
-
-        // Fallback: queue songId may be a catalog code, not the local DB id.
-        if (match == nullptr && wantId.isNotEmpty())
-        {
-            for (const auto& s : library)
-            {
-                for (const auto& code : s.code)
-                {
-                    if (juce::String(code).trim().equalsIgnoreCase(wantId))
-                    {
-                        match = &s;
-                        break;
-                    }
-                }
-                if (match != nullptr)
-                    break;
-            }
-        }
-        if (match == nullptr)
-        {
-            for (const auto& s : library)
-            {
-                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
-                const juce::String libArtist = juce::String(s.artistName).trim().toLowerCase();
-
-                const bool nameMatches = (libName == wantName);
-                const bool artistMatches = wantArtist.isEmpty() || (libArtist == wantArtist);
-
-                if (nameMatches && artistMatches)
-                {
-                    match = &s;
-                    break;
-                }
-            }
-        }
-
-        // Last-resort fuzzy fallback: song title contains/contained-by
-        // when metadata variants differ slightly.
-        if (match == nullptr && wantName.isNotEmpty())
-        {
-            for (const auto& s : library)
-            {
-                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
-                if (libName.contains(wantName) || wantName.contains(libName))
-                {
-                    match = &s;
-                    break;
-                }
-            }
-        }
-
-        // Database fallback for multi-computer venues:
-        // queue item may come from another machine (different library cache
-        // lifetime), so resolve against this machine's local song DB.
-        CdgSong dbMatch;
-        if (match == nullptr)
-        {
-            SongDatabase db;
-            if (db.open())
-            {
-                if (wantId.isNotEmpty())
-                    dbMatch = db.getById(wantId);
-
-                if (dbMatch.id.empty() && wantName.isNotEmpty())
-                {
-                    const juce::String query = wantArtist.isNotEmpty()
-                        ? (wantName + " " + wantArtist)
-                        : wantName;
-
-                    auto hits = db.searchPrefix(query, 40);
-                    if (!hits.empty())
-                        dbMatch = hits.front();
-                }
-            }
-
-            if (!dbMatch.id.empty())
-                match = &dbMatch;
-        }
-        if (match == nullptr)
-        {
-            DBG("Play singer: no library match for '" << juce::String(firstSong.songName)
-                << "' by '" << juce::String(firstSong.songArtist) << "'");
-            showSongUnavailableMessage(firstSong);
-            return;
-        }
-
-        int resolvedVersionIndex = 0;
-        const juce::String wantedVersion = juce::String(firstSong.songVersion).trim();
-        if (wantedVersion.isNotEmpty() && !match->version.empty())
-        {
-            for (size_t vi = 0; vi < match->version.size(); ++vi)
-            {
-                if (juce::String(match->version[vi]).trim().equalsIgnoreCase(wantedVersion))
-                {
-                    resolvedVersionIndex = (int) vi;
-                    break;
-                }
-            }
-        }
-
-        const int pitchSemis = juce::roundToInt(firstSong.pitch);
         const bool autoStartSelectedSinger = queueAutoStartRequested_;
         queueAutoStartRequested_ = false;
-        loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, autoStartSelectedSinger);
+        juce::ignoreUnused(loadSingerIntoNowPlaying(singer, autoStartSelectedSinger));
     };
 
     queueBar->onPlayCurrent = [this, startTransportPlayback]() {
@@ -1650,7 +1845,7 @@ void MainComponent::setupUI()
     // Shared helper: re-insert the current singer at the given position and
     // clear the now-playing card, without stopping the audio (the host may
     // want to fade out manually).
-    auto returnCurrentToQueue = [this](bool toFront)
+    auto returnCurrentToQueue = [this, clearLocalNowPlayingState, clearLoadedPlaybackState](bool toFront)
     {
         if (queueBar == nullptr) return;
         Singers cs = localNowPlaying_;
@@ -1658,7 +1853,8 @@ void MainComponent::setupUI()
         if (cs.id.empty()) return;
 
         queueBar->clearNowPlaying();
-        if (audioEngine) audioEngine->stop();
+    clearLocalNowPlayingState();
+    clearLoadedPlaybackState();
 
         const auto venueId = activeVenueId_;
         const juce::String docId = juce::String(cs.id);
@@ -1686,11 +1882,12 @@ void MainComponent::setupUI()
     queueBar->onReturnCurrentToQueueEnd  = [returnCurrentToQueue]()  { returnCurrentToQueue(false); };
 
     // ── Skip current singer ────────────────────────────────────────────────────
-    queueBar->onSkipCurrentSinger = [this]()
+    queueBar->onSkipCurrentSinger = [this, clearLocalNowPlayingState, clearLoadedPlaybackState]()
     {
         logPlayHistoryIfNeeded(false); // logs only if played > 30 s
-        if (audioEngine) audioEngine->stop();
         if (queueBar)    queueBar->clearNowPlaying();
+        clearLocalNowPlayingState();
+        clearLoadedPlaybackState();
         if (queueBar)    queueBar->setPlaying(false);
     };
 
@@ -2168,6 +2365,30 @@ void MainComponent::showSongUnavailableMessage(const QueueItem& item)
         if (safe != nullptr)
             safe->hideLoadingOverlay();
     });
+}
+
+void MainComponent::showSongLoadFailedMessage(const juce::String& songName,
+                                              const juce::String& reason,
+                                              const juce::String& path)
+{
+    juce::String title = "Song Load Failed";
+    juce::String message = reason;
+
+    const auto trimmedSong = songName.trim();
+    if (trimmedSong.isNotEmpty())
+        message = "Could not load \"" + trimmedSong + "\".\n\n" + reason;
+
+    const auto trimmedPath = path.trim();
+    if (trimmedPath.isNotEmpty())
+        message << "\n\nPath: " << trimmedPath;
+
+    if (bottomBar != nullptr)
+        bottomBar->setWaveformStatusMessage(reason);
+
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::WarningIcon,
+        title,
+        message);
 }
 
 void MainComponent::showMaintenanceToast(const juce::String& message)
@@ -2695,10 +2916,18 @@ void MainComponent::setLargeTextMode(bool enabled)
 //==============================================================================
 // Song playback
 //==============================================================================
-void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int pitchSemitones, bool autoStart)
+void MainComponent::loadAndPlaySong(const CdgSong& song,
+                                    int versionIndex,
+                                    int pitchSemitones,
+                                    bool autoStart,
+                                    std::function<void(bool)> onDone)
 {
     if (! audioEngine)
+    {
+        if (onDone)
+            onDone(false);
         return;
+    }
 
     if (! audioEngine->isInitialized())
     {
@@ -2715,6 +2944,10 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
                 if (safe != nullptr)
                     safe->hideLoadingOverlay();
             });
+            showSongLoadFailedMessage(song.songName,
+                                      "Audio engine is unavailable.");
+            if (onDone)
+                onDone(false);
             return;
         }
     }
@@ -2727,56 +2960,126 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     // Defer the actual load work to the next message-loop tick so the overlay
     // has a chance to paint before we block the UI thread on file I/O.
     juce::Component::SafePointer<MainComponent> self(this);
-    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart]()
+    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart, onDone = std::move(onDone)]()
     {
         if (! self || ! self->audioEngine)
+        {
+            if (onDone)
+                onDone(false);
             return;
+        }
+
+    auto resolvePlayableMediaFile = [] (juce::File candidate) -> juce::File
+    {
+        auto ext = candidate.getFileExtension().toLowerCase();
+        if (ext == ".cdg" || ext == ".xml")
+        {
+            static const juce::StringArray sidecarExts { ".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a" };
+            for (const auto& sidecarExt : sidecarExts)
+            {
+                auto sibling = candidate.withFileExtension(sidecarExt);
+                if (sibling.existsAsFile())
+                    return sibling;
+            }
+        }
+
+        return candidate;
+    };
+
+    auto resolveSongFilesForLoad = [&resolvePlayableMediaFile](const juce::File& sourceFile,
+                                                               juce::File& audioOut,
+                                                               juce::File& cdgOut,
+                                                               juce::String& errorOut) -> bool
+    {
+        audioOut = juce::File{};
+        cdgOut = juce::File{};
+        errorOut.clear();
+
+        const auto ext = sourceFile.getFileExtension().toLowerCase();
+        if (ext == ".zip")
+            return extractZipMediaFiles(sourceFile, audioOut, cdgOut, errorOut);
+
+        audioOut = resolvePlayableMediaFile(sourceFile);
+        return true;
+    };
+
+    auto buildVersionPath = [&song](int index) -> juce::String
+    {
+        if (index >= 0 && index < (int) song.fullPath.size())
+        {
+            const auto path = juce::String(song.fullPath[(size_t) index]).trim();
+            if (path.isNotEmpty())
+                return path;
+        }
+
+        if (index >= 0
+            && index < (int) song.filePath.size()
+            && index < (int) song.fileName.size())
+        {
+            const auto dir = juce::String(song.filePath[(size_t) index]).trim();
+            const auto name = juce::String(song.fileName[(size_t) index]).trim();
+            if (dir.isNotEmpty() && name.isNotEmpty())
+                return juce::File(dir).getChildFile(name).getFullPathName();
+        }
+
+        return {};
+    };
 
     // Pick the file path for the chosen version (fall back to the first path).
-    juce::String path;
-    if (versionIndex >= 0 && versionIndex < (int) song.fullPath.size())
-        path = juce::String(song.fullPath[(size_t) versionIndex]);
-    else if (! song.fullPath.empty())
-        path = juce::String(song.fullPath.front());
+    juce::String path = buildVersionPath(versionIndex);
+    if (path.isEmpty())
+        path = buildVersionPath(0);
 
     if (path.isEmpty())
     {
         DBG("loadAndPlaySong: no file path on song \"" + juce::String(song.songName) + "\"");
         self->hideLoadingOverlay();
+        self->showSongLoadFailedMessage(song.songName,
+                                        "No playable file path is recorded for this song.");
+        if (onDone)
+            onDone(false);
         return;
     }
 
-    juce::File audioFile(path);
-
-    // Some karaoke libraries store a ZIP containing CDG + MP3, or a .cdg file
-    // beside a .mp3 — try a sibling MP3 if the direct path isn't playable.
-    auto ext = audioFile.getFileExtension().toLowerCase();
-    if (ext == ".cdg" || ext == ".zip")
+    juce::File audioFile;
+    juce::File extractedCdgFile;
+    juce::String resolveError;
+    const juce::File sourceFile(path);
+    if (! resolveSongFilesForLoad(sourceFile, audioFile, extractedCdgFile, resolveError))
     {
-        auto sibling = audioFile.withFileExtension("mp3");
-        if (sibling.existsAsFile())
-            audioFile = sibling;
-        ext = audioFile.getFileExtension().toLowerCase();
+        self->hideLoadingOverlay();
+        self->showSongLoadFailedMessage(song.songName,
+                                        resolveError.isNotEmpty() ? resolveError : "Could not read ZIP archive.",
+                                        sourceFile.getFullPathName());
+        if (onDone)
+            onDone(false);
+        return;
     }
+
+    auto ext = audioFile.getFileExtension().toLowerCase();
 
     if (! audioFile.existsAsFile())
     {
         // Fallback: if the requested version path is unavailable, try every
         // known version path and pick the first playable file.
-        for (const auto& fp : song.fullPath)
+        const int versionCount = juce::jmax((int) song.fullPath.size(),
+                                            juce::jmin((int) song.filePath.size(), (int) song.fileName.size()));
+        for (int i = 0; i < versionCount; ++i)
         {
-            juce::File candidate { juce::String(fp) };
-            auto cext = candidate.getFileExtension().toLowerCase();
-            if (cext == ".cdg" || cext == ".zip")
-            {
-                auto sibling = candidate.withFileExtension("mp3");
-                if (sibling.existsAsFile())
-                    candidate = sibling;
-            }
+            auto candidatePath = buildVersionPath(i);
+            if (candidatePath.isEmpty())
+                continue;
+
+            juce::File candidate;
+            juce::File candidateCdg;
+            juce::String candidateError;
+            if (! resolveSongFilesForLoad(juce::File(candidatePath), candidate, candidateCdg, candidateError))
+                continue;
 
             if (candidate.existsAsFile())
             {
                 audioFile = candidate;
+                extractedCdgFile = candidateCdg;
                 ext = audioFile.getFileExtension().toLowerCase();
                 DBG("loadAndPlaySong: fallback picked playable version: " + audioFile.getFullPathName());
                 break;
@@ -2788,6 +3091,11 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     {
         DBG("loadAndPlaySong: file not found: " + audioFile.getFullPathName());
         self->hideLoadingOverlay();
+        self->showSongLoadFailedMessage(song.songName,
+                                        "The song file was not found on this computer.",
+                                        audioFile.getFullPathName());
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -2807,6 +3115,11 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         {
             DBG("loadAndPlaySong: video load failed: " + audioFile.getFullPathName());
             self->hideLoadingOverlay();
+            self->showSongLoadFailedMessage(song.songName,
+                                            "The video file could not be opened for playback.",
+                                            audioFile.getFullPathName());
+            if (onDone)
+                onDone(false);
             return;
         }
 
@@ -2856,6 +3169,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         if (self->queueBar) self->queueBar->setPlaying (autoStart);
 
         self->hideLoadingOverlay();
+        if (onDone)
+            onDone(true);
         return;
     }
 
@@ -2863,6 +3178,11 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     {
         DBG("loadAndPlaySong: AudioEngine failed to load " + audioFile.getFullPathName());
         self->hideLoadingOverlay();
+        self->showSongLoadFailedMessage(song.songName,
+                                        "The audio file format is unsupported or the file could not be opened.",
+                                        audioFile.getFullPathName());
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -2870,7 +3190,9 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
     // companion exists the window will simply fall back to its idle screen.
     if (self->lyricWindow_)
     {
-        const auto cdgFile = self->resolveCdgFileFor (audioFile);
+        const auto cdgFile = extractedCdgFile.existsAsFile()
+            ? extractedCdgFile
+            : self->resolveCdgFileFor (audioFile);
         self->lyricWindow_->loadCDG (cdgFile);
     }
 
@@ -2938,6 +3260,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song, int versionIndex, int p
         self->audioEngine->play();
     }
     self->hideLoadingOverlay();
+    if (onDone)
+        onDone(true);
     });
 }
 

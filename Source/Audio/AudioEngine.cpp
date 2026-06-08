@@ -272,6 +272,32 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
     return true;
 }
 
+void AudioEngine::unloadSong()
+{
+    stop();
+
+    if (audioSourcePlayer != nullptr)
+        audioSourcePlayer->setSource(nullptr);
+
+    resamplingSource.reset();
+
+    if (transportSource != nullptr)
+    {
+        transportSource->setSource(nullptr);
+        transportSource.reset();
+    }
+
+    readerSource.reset();
+
+    totalLength = 0.0;
+    currentPosition = 0.0;
+    audibleEndPosition = 0.0;
+    cdgLoaded = false;
+
+    if (audioSourcePlayer != nullptr)
+        audioSourcePlayer->setSource(this);
+}
+
 void AudioEngine::play()
 {
     if (transportSource == nullptr)

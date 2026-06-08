@@ -44,9 +44,11 @@ public:
     /** Append `item` to the end of the matching singer's `songs` array under
         `venues/<venueId>/queue`, finding the singer by case-insensitive
         `singerName`. If no singer matches, a brand-new singer document is
-        created using the item's singerName, avatar and profileId. Network
-        I/O runs on a background thread; callback fires on the message
-        thread. */
+        created using canonical queue-doc IDs:
+        - auth singers use `profileId` (Firebase auth UID)
+        - manual singers use deterministic namespaced `manual-*` IDs.
+        Network I/O runs on a background thread; callback fires on the
+        message thread. */
     void appendSong(const juce::String& venueId,
                     const QueueItem& item,
                     WriteCallback onDone = nullptr);

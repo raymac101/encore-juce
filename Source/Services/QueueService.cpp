@@ -26,6 +26,25 @@ QueueService& QueueService::getInstance()
 
 namespace
 {
+    juce::String normalizedSingerKey(const juce::String& singerName)
+    {
+        auto key = singerName.trim().toLowerCase();
+        key = key.retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789");
+        return key.isNotEmpty() ? key : juce::String("unknown");
+    }
+
+    juce::String makeManualSingerDocId(const QueueItem& item)
+    {
+        const auto singerKey = normalizedSingerKey(juce::String(item.singerName));
+        const auto deviceKey = juce::String(item.deviceId).trim().toLowerCase();
+        const auto hashSeed = singerKey + "|" + deviceKey;
+
+        const auto hashValue = (juce::int64) std::hash<std::string>{}(hashSeed.toStdString());
+        const auto hashHex = juce::String::toHexString(hashValue < 0 ? -hashValue : hashValue);
+
+        return "manual-" + singerKey.substring(0, 24) + "-" + hashHex;
+    }
+
     //--- Firestore typed-value readers (work on a `valueObj` which is the
     //    inner { stringValue: ..., integerValue: ..., ... } wrapper). ----
 
@@ -403,23 +422,24 @@ void QueueService::appendSong(const juce::String& venueId,
 
         std::vector<QueueItem> initialSongs { first };
 
-        // Determine the document ID to use for this singer's queue doc.
-        // Mobile users provide profileId; KJ-added singers may have no
-        // profile ID (or "Unknown"). For those, generate a stable unique
-        // queue doc ID so reorder/update calls can always target this singer.
+        // Queue singer docs use one canonical ID policy:
+        // - Auth singers: their Firebase auth UID (`profileId`)
+        // - Manual singers: deterministic namespaced ID (`manual-*`)
         const juce::String profileId = juce::String(item.profileId).trim();
         const bool hasProfileId = profileId.isNotEmpty()
                        && profileId.compareIgnoreCase("unknown") != 0;
-        juce::String docId = hasProfileId
-                   ? profileId
-                   : ("kj-" + juce::Uuid().toString().removeCharacters("{}-"));
+
+        const juce::String docId = hasProfileId
+                                 ? profileId
+                                 : makeManualSingerDocId(item);
+        const juce::String storedProfileId = hasProfileId ? profileId : docId;
 
         juce::DynamicObject::Ptr fields = new juce::DynamicObject();
         fields->setProperty("id",             FirestoreClient::stringValue(docId));
         fields->setProperty("name",           FirestoreClient::stringValue(juce::String(item.singerName)));
         fields->setProperty("avatar",         FirestoreClient::stringValue(juce::String(item.singerAvatar)));
         fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String(item.deviceId)));
-        fields->setProperty("profileId",      FirestoreClient::stringValue(hasProfileId ? profileId : juce::String("Unknown")));
+        fields->setProperty("profileId",      FirestoreClient::stringValue(storedProfileId));
         fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
         fields->setProperty("status",         FirestoreClient::stringValue("queued"));
         fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
@@ -433,6 +453,7 @@ void QueueService::appendSong(const juce::String& venueId,
         const bool ok = resp.isObject();
 
         DBG ("[Queue] appendSong new singer '" << juce::String(item.singerName)
+               << "' docId='" << docId << "'"
              << "' ok=" << (ok ? 1 : 0));
 
         if (onDone)
@@ -673,7 +694,8 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
                 });
 
                 const auto patchPath = relPath
-                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder&updateMask.fieldPaths=strikes";
+                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder&updateMask.fieldPaths=strikes"
+                    + "&currentDocument.exists=true";
 
                 const bool ok = FirestoreClient::getInstance().patchDocument(patchPath, fields);
                 allOk = allOk && ok;
