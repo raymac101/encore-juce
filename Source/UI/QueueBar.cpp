@@ -896,6 +896,9 @@ QueueBar::QueueBar()
     countdownLabel->setColour(juce::Label::textColourId, accentColour);
     countdownLabel->setFont(juce::Font(22.f).boldened());
     countdownLabel->setJustificationType(juce::Justification::centred);
+    // This label overlays the top of the list area; keep it visual-only so
+    // the first singer row remains fully hover/clickable.
+    countdownLabel->setInterceptsMouseClicks(false, false);
     countdownLabel->setVisible(false);
     addAndMakeVisible(*countdownLabel);
 }

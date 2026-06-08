@@ -413,7 +413,7 @@ void LyricDisplayComponent::timerCallback()
         return;
     }
 
-    if (! decoder_.isLoaded() || audioEngine_ == nullptr)
+    if (forceIdleScreen_ || ! decoder_.isLoaded() || audioEngine_ == nullptr)
     {
         repaint();
         return;
@@ -472,7 +472,11 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
 
     // The VideoComponent (when active) paints itself as a child component, so
     // skip CDG/idle painting and only draw the overlays on top.
-    if (forceIdleScreen_ || ! isVideoActive())
+    if (forceIdleScreen_)
+    {
+        paintIdle (g, getContentRenderArea (area));
+    }
+    else if (! isVideoActive())
     {
         if (decoder_.isLoaded())
             paintCdg (g, getContentRenderArea (getPrimaryRenderArea (area, false)));
@@ -704,7 +708,7 @@ void LyricDisplayComponent::layoutIdleAdVideoBounds (juce::Rectangle<int> area)
     if (idleAdVideoComponent_ == nullptr)
         return;
 
-    const bool idleMode = (! isVideoActive() && ! decoder_.isLoaded());
+    const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
     auto right = getContentRenderArea (getAdRenderArea (area, idleMode)).reduced (28);
     idleAdVideoComponent_->setBounds (right);
     idleAdVideoComponent_->setVisible (right.getWidth() > 60 && right.getHeight() > 60);
