@@ -242,7 +242,8 @@ private:
     void showSongLoadFailedMessage(const juce::String& songName,
                                    const juce::String& reason,
                                    const juce::String& path = {});
-    bool queueAndLoadNextSingerSong(bool autoStartAfterLoad = false);
+    bool queueAndLoadNextSingerSong(bool autoStartAfterLoad = false,
+                                    bool showNoSongsMessage = false);
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);
     std::vector<LyricDisplayComponent::QueuePreviewEntry>

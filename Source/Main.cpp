@@ -18,6 +18,7 @@
 #include "Localization/LocalizationManager.h"
 #include "Services/UserPreferences.h"
 #include "Services/VenueService.h"
+#include "BuildInfo.h"
 
 //==============================================================================
 class EncoreApplication : public juce::JUCEApplication,
@@ -28,7 +29,7 @@ public:
     EncoreApplication() {}
 
     const juce::String getApplicationName() override       { return ProjectInfo::projectName; }
-    const juce::String getApplicationVersion() override    { return ProjectInfo::versionString; }
+    const juce::String getApplicationVersion() override    { return ENCORE_VERSION_WITH_BUILD; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     //==============================================================================

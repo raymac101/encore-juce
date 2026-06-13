@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.22)
 
 project(EncoreJUCE VERSION 1.0.0)
 
+set(ENCORE_BUILD_NUMBER_FILE "${CMAKE_SOURCE_DIR}/build_number.txt")
+set(ENCORE_BUILD_INFO_HEADER "${CMAKE_BINARY_DIR}/generated/BuildInfo.h")
+
 # Add JUCE subdirectory (using complete JUCE framework)
 if(WIN32)
     set(JUCE_SOURCE_DIR "C:/JUCE-Full")
@@ -23,6 +26,16 @@ juce_add_gui_app(EncoreJUCE
     BUNDLE_ID "com.viracicom.encore"
     ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png")
+
+add_custom_target(EncoreBuildNumber ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DBUILD_NUMBER_FILE=${ENCORE_BUILD_NUMBER_FILE}
+        -DOUTPUT_HEADER=${ENCORE_BUILD_INFO_HEADER}
+        -DPROJECT_VERSION=${PROJECT_VERSION}
+        -P ${CMAKE_SOURCE_DIR}/cmake/IncrementBuildNumber.cmake
+    COMMENT "Incrementing Encore build number")
+
+add_dependencies(EncoreJUCE EncoreBuildNumber)
 
 # Generate JuceHeader.h
 juce_generate_juce_header(EncoreJUCE)
@@ -169,6 +182,8 @@ if(RUBBERBAND_LIBRARY_DIRS)
     target_link_directories(EncoreJUCE PRIVATE ${RUBBERBAND_LIBRARY_DIRS})
 endif()
 target_link_libraries(EncoreJUCE      PRIVATE ${RUBBERBAND_LIBRARIES})
+
+target_include_directories(EncoreJUCE PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # SQLite3 — used by SongDatabase. macOS ships with system sqlite3.
 find_package(SQLite3 QUIET)

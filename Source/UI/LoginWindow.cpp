@@ -19,6 +19,7 @@
 #include "../Models/VenueItem.h"
 #include "../Models/UserVenueAssociation.h"
 #include "../Models/AccessRights.h"
+#include "BuildInfo.h"
 
 //==============================================================================
 // Brand-matched look-and-feel for the login screen. Mirrors the Angular
@@ -200,9 +201,10 @@ public:
         versionLabel_.setColour(juce::Label::textColourId,
                                 juce::Colour(LoginTheme::kSubtleText));
         versionLabel_.setFont(juce::Font(juce::FontOptions(14.0f)));
-        if (auto* app = juce::JUCEApplication::getInstance())
-            versionLabel_.setText("Version " + app->getApplicationVersion(),
-                                  juce::dontSendNotification);
+        const juce::String baseVersion = ProjectInfo::versionString;
+        const juce::String buildNumber = juce::String(ENCORE_BUILD_NUMBER);
+        versionLabel_.setText("Version " + baseVersion + " (Build " + buildNumber + ")",
+                              juce::dontSendNotification);
 
         addAndMakeVisible(headingLabel_);
         addAndMakeVisible(statusLabel_);
@@ -467,7 +469,7 @@ public:
 
             // Don't show the small logo on this page (heading is the focus).
             logoBounds_ = {};
-            versionLabel_.setBounds(0, 0, 0, 0);
+            versionLabel_.setBounds(top.removeFromTop(22));
 
             // White card.
             const int cardW = juce::jmin(820, full.getWidth() - 80);

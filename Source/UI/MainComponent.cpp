@@ -669,7 +669,7 @@ void MainComponent::setupUI()
             if (allowQueueFallback)
             {
                 // First press with no loaded media should preload only.
-                const bool queued = queueAndLoadNextSingerSong(false);
+                const bool queued = queueAndLoadNextSingerSong(false, true);
 
                 if (bottomBar != nullptr)
                     bottomBar->setPlaying(false);
@@ -1750,19 +1750,115 @@ void MainComponent::setupUI()
     queueBar->onPlaySinger = [this, loadSingerIntoNowPlaying](int singerIndex) {
         DBG("QueueBar: Play singer at index " + juce::String(singerIndex));
         if (queueBar == nullptr) return;
-        const auto& list = queueBar->getSingers();
-        if (singerIndex < 0 || singerIndex >= (int) list.size()) return;
 
-        const auto singer = list[(size_t) singerIndex];
+        auto singers = queueBar->getSingers();
+        if (singerIndex < 0 || singerIndex >= (int) singers.size()) return;
+
+        auto singer = singers[(size_t) singerIndex];
+        const bool singerHasQueuedSongs = ! singer.songs.empty();
+        auto singerForPlayback = singer;
+        QueueItem nowSingingItem;
+
+        if (singerHasQueuedSongs)
+        {
+            nowSingingItem = singer.songs.front();
+            nowSingingItem.singerName = singer.name;
+            singerForPlayback.isNewlyAdded = false;
+            singer.isNewlyAdded = false;
+            singer.songs.erase(singer.songs.begin());
+        }
+
+        // Moving a singer into now-singing should also move them to the end
+        // of the round queue so the rotation stays fair.
+        if (! singer.isHost && singers.size() > 1)
+        {
+            const int fromIndex = singerIndex;
+
+            if (! singerHasQueuedSongs)
+            {
+                const int currentStrikes = juce::jmax(0, singer.strikes);
+                singer.strikes = currentStrikes + 1;
+            }
+
+            singers.erase(singers.begin() + singerIndex);
+            singers.push_back(singer);
+
+            const int toIndex = (int) singers.size() - 1;
+
+            if (toIndex != fromIndex || ! singerHasQueuedSongs)
+            {
+                reindexQueueWithHostRoundAnchor(singers);
+                queueBar->setSingers(singers);
+
+                const auto venueId = activeVenueId_.trim();
+                if (venueId.isNotEmpty())
+                {
+                    QueueService::getInstance().persistSingerOrder(venueId, singers,
+                        [](bool ok, juce::String err)
+                        {
+                            if (! ok)
+                                DBG("[Queue] onPlaySinger persistSingerOrder failed: " << err);
+                        });
+                }
+            }
+
+            if (toIndex >= 0)
+                singer = singers[(size_t) toIndex];
+        }
+
+        // If we promoted a song into now-singing, remove it from the
+        // singer's persisted queue immediately so it does not remain queued.
+        if (singerHasQueuedSongs)
+        {
+            const auto venueId = activeVenueId_.trim();
+            if (venueId.isNotEmpty())
+            {
+                QueueService::getInstance().removeSong(venueId, nowSingingItem,
+                    [](bool ok, juce::String err)
+                    {
+                        if (! ok)
+                            DBG("[Queue] onPlaySinger removeSong failed: " << err);
+                    });
+            }
+        }
+
         const bool autoStartSelectedSinger = queueAutoStartRequested_;
         queueAutoStartRequested_ = false;
-        juce::ignoreUnused(loadSingerIntoNowPlaying(singer, autoStartSelectedSinger));
+
+        // Empty singer queue item means "skip" this singer and keep advancing
+        // until we find a singer with a queued song.
+        if (! singerHasQueuedSongs)
+        {
+            const bool queued = queueAndLoadNextSingerSong(autoStartSelectedSinger, true);
+            if (! queued)
+            {
+                if (bottomBar != nullptr)
+                    bottomBar->setPlaying(false);
+                if (queueBar != nullptr)
+                    queueBar->setPlaying(false);
+            }
+            return;
+        }
+
+        juce::ignoreUnused(loadSingerIntoNowPlaying(singerForPlayback, autoStartSelectedSinger));
     };
 
     queueBar->onPlayCurrent = [this, startTransportPlayback]() {
         // Now-playing play button should only start transport for the
         // currently loaded song and never advance/load the queue.
         startTransportPlayback(false);
+    };
+
+    queueBar->onPauseCurrent = [this]() {
+        if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive())
+            lyricWindow_->pauseVideo();
+        else if (audioEngine != nullptr)
+            audioEngine->pause();
+
+        if (bottomBar != nullptr)
+            bottomBar->setPlaying(false);
+        if (queueBar != nullptr)
+            queueBar->setPlaying(false);
     };
 
     queueBar->onSongClicked = [this](int singerIdx, int /*songIdx*/) {
@@ -2937,13 +3033,13 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         if (! audioEngine->isInitialized())
         {
             auto& lm = LocalizationManager::getInstance();
-            showLoadingOverlay(audioStartupInProgress_ ? lm.getText("audio.feedback.engine_starting")
-                                                       : lm.getText("audio.feedback.engine_unavailable"));
-            juce::Timer::callAfterDelay(1200, [safe = juce::Component::SafePointer<MainComponent>(this)]()
+            if (bottomBar != nullptr)
             {
-                if (safe != nullptr)
-                    safe->hideLoadingOverlay();
-            });
+                bottomBar->setWaveformSamples({});
+                bottomBar->setWaveformStatusMessage(audioStartupInProgress_
+                    ? lm.getText("audio.feedback.engine_starting")
+                    : lm.getText("audio.feedback.engine_unavailable"));
+            }
             showSongLoadFailedMessage(song.songName,
                                       "Audio engine is unavailable.");
             if (onDone)
@@ -2952,13 +3048,14 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         }
     }
 
-    // Show the loading overlay immediately so the user gets instant feedback
-    // instead of the OS beach-ball that the synchronous load would otherwise
-    // produce.
-    showLoadingOverlay("Loading \"" + juce::String(song.songName) + "\"...");
+    if (bottomBar != nullptr)
+    {
+        bottomBar->setWaveformSamples({});
+        bottomBar->setWaveformStatusMessage("Loading \"" + juce::String(song.songName) + "\"...");
+    }
 
-    // Defer the actual load work to the next message-loop tick so the overlay
-    // has a chance to paint before we block the UI thread on file I/O.
+    // Defer the actual load work to the next message-loop tick so the loading
+    // message paints in the waveform area before any file I/O starts.
     juce::Component::SafePointer<MainComponent> self(this);
     juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart, onDone = std::move(onDone)]()
     {
@@ -3033,7 +3130,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     if (path.isEmpty())
     {
         DBG("loadAndPlaySong: no file path on song \"" + juce::String(song.songName) + "\"");
-        self->hideLoadingOverlay();
+        if (self->bottomBar != nullptr)
+            self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         "No playable file path is recorded for this song.");
         if (onDone)
@@ -3047,7 +3145,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     const juce::File sourceFile(path);
     if (! resolveSongFilesForLoad(sourceFile, audioFile, extractedCdgFile, resolveError))
     {
-        self->hideLoadingOverlay();
+        if (self->bottomBar != nullptr)
+            self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         resolveError.isNotEmpty() ? resolveError : "Could not read ZIP archive.",
                                         sourceFile.getFullPathName());
@@ -3090,7 +3189,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     if (! audioFile.existsAsFile())
     {
         DBG("loadAndPlaySong: file not found: " + audioFile.getFullPathName());
-        self->hideLoadingOverlay();
+        if (self->bottomBar != nullptr)
+            self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         "The song file was not found on this computer.",
                                         audioFile.getFullPathName());
@@ -3114,7 +3214,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             || ! self->lyricWindow_->loadVideo (audioFile, autoStart))
         {
             DBG("loadAndPlaySong: video load failed: " + audioFile.getFullPathName());
-            self->hideLoadingOverlay();
+            if (self->bottomBar != nullptr)
+                self->bottomBar->setWaveformStatusMessage("Load failed.");
             self->showSongLoadFailedMessage(song.songName,
                                             "The video file could not be opened for playback.",
                                             audioFile.getFullPathName());
@@ -3164,11 +3265,11 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->bottomBar->setPlaying (autoStart);
             self->bottomBar->setPitch (pitchSemitones);
             self->bottomBar->setWaveformSamples ({}); // No waveform for video.
+            self->bottomBar->setWaveformStatusMessage("Video loaded.");
         }
 
         if (self->queueBar) self->queueBar->setPlaying (autoStart);
 
-        self->hideLoadingOverlay();
         if (onDone)
             onDone(true);
         return;
@@ -3177,7 +3278,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     if (! self->audioEngine->loadSong(audioFile))
     {
         DBG("loadAndPlaySong: AudioEngine failed to load " + audioFile.getFullPathName());
-        self->hideLoadingOverlay();
+        if (self->bottomBar != nullptr)
+            self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         "The audio file format is unsupported or the file could not be opened.",
                                         audioFile.getFullPathName());
@@ -3244,11 +3346,16 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->bottomBar->setPlaying(autoStart);
         self->bottomBar->setPitch(pitchSemitones);
         self->bottomBar->setWaveformSamples({});
+        self->bottomBar->setWaveformStatusMessage("Analyzing waveform...");
 
         // Build a real waveform asynchronously.
         juce::Component::SafePointer<BottomBar> safeBottom(self->bottomBar.get());
         WaveformGenerator::generateAsync(audioFile, 240, [safeBottom](std::vector<float> peaks) {
-            if (safeBottom) safeBottom->setWaveformSamples(peaks);
+            if (safeBottom)
+            {
+                safeBottom->setWaveformSamples(peaks);
+                safeBottom->setWaveformStatusMessage(peaks.empty() ? "Waveform unavailable." : juce::String());
+            }
         });
     }
 
@@ -3259,7 +3366,6 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->playStartTimeMs_ = juce::Time::currentTimeMillis();
         self->audioEngine->play();
     }
-    self->hideLoadingOverlay();
     if (onDone)
         onDone(true);
     });
@@ -3280,7 +3386,8 @@ void MainComponent::showLoadingOverlay(const juce::String& message, double progr
     loadingOverlay_->repaint();
 }
 
-bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad)
+bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad,
+                                               bool showNoSongsMessage)
 {
     if (queueBar == nullptr || !queueBar->onPlaySinger)
         return false;
@@ -3289,6 +3396,26 @@ bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad)
     auto current = queueBar->getSingers();
     if (current.empty())
         return false;
+
+    bool anyPlayableSinger = false;
+    for (const auto& s : current)
+    {
+        if (! s.songs.empty())
+        {
+            anyPlayableSinger = true;
+            break;
+        }
+    }
+
+    // If no singer has any queued songs, stop auto-rotation and keep the
+    // transport idle when Play is pressed.
+    if (! anyPlayableSinger)
+    {
+        queueAutoStartRequested_ = false;
+        if (showNoSongsMessage)
+            showMaintenanceToast("No queued songs available.");
+        return false;
+    }
 
     // Rotate past singers with no songs and stop at the first playable singer.
     // Process from the actual top of queue so queue order stays in sync with
@@ -3414,6 +3541,50 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
 
     preferredIndex = juce::jlimit(0, (int) merged.size(), preferredIndex);
     merged.insert(merged.begin() + preferredIndex, std::move(hostSinger));
+
+    // Preserve/assign "new singer" highlight across watcher refreshes:
+    // - Existing highlighted singers remain highlighted until they've had a turn.
+    // - Newly discovered non-host singers with queued songs are highlighted.
+    std::unordered_map<std::string, bool> existingNewFlags;
+    if (queueBar != nullptr)
+    {
+        for (const auto& existing : queueBar->getSingers())
+        {
+            if (existing.isHost)
+                continue;
+
+            juce::String key = juce::String(existing.id).trim();
+            if (key.isEmpty())
+                key = "name:" + juce::String(existing.name).trim().toLowerCase();
+
+            existingNewFlags[key.toStdString()] = existing.isNewlyAdded;
+        }
+    }
+
+    for (auto& s : merged)
+    {
+        if (s.isHost)
+        {
+            s.isNewlyAdded = false;
+            continue;
+        }
+
+        if (s.songsPerformed > 0)
+        {
+            s.isNewlyAdded = false;
+            continue;
+        }
+
+        juce::String key = juce::String(s.id).trim();
+        if (key.isEmpty())
+            key = "name:" + juce::String(s.name).trim().toLowerCase();
+
+        const auto it = existingNewFlags.find(key.toStdString());
+        if (it != existingNewFlags.end())
+            s.isNewlyAdded = it->second;
+        else
+            s.isNewlyAdded = ! s.songs.empty();
+    }
 
     return merged;
 }

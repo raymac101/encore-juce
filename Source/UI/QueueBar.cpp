@@ -456,14 +456,14 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff262626));
     g.fillRoundedRectangle(bounds.toFloat(), 8.f);
 
-    // Newly-added highlight — subtle green tint on the card background
+    // Newly-added highlight — subtle primary-colour tint on the card background
     if (isNewlyAdded)
     {
-        g.setColour(juce::Colour(0xff10b981).withAlpha(0.18f));
+        g.setColour(juce::Colour(0xff30daff).withAlpha(0.16f));
         g.fillRoundedRectangle(bounds.toFloat(), 8.f);
     }
 
-    // Round border: green for host, yellow-green for newly added,
+    // Round border: green for host, primary colour for newly added,
     // red for the singer at the tail of the current round.
     if (isHost)
     {
@@ -472,7 +472,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     }
     else if (isNewlyAdded)
     {
-        g.setColour(juce::Colour(0xff84cc16));
+        g.setColour(juce::Colour(0xff30daff));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 2.f);
     }
     else if (isLast)
