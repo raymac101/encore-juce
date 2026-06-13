@@ -87,6 +87,19 @@ public:
                             const std::vector<Singers>& orderedSingers,
                             WriteCallback onDone = nullptr);
 
+    /** Ensure the host has a permanent Firestore doc at
+        `venues/<venueId>/queue/<authUid>`.  Creates it with `order = 0`
+        and an empty songs array if the doc doesn't already exist; no-ops
+        silently if it does.  Should be called once after the queue loads
+        so the host slot is always backed by a real document.
+        Network I/O runs on a background thread; callback fires on the
+        message thread. */
+    void ensureHostQueueDoc(const juce::String& venueId,
+                            const juce::String& authUid,
+                            const juce::String& stageName,
+                            const juce::String& avatarUrl,
+                            WriteCallback onDone = nullptr);
+
     //==============================================================================
     // Live watcher — polls `venues/<venueId>/queue` on a timer and fires
     // onChange (with the freshly-parsed Snapshot) whenever the contents

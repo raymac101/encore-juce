@@ -142,6 +142,11 @@ namespace
         s.strikes       = valueAsInt   (fieldByName(fields, "strikes"));
         s.songsPerformed= valueAsInt   (fieldByName(fields, "songsPerformed"));
 
+        // isHost is stored as a booleanValue field on the host's queue doc.
+        auto isHostField = fieldByName(fields, "isHost");
+        if (isHostField.hasProperty("booleanValue"))
+            s.isHost = (bool) isHostField.getProperty("booleanValue", false);
+
         // songs: arrayValue → values[] → each is a mapValue.
         auto songsField = fieldByName(fields, "songs");
         auto arr = songsField.getProperty("arrayValue", juce::var())
@@ -350,6 +355,30 @@ namespace
         return out;
     }
 
+    // Find a queue doc by its Firestore document ID (last path segment).
+    // Used for auth singers whose doc ID == their profileId (auth UID).
+    FoundSinger findSingerByDocId(const juce::Array<juce::var>& docs,
+                                  const juce::String& docId)
+    {
+        FoundSinger out;
+        if (docId.isEmpty())
+            return out;
+
+        const auto target = docId.trim().toLowerCase();
+        for (auto& d : docs)
+        {
+            const auto fullName = d.getProperty("name", "").toString();
+            const auto id = fullName.fromLastOccurrenceOf("/", false, false).trim().toLowerCase();
+            if (id == target)
+            {
+                out.docName = fullName;
+                out.singer  = singerFromDoc(d);
+                return out;
+            }
+        }
+        return out;
+    }
+
     juce::String relPathFromDocName(const juce::String& docName)
     {
         // "projects/X/databases/(default)/documents/<rel>" -> "<rel>"
@@ -358,6 +387,65 @@ namespace
         if (idx < 0) return docName;
         return docName.substring(idx + marker.length());
     }
+}
+
+void QueueService::ensureHostQueueDoc(const juce::String& venueId,
+                                      const juce::String& authUid,
+                                      const juce::String& stageName,
+                                      const juce::String& avatarUrl,
+                                      WriteCallback onDone)
+{
+    if (venueId.isEmpty() || authUid.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "Missing venueId or authUid"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, authUid, stageName, avatarUrl, onDone = std::move(onDone)]()
+    {
+        const auto collPath = "venues/" + venueId + "/queue";
+        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+
+        // If a doc already exists for this auth UID, nothing to do.
+        auto existing = findSingerByDocId(docs, authUid);
+        if (existing.docName.isNotEmpty())
+        {
+            DBG ("[Queue] ensureHostQueueDoc: host doc already exists for '" << authUid << "'");
+            if (onDone) juce::MessageManager::callAsync([onDone] { onDone(true, {}); });
+            return;
+        }
+
+        // Create a permanent host singer doc with no songs, pinned at order 0.
+        juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+        fields->setProperty("id",             FirestoreClient::stringValue(authUid));
+        fields->setProperty("name",           FirestoreClient::stringValue(stageName));
+        fields->setProperty("avatar",         FirestoreClient::stringValue(avatarUrl));
+        fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String("host")));
+        fields->setProperty("profileId",      FirestoreClient::stringValue(authUid));
+        fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String()));
+        fields->setProperty("status",         FirestoreClient::stringValue("active"));
+        fields->setProperty("isHost",         FirestoreClient::booleanValue(true));
+        fields->setProperty("order",          FirestoreClient::integerValue(0));
+        fields->setProperty("rotationOrder",  FirestoreClient::integerValue(-1));
+        fields->setProperty("strikes",        FirestoreClient::integerValue(0));
+        fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
+
+        // Empty songs array
+        juce::DynamicObject::Ptr arrInner = new juce::DynamicObject();
+        arrInner->setProperty("values", juce::var(juce::Array<juce::var>{}));
+        juce::DynamicObject::Ptr arrWrapper = new juce::DynamicObject();
+        arrWrapper->setProperty("arrayValue", juce::var(arrInner.get()));
+        fields->setProperty("songs", juce::var(arrWrapper.get()));
+
+        auto resp = FirestoreClient::getInstance()
+                        .createDocument(collPath, juce::var(fields.get()), authUid);
+        const bool ok = resp.isObject();
+
+        DBG ("[Queue] ensureHostQueueDoc created host doc '" << authUid << "' ok=" << (ok ? 1 : 0));
+
+        if (onDone) juce::MessageManager::callAsync([onDone, ok]
+            { onDone(ok, ok ? juce::String() : juce::String("createDocument failed")); });
+    });
 }
 
 void QueueService::appendSong(const juce::String& venueId,
@@ -375,7 +463,15 @@ void QueueService::appendSong(const juce::String& venueId,
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
-        auto found = findSingerByName(docs, juce::String(item.singerName));
+        // For auth singers (profileId == auth UID), look up by doc ID first
+        // so we can find a host slot that exists in Firestore even when its
+        // display name hasn't been resolved yet.
+        const juce::String profileId = juce::String(item.profileId).trim();
+        auto found = profileId.isNotEmpty()
+                   ? findSingerByDocId(docs, profileId)
+                   : FoundSinger{};
+        if (found.docName.isEmpty())
+            found = findSingerByName(docs, juce::String(item.singerName));
 
         if (found.docName.isNotEmpty())
         {
@@ -425,7 +521,6 @@ void QueueService::appendSong(const juce::String& venueId,
         // Queue singer docs use one canonical ID policy:
         // - Auth singers: their Firebase auth UID (`profileId`)
         // - Manual singers: deterministic namespaced ID (`manual-*`)
-        const juce::String profileId = juce::String(item.profileId).trim();
         const bool hasProfileId = profileId.isNotEmpty()
                        && profileId.compareIgnoreCase("unknown") != 0;
 

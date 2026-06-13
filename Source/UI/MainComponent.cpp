@@ -858,15 +858,27 @@ void MainComponent::setupUI()
             hostFullName = juce::String(h.fullName).trim();
         }
 
+        const juce::String trimmedSingerName = singerName.trim();
+        const bool singerIsHostKeyword = trimmedSingerName.equalsIgnoreCase("host");
         const bool singerLooksLikeHost = authUid.isNotEmpty()
-            && (singerName.trim().equalsIgnoreCase(hostStageName)
-             || singerName.trim().equalsIgnoreCase(hostFullName));
+            && (singerIsHostKeyword
+             || trimmedSingerName.equalsIgnoreCase(hostStageName)
+             || trimmedSingerName.equalsIgnoreCase(hostFullName));
+
+        // If the user typed the keyword "host", resolve it to the host's real
+        // stage name so QueueService's case-insensitive name lookup finds the
+        // pinned host slot rather than creating a new "host" singer entry.
+        const juce::String resolvedSingerName = (singerIsHostKeyword && singerLooksLikeHost)
+            ? (hostStageName.isNotEmpty() ? hostStageName
+               : hostFullName.isNotEmpty() ? hostFullName
+               : singerName)
+            : singerName;
 
         QueueItem item;
         item.id          = juce::Uuid().toString().toStdString();
         item.deviceId    = "local";
         item.profileId   = singerLooksLikeHost ? authUid.toStdString() : "";
-        item.singerName  = singerName.toStdString();
+        item.singerName  = resolvedSingerName.toStdString();
         item.songId      = r.song.id;
         item.songName    = r.song.songName;
         item.songArtist  = r.song.artistName;
@@ -880,12 +892,12 @@ void MainComponent::setupUI()
         const bool playNext = (r.action == SongSelectionResult::Action::PlayNext);
 
         DBG ("[SongSelect] " << (playNext ? "PlayNext" : "AddToQueue")
-             << " singer='" << singerName << "'"
+             << " singer='" << resolvedSingerName << "'"
              << " song='" << juce::String(item.songName) << "'");
 
         juce::Component::SafePointer<MainComponent> safe (this);
         QueueService::getInstance().appendSong (venueId, item,
-            [safe, venueId, singerName, playNext](bool ok, juce::String err)
+            [safe, venueId, resolvedSingerName, playNext](bool ok, juce::String err)
             {
                 if (!ok)
                 {
@@ -897,7 +909,7 @@ void MainComponent::setupUI()
                     return;
                 }
 
-                DBG ("[SongSelect] appendSong OK for '" << singerName << "'");
+                DBG ("[SongSelect] appendSong OK for '" << resolvedSingerName << "'");
 
                 if (playNext)
                 {
@@ -905,7 +917,7 @@ void MainComponent::setupUI()
                     // (position 1, right after the pinned host at 0).  We do
                     // this by bumping every non-host singer's order up by 1,
                     // then setting the new singer's order to 1.
-                    juce::Thread::launch([venueId, singerName, safe]()
+                    juce::Thread::launch([venueId, resolvedSingerName, safe]()
                     {
                         const auto collPath = "venues/" + venueId + "/queue";
                         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
@@ -935,8 +947,8 @@ void MainComponent::setupUI()
                             if (isHost || currentOrder == 0)
                                 continue;
 
-                            int newOrder = (nameVal.equalsIgnoreCase(singerName)) ? 1
-                                                                                  : currentOrder + 1;
+                            int newOrder = (nameVal.equalsIgnoreCase(resolvedSingerName)) ? 1
+                                                                                       : currentOrder + 1;
 
                             juce::DynamicObject::Ptr f = new juce::DynamicObject();
                             f->setProperty("order", FirestoreClient::integerValue(newOrder));
@@ -3487,8 +3499,30 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
         return merged;
 
     const auto h = HostService::getInstance().getCurrent();
+    const juce::String hostId = juce::String(h.userId.empty() ? h.profileId : h.userId).trim();
+
+    // If Firestore already has a doc for this host (doc ID == auth UID, or
+    // isHost flag set in Firestore), promote that real singer in-place rather
+    // than injecting a second synthetic slot — avoids duplicate host entries
+    // after the first song add.
+    if (hostId.isNotEmpty())
+    {
+        for (auto& s : merged)
+        {
+            if (s.isHost || juce::String(s.id).trim() == hostId)
+            {
+                s.isHost = true;
+                // Keep Firestore songs; update display name/avatar from credentials.
+                if (! h.stageName.empty()) s.name   = h.stageName;
+                else if (! h.fullName.empty()) s.name = h.fullName;
+                if (! h.avatarUrl.empty()) s.avatar = h.avatarUrl;
+                return merged;   // already in the right position from Firestore order
+            }
+        }
+    }
+
     Singers hostSinger;
-    hostSinger.id     = h.userId.empty() ? h.profileId : h.userId;
+    hostSinger.id     = hostId.toStdString();
     hostSinger.name   = ! h.stageName.empty() ? h.stageName
                       : ! h.fullName.empty()  ? h.fullName
                       : "Host";
@@ -4037,6 +4071,30 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     }
 
                     safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
+
+                    // Ensure the host always has a real Firestore queue doc
+                    // (created on first venue load, no-op thereafter).
+                    if (HostService::getInstance().hasCurrent())
+                    {
+                        const auto hostInfo = HostService::getInstance().getCurrent();
+                        const juce::String hostUid = juce::String(
+                            hostInfo.userId.empty() ? hostInfo.profileId : hostInfo.userId).trim();
+                        if (hostUid.isNotEmpty())
+                        {
+                            QueueService::getInstance().ensureHostQueueDoc(
+                                vid,
+                                hostUid,
+                                juce::String(hostInfo.stageName),
+                                juce::String(hostInfo.avatarUrl),
+                                [vid, safe](bool ok, juce::String err)
+                                {
+                                    if (! ok)
+                                        DBG("[Queue] ensureHostQueueDoc failed: " << err);
+                                    else if (safe != nullptr)
+                                        safe->reloadQueueFromFirestore(vid);
+                                });
+                        }
+                    }
 
                     // Ensure persisted queue order is canonical at startup so
                     // relaunches and mobile clients resume the same round state.
