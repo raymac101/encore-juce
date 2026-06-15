@@ -379,6 +379,29 @@ namespace
         return out;
     }
 
+    // Find a singer by profileId field (Firebase auth UID).
+    FoundSinger findSingerByProfileId(const juce::Array<juce::var>& docs,
+                                      const juce::String& profileId)
+    {
+        FoundSinger out;
+        if (profileId.isEmpty())
+            return out;
+
+        const auto target = profileId.trim().toLowerCase();
+        for (auto& d : docs)
+        {
+            auto fields = d.getProperty("fields", juce::var());
+            const auto profile = valueAsString(fieldByName(fields, "profileId")).trim().toLowerCase();
+            if (profile == target)
+            {
+                out.docName = d.getProperty("name", "").toString();
+                out.singer  = singerFromDoc(d);
+                return out;
+            }
+        }
+        return out;
+    }
+
     juce::String relPathFromDocName(const juce::String& docName)
     {
         // "projects/X/databases/(default)/documents/<rel>" -> "<rel>"
@@ -408,6 +431,8 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
 
         // If a doc already exists for this auth UID, nothing to do.
         auto existing = findSingerByDocId(docs, authUid);
+        if (existing.docName.isEmpty())
+            existing = findSingerByProfileId(docs, authUid);
         if (existing.docName.isNotEmpty())
         {
             DBG ("[Queue] ensureHostQueueDoc: host doc already exists for '" << authUid << "'");
@@ -470,6 +495,8 @@ void QueueService::appendSong(const juce::String& venueId,
         auto found = profileId.isNotEmpty()
                    ? findSingerByDocId(docs, profileId)
                    : FoundSinger{};
+        if (found.docName.isEmpty() && profileId.isNotEmpty())
+            found = findSingerByProfileId(docs, profileId);
         if (found.docName.isEmpty())
             found = findSingerByName(docs, juce::String(item.singerName));
 
@@ -750,17 +777,11 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
         }
 
         bool allOk = true;
-        // Host is always pinned at order=0 in Firestore.  Non-host singers
-        // must start at 1 so they never collide with the host in the sort.
-        const bool hasHost = std::any_of(orderedSingers.begin(), orderedSingers.end(),
-                                         [](const Singers& s) { return s.isHost; });
-        int writeOrder = hasHost ? 1 : 0;
+        int writeOrder = 0;
         int patched = 0;
 
         for (const auto& singer : orderedSingers)
         {
-            if (singer.isHost)
-                continue;
 
             juce::String relPath;
 

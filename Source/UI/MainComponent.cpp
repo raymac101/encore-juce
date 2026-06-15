@@ -582,8 +582,13 @@ void MainComponent::setupUI()
 
         const int pitchSemis = juce::roundToInt(firstSong.pitch);
 
+        // Loading a singer into the Now Singing card should not switch the
+        // lyric screen out of idle mode until transport actually starts.
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setForceIdleScreen(! autoStart);
+
         loadAndPlaySong(*match, resolvedVersionIndex, pitchSemis, autoStart,
-                        [this, singer](bool ok)
+                        [this, singer, autoStart](bool ok)
                         {
                             if (! ok)
                             {
@@ -591,6 +596,7 @@ void MainComponent::setupUI()
                                     queueBar->clearNowPlaying();
                                 localNowPlaying_ = {};
                                 hasLocalNowPlaying_ = false;
+                                lyricLowerThirdHoldNowSinging_ = false;
 
                                 if (bottomBar != nullptr)
                                     bottomBar->setPlaying(false);
@@ -603,6 +609,10 @@ void MainComponent::setupUI()
                                 queueBar->setNowPlaying(singer);
                             localNowPlaying_ = singer;
                             hasLocalNowPlaying_ = true;
+                            lyricLowerThirdHoldNowSinging_ = ! autoStart;
+                            syncLyricNowSingingSummary();
+                            if (queueBar != nullptr)
+                                syncLyricLowerThirdNextUp(queueBar->getSingers());
                         });
         return true;
     };
@@ -611,6 +621,12 @@ void MainComponent::setupUI()
     {
         localNowPlaying_ = {};
         hasLocalNowPlaying_ = false;
+        lyricLowerThirdHoldNowSinging_ = false;
+        syncLyricNowSingingSummary();
+        if (queueBar != nullptr)
+            syncLyricLowerThirdNextUp(queueBar->getSingers());
+        else if (lyricWindow_ != nullptr)
+            lyricWindow_->setLowerThirdNextUpSinger({});
     };
 
     auto clearLoadedPlaybackState = [this]()
@@ -699,6 +715,10 @@ void MainComponent::setupUI()
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(false);
 
+        lyricLowerThirdHoldNowSinging_ = false;
+        if (queueBar != nullptr)
+            syncLyricLowerThirdNextUp(queueBar->getSingers());
+
         if (bottomBar != nullptr)
             bottomBar->setPlaying(true);
         if (queueBar != nullptr)
@@ -723,6 +743,10 @@ void MainComponent::setupUI()
         }
         else if (audioEngine)
             audioEngine->stop();
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setForceIdleScreen(true);
+
         bottomBar->setProgress(0.0f);
         bottomBar->setPlaying(false);
         if (queueBar != nullptr)
@@ -742,6 +766,10 @@ void MainComponent::setupUI()
                 lyricWindow_->pauseVideo();
             else
                 audioEngine->pause();
+
+            if (lyricWindow_ != nullptr)
+                lyricWindow_->setForceIdleScreen(true);
+
             if (queueBar != nullptr)
                 queueBar->setPlaying(false);
         }
@@ -851,11 +879,13 @@ void MainComponent::setupUI()
 
         juce::String hostStageName;
         juce::String hostFullName;
+        juce::String hostAvatarUrl;
         if (HostService::getInstance().hasCurrent())
         {
             const auto h = HostService::getInstance().getCurrent();
             hostStageName = juce::String(h.stageName).trim();
             hostFullName = juce::String(h.fullName).trim();
+            hostAvatarUrl = juce::String(h.avatarUrl).trim();
         }
 
         const juce::String trimmedSingerName = singerName.trim();
@@ -896,80 +926,110 @@ void MainComponent::setupUI()
              << " song='" << juce::String(item.songName) << "'");
 
         juce::Component::SafePointer<MainComponent> safe (this);
-        QueueService::getInstance().appendSong (venueId, item,
-            [safe, venueId, resolvedSingerName, playNext](bool ok, juce::String err)
-            {
-                if (!ok)
+        auto appendSelectedSong = [safe, venueId, resolvedSingerName, playNext, item]()
+        {
+            QueueService::getInstance().appendSong (venueId, item,
+                [safe, venueId, resolvedSingerName, playNext](bool ok, juce::String err)
                 {
-                    DBG ("[SongSelect] appendSong FAILED: " << err);
-                    juce::AlertWindow::showMessageBoxAsync(
-                        juce::MessageBoxIconType::WarningIcon,
-                        "Could Not Add Song",
-                        "Failed to add the song to the queue: " + err);
-                    return;
-                }
-
-                DBG ("[SongSelect] appendSong OK for '" << resolvedSingerName << "'");
-
-                if (playNext)
-                {
-                    // Move the newly-added singer to the front of the rotation
-                    // (position 1, right after the pinned host at 0).  We do
-                    // this by bumping every non-host singer's order up by 1,
-                    // then setting the new singer's order to 1.
-                    juce::Thread::launch([venueId, resolvedSingerName, safe]()
+                    if (!ok)
                     {
-                        const auto collPath = "venues/" + venueId + "/queue";
-                        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+                        DBG ("[SongSelect] appendSong FAILED: " << err);
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Could Not Add Song",
+                            "Failed to add the song to the queue: " + err);
+                        return;
+                    }
 
-                        for (auto& d : docs)
+                    DBG ("[SongSelect] appendSong OK for '" << resolvedSingerName << "'");
+
+                    if (playNext)
+                    {
+                        // Move the newly-added singer to the front of the rotation
+                        // (position 1, right after the pinned host at 0).  We do
+                        // this by bumping every non-host singer's order up by 1,
+                        // then setting the new singer's order to 1.
+                        juce::Thread::launch([venueId, resolvedSingerName, safe]()
                         {
-                            auto fields   = d.getProperty("fields", juce::var());
-                            auto nameVar  = fields.getProperty("name", juce::var());
-                            juce::String docName = d.getProperty("name", "").toString();
-                            juce::String rel = docName.fromLastOccurrenceOf("/documents/", false, false);
-                            if (rel.isEmpty()) continue;
+                            const auto collPath = "venues/" + venueId + "/queue";
+                            auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
-                            // Parse name and order
-                            auto nameVal = nameVar.hasProperty("stringValue")
-                                               ? nameVar.getProperty("stringValue", "").toString()
-                                               : juce::String();
-                            auto orderVar = fields.getProperty("order", juce::var());
-                            int currentOrder = orderVar.hasProperty("integerValue")
-                                                   ? (int) orderVar.getProperty("integerValue", "0")
-                                                         .toString().getLargeIntValue()
-                                                   : 0;
+                            for (auto& d : docs)
+                            {
+                                auto fields   = d.getProperty("fields", juce::var());
+                                auto nameVar  = fields.getProperty("name", juce::var());
+                                juce::String docName = d.getProperty("name", "").toString();
+                                juce::String rel = docName.fromLastOccurrenceOf("/documents/", false, false);
+                                if (rel.isEmpty()) continue;
 
-                            // Skip the host (order 0 or isHost flag)
-                            auto isHostVar = fields.getProperty("isHost", juce::var());
-                            bool isHost = isHostVar.hasProperty("booleanValue")
-                                              && (bool) isHostVar.getProperty("booleanValue", false);
-                            if (isHost || currentOrder == 0)
-                                continue;
+                                // Parse name and order
+                                auto nameVal = nameVar.hasProperty("stringValue")
+                                                   ? nameVar.getProperty("stringValue", "").toString()
+                                                   : juce::String();
+                                auto orderVar = fields.getProperty("order", juce::var());
+                                int currentOrder = orderVar.hasProperty("integerValue")
+                                                       ? (int) orderVar.getProperty("integerValue", "0")
+                                                             .toString().getLargeIntValue()
+                                                       : 0;
 
-                            int newOrder = (nameVal.equalsIgnoreCase(resolvedSingerName)) ? 1
-                                                                                       : currentOrder + 1;
+                                // Skip the host (order 0 or isHost flag)
+                                auto isHostVar = fields.getProperty("isHost", juce::var());
+                                bool isHost = isHostVar.hasProperty("booleanValue")
+                                                  && (bool) isHostVar.getProperty("booleanValue", false);
+                                if (isHost || currentOrder == 0)
+                                    continue;
 
-                            juce::DynamicObject::Ptr f = new juce::DynamicObject();
-                            f->setProperty("order", FirestoreClient::integerValue(newOrder));
-                            FirestoreClient::getInstance()
-                                .patchDocument(rel + "?updateMask.fieldPaths=order",
-                                               juce::var(f.get()));
-                        }
+                                int newOrder = (nameVal.equalsIgnoreCase(resolvedSingerName)) ? 1
+                                                                                           : currentOrder + 1;
 
-                        // Reload on the message thread once all patches are done.
-                        juce::MessageManager::callAsync([venueId, safe]() mutable
-                        {
-                            if (safe != nullptr)
-                                safe->reloadQueueFromFirestore(venueId);
+                                juce::DynamicObject::Ptr f = new juce::DynamicObject();
+                                f->setProperty("order", FirestoreClient::integerValue(newOrder));
+                                FirestoreClient::getInstance()
+                                    .patchDocument(rel + "?updateMask.fieldPaths=order",
+                                                   juce::var(f.get()));
+                            }
+
+                            // Reload on the message thread once all patches are done.
+                            juce::MessageManager::callAsync([venueId, safe]() mutable
+                            {
+                                if (safe != nullptr)
+                                    safe->reloadQueueFromFirestore(venueId);
+                            });
                         });
-                    });
-                }
-                else
+                    }
+                    else if (safe != nullptr)
+                    {
+                        safe->reloadQueueFromFirestore(venueId);
+                    }
+                });
+        };
+
+        if (singerLooksLikeHost && authUid.isNotEmpty())
+        {
+            QueueService::getInstance().ensureHostQueueDoc(
+                venueId,
+                authUid,
+                hostStageName.isNotEmpty() ? hostStageName : resolvedSingerName,
+                hostAvatarUrl,
+                [appendSelectedSong](bool ok, juce::String err)
                 {
-                    safe->reloadQueueFromFirestore(venueId);
-                }
-            });
+                    if (! ok)
+                    {
+                        DBG ("[SongSelect] ensureHostQueueDoc FAILED: " << err);
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Could Not Add Song",
+                            "Failed to prepare the host queue slot: " + err);
+                        return;
+                    }
+
+                    appendSelectedSong();
+                });
+        }
+        else
+        {
+            appendSelectedSong();
+        }
     };
 
     // Persist Song-Edit dialog results.  Save also patches the venue
@@ -1866,6 +1926,9 @@ void MainComponent::setupUI()
             lyricWindow_->pauseVideo();
         else if (audioEngine != nullptr)
             audioEngine->pause();
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setForceIdleScreen(true);
 
         if (bottomBar != nullptr)
             bottomBar->setPlaying(false);
@@ -3499,24 +3562,26 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
         return merged;
 
     const auto h = HostService::getInstance().getCurrent();
-    const juce::String hostId = juce::String(h.userId.empty() ? h.profileId : h.userId).trim();
+    const juce::String authUid = FirestoreClient::getInstance().getUserId().trim();
+    const juce::String hostId = authUid.isNotEmpty()
+        ? authUid
+        : juce::String(! h.profileId.empty() ? h.profileId : h.userId).trim();
 
-    // If Firestore already has a doc for this host (doc ID == auth UID, or
-    // isHost flag set in Firestore), promote that real singer in-place rather
-    // than injecting a second synthetic slot — avoids duplicate host entries
-    // after the first song add.
+    int existingHostIndex = -1;
     if (hostId.isNotEmpty())
     {
-        for (auto& s : merged)
+        for (int i = 0; i < (int) merged.size(); ++i)
         {
+            auto& s = merged[(size_t) i];
             if (s.isHost || juce::String(s.id).trim() == hostId)
             {
+                existingHostIndex = i;
                 s.isHost = true;
                 // Keep Firestore songs; update display name/avatar from credentials.
-                if (! h.stageName.empty()) s.name   = h.stageName;
+                if (! h.stageName.empty()) s.name = h.stageName;
                 else if (! h.fullName.empty()) s.name = h.fullName;
                 if (! h.avatarUrl.empty()) s.avatar = h.avatarUrl;
-                return merged;   // already in the right position from Firestore order
+                break;
             }
         }
     }
@@ -3573,8 +3638,15 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
         }
     }
 
-    preferredIndex = juce::jlimit(0, (int) merged.size(), preferredIndex);
-    merged.insert(merged.begin() + preferredIndex, std::move(hostSinger));
+    if (existingHostIndex >= 0)
+    {
+        // No synthetic insertion needed when a real host doc is already present.
+    }
+    else
+    {
+        preferredIndex = juce::jlimit(0, (int) merged.size(), preferredIndex);
+        merged.insert(merged.begin() + preferredIndex, std::move(hostSinger));
+    }
 
     // Preserve/assign "new singer" highlight across watcher refreshes:
     // - Existing highlighted singers remain highlighted until they've had a turn.
@@ -3631,18 +3703,16 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 
     for (const auto& singer : singers)
     {
-        if (singer.isHost)
+        if (singer.isHost || singer.songs.empty())
             continue;
 
         LyricDisplayComponent::QueuePreviewEntry entry;
         entry.singerName = juce::String (singer.name);
+        entry.avatarPath = juce::String (singer.avatar);
 
-        if (! singer.songs.empty())
-        {
-            const auto& song = singer.songs.front();
-            entry.songName = juce::String (song.songName);
-            entry.artistName = juce::String (song.songArtist);
-        }
+        const auto& song = singer.songs.front();
+        entry.songName = juce::String (song.songName);
+        entry.artistName = juce::String (song.songArtist);
 
         preview.push_back (std::move (entry));
         if ((int) preview.size() >= 3)
@@ -3659,6 +3729,74 @@ void MainComponent::syncLyricIdlePreview(const std::vector<Singers>& singers)
 
     lyricWindow_->setVenueContext (activeVenueId_, activeVenueName_);
     lyricWindow_->setQueuePreview (buildLyricQueuePreview (singers));
+    syncLyricNowSingingSummary();
+    syncLyricLowerThirdNextUp(singers);
+}
+
+juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const
+{
+    for (const auto& singer : singers)
+    {
+        if (singer.isHost || singer.songs.empty())
+            continue;
+
+        const auto name = juce::String(singer.name).trim();
+        if (name.isNotEmpty())
+            return name;
+    }
+
+    return {};
+}
+
+void MainComponent::syncLyricLowerThirdNextUp(const std::vector<Singers>& singers)
+{
+    if (lyricWindow_ == nullptr)
+        return;
+
+    if (lyricLowerThirdHoldNowSinging_ && hasLocalNowPlaying_)
+    {
+        const auto nowName = juce::String(localNowPlaying_.name).trim();
+        if (nowName.isNotEmpty())
+        {
+            lyricWindow_->setLowerThirdNextUpSinger(nowName);
+            return;
+        }
+    }
+
+    lyricWindow_->setLowerThirdNextUpSinger(buildLyricLowerThirdNextUpSinger(singers));
+}
+
+void MainComponent::syncLyricNowSingingSummary()
+{
+    if (lyricWindow_ == nullptr)
+        return;
+
+    if (! hasLocalNowPlaying_)
+    {
+        lyricWindow_->setNowSingingInfo ({}, {}, {}, {});
+        return;
+    }
+
+    juce::String singerName = juce::String (localNowPlaying_.name).trim();
+    juce::String songName;
+    juce::String artistName;
+    juce::String avatarPath = juce::String (localNowPlaying_.avatar).trim();
+
+    if (! localNowPlaying_.songs.empty())
+    {
+        const auto& nowSong = localNowPlaying_.songs.front();
+        songName = juce::String (nowSong.songName).trim();
+        artistName = juce::String (nowSong.songArtist).trim();
+        if (avatarPath.isEmpty())
+            avatarPath = juce::String (nowSong.singerAvatar).trim();
+    }
+    else
+    {
+        songName = juce::String (currentSong.songName).trim();
+        artistName = juce::String (currentSong.artistName).trim();
+    }
+
+    lyricWindow_->setNowSingingInfo (singerName, songName, artistName, avatarPath);
 }
 
 void MainComponent::updateLoadingOverlay(const juce::String& message, double progress)
@@ -4070,15 +4208,17 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         safe->queueBar->clearNowPlaying();
                     }
 
+                    safe->syncLyricNowSingingSummary();
+
                     safe->queueBar->setSingers (safe->composeQueueWithHost(snap.singers));
+                    safe->syncLyricLowerThirdNextUp(safe->queueBar->getSingers());
 
                     // Ensure the host always has a real Firestore queue doc
                     // (created on first venue load, no-op thereafter).
                     if (HostService::getInstance().hasCurrent())
                     {
                         const auto hostInfo = HostService::getInstance().getCurrent();
-                        const juce::String hostUid = juce::String(
-                            hostInfo.userId.empty() ? hostInfo.profileId : hostInfo.userId).trim();
+                        const juce::String hostUid = FirestoreClient::getInstance().getUserId().trim();
                         if (hostUid.isNotEmpty())
                         {
                             QueueService::getInstance().ensureHostQueueDoc(

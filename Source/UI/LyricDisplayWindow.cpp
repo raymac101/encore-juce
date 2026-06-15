@@ -117,6 +117,21 @@ void LyricDisplayWindow::setQueuePreview (const std::vector<LyricDisplayComponen
         display_->setQueuePreview (entries);
 }
 
+void LyricDisplayWindow::setLowerThirdNextUpSinger (const juce::String& singerName)
+{
+    if (display_ != nullptr)
+        display_->setLowerThirdNextUpSinger (singerName);
+}
+
+void LyricDisplayWindow::setNowSingingInfo (const juce::String& singerName,
+                                            const juce::String& songName,
+                                            const juce::String& artistName,
+                                            const juce::String& avatarPath)
+{
+    if (display_ != nullptr)
+        display_->setNowSingingInfo (singerName, songName, artistName, avatarPath);
+}
+
 void LyricDisplayWindow::setForceIdleScreen (bool shouldForce)
 {
     if (display_ != nullptr)

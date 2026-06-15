@@ -220,6 +220,7 @@ private:
     // loadQueue callbacks until the host explicitly clears or replaces it.
     Singers localNowPlaying_;
     bool    hasLocalNowPlaying_ = false;
+    bool    lyricLowerThirdHoldNowSinging_ = false;
     
     //==============================================================================
     // UI Setup
@@ -246,6 +247,9 @@ private:
                                     bool showNoSongsMessage = false);
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);
+    void syncLyricNowSingingSummary();
+    juce::String buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const;
+    void syncLyricLowerThirdNextUp(const std::vector<Singers>& singers);
     std::vector<LyricDisplayComponent::QueuePreviewEntry>
     buildLyricQueuePreview(const std::vector<Singers>& singers) const;
 

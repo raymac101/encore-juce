@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <unordered_map>
 #include <vector>
 #include "../CDG/CDGDecoder.h"
 
@@ -27,6 +28,7 @@ public:
         juce::String singerName;
         juce::String songName;
         juce::String artistName;
+        juce::String avatarPath;
     };
 
     struct AdEntry
@@ -109,6 +111,17 @@ public:
     /** Push the next singers shown in the idle split-screen panel. */
     void setQueuePreview (const std::vector<QueuePreviewEntry>& entries);
 
+    /** Lower-third next-up singer shown on the left side of the black bar.
+        Pass empty to hide. */
+    void setLowerThirdNextUpSinger (const juce::String& singerName);
+
+    /** Idle-screen now-singing summary shown above the Next Up list.
+        Pass empty values to hide the section. */
+    void setNowSingingInfo (const juce::String& singerName,
+                            const juce::String& songName,
+                            const juce::String& artistName,
+                            const juce::String& avatarPath);
+
     /** Forces idle rendering even when a song is preloaded. The flag clears
         automatically when playback resumes. */
     void setForceIdleScreen (bool shouldForce);
@@ -131,6 +144,7 @@ private:
     void layoutVideoBounds();
     void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
     void updateAdPanelAnimation (bool idleMode);
+    juce::Image getQueuePreviewAvatar (const juce::String& avatarPath);
 
     double getPlaybackPositionSeconds() const;
     double getPlaybackDurationSeconds() const;
@@ -158,6 +172,11 @@ private:
     juce::String nextSinger_;
     juce::String nextSong_;
     juce::String nextArtist_;
+    juce::String nowSingingName_;
+    juce::String nowSingingSong_;
+    juce::String nowSingingArtist_;
+    juce::String nowSingingAvatarPath_;
+    juce::String lowerThirdNextUpSinger_;
     juce::String venueCode_;
     juce::String venueId_;
     juce::String venueName_;
@@ -165,6 +184,7 @@ private:
     juce::Image  logoImage_;
 
     std::vector<QueuePreviewEntry> queuePreview_;
+    std::unordered_map<std::string, juce::Image> queueAvatarCache_;
 
     std::vector<AdEntry> ads_;
     int currentAdIndex_ = -1;

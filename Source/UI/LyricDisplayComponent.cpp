@@ -160,6 +160,33 @@ namespace
 
         return out;
     }
+
+    static juce::Image loadAvatarFromAssets (const juce::String& avatarPath)
+    {
+        if (avatarPath.isEmpty())
+            return {};
+
+        auto appDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                          .getParentDirectory();
+
+        auto baseName = avatarPath.fromLastOccurrenceOf ("/", false, false);
+        if (baseName.isEmpty())
+            baseName = avatarPath;
+
+        auto candidate1 = appDir.getChildFile ("assets/icon/" + baseName);
+        if (candidate1.existsAsFile())
+            return juce::ImageFileFormat::loadFrom (candidate1);
+
+        auto candidate2 = appDir.getChildFile (avatarPath);
+        if (candidate2.existsAsFile())
+            return juce::ImageFileFormat::loadFrom (candidate2);
+
+        auto candidate3 = appDir.getChildFile ("assets/" + avatarPath);
+        if (candidate3.existsAsFile())
+            return juce::ImageFileFormat::loadFrom (candidate3);
+
+        return {};
+    }
 }
 
 //==============================================================================
@@ -234,6 +261,52 @@ void LyricDisplayComponent::setVenueContext (const juce::String& venueId,
 void LyricDisplayComponent::setQueuePreview (const std::vector<QueuePreviewEntry>& entries)
 {
     queuePreview_ = entries;
+    for (const auto& entry : queuePreview_)
+    {
+        const auto key = entry.avatarPath.trim().toStdString();
+        if (key.empty() || queueAvatarCache_.find (key) != queueAvatarCache_.end())
+            continue;
+
+        queueAvatarCache_[key] = loadAvatarFromAssets (entry.avatarPath);
+    }
+    repaint();
+}
+
+void LyricDisplayComponent::setLowerThirdNextUpSinger (const juce::String& singerName)
+{
+    lowerThirdNextUpSinger_ = singerName.trim();
+    repaint();
+}
+
+juce::Image LyricDisplayComponent::getQueuePreviewAvatar (const juce::String& avatarPath)
+{
+    const auto key = avatarPath.trim().toStdString();
+    if (key.empty())
+        return {};
+
+    const auto cached = queueAvatarCache_.find (key);
+    if (cached != queueAvatarCache_.end())
+        return cached->second;
+
+    auto image = loadAvatarFromAssets (avatarPath);
+    queueAvatarCache_[key] = image;
+    return image;
+}
+
+void LyricDisplayComponent::setNowSingingInfo (const juce::String& singerName,
+                                               const juce::String& songName,
+                                               const juce::String& artistName,
+                                               const juce::String& avatarPath)
+{
+    nowSingingName_ = singerName;
+    nowSingingSong_ = songName;
+    nowSingingArtist_ = artistName;
+    nowSingingAvatarPath_ = avatarPath;
+
+    const auto key = nowSingingAvatarPath_.trim().toStdString();
+    if (! key.empty() && queueAvatarCache_.find (key) == queueAvatarCache_.end())
+        queueAvatarCache_[key] = loadAvatarFromAssets (nowSingingAvatarPath_);
+
     repaint();
 }
 
@@ -487,7 +560,8 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
     if (! idleMode && adPanelVisibility_ > 0.01f)
         paintAdPanel (g, getContentRenderArea (getAdRenderArea (area, false)), true);
 
-    paintOverlay (g, idleMode ? area : getPrimaryRenderArea (area, false));
+    // Keep lower-third overlays full-width in all modes.
+    paintOverlay (g, area);
 }
 
 void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> area)
@@ -505,25 +579,99 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     g.setColour (juce::Colours::black.withAlpha (0.22f));
     g.fillRect (right);
 
-    auto brandArea = left.removeFromTop ((int) (left.getHeight() * 0.52f)).reduced (28, 24);
-    auto queueArea = left.reduced (28, 14);
+    // Keep branding compact so the queue panel has enough height for 3 rows.
+    auto brandArea = left.removeFromTop ((int) (left.getHeight() * 0.38f)).reduced (24, 16);
+    auto queueArea = left.reduced (24, 10);
 
     if (logoImage_.isValid())
     {
-        auto logoArea = brandArea.removeFromTop ((int) (brandArea.getHeight() * 0.70f));
+        auto logoArea = brandArea.removeFromTop ((int) (brandArea.getHeight() * 0.56f));
         g.drawImage (logoImage_, logoArea.toFloat(),
                      juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
     }
 
     const auto venueLabel = venueName_.isNotEmpty() ? venueName_ : juce::String ("Encore Karaoke");
     g.setColour (juce::Colours::white);
-    g.setFont (juce::Font (juce::FontOptions().withHeight (juce::jmax (30.0f, brandArea.getHeight() * 0.20f))).boldened());
+    g.setFont (juce::Font (juce::FontOptions().withHeight (juce::jmax (24.0f, brandArea.getHeight() * 0.16f))).boldened());
     g.drawFittedText (venueLabel, brandArea, juce::Justification::centredTop, 2);
+
+    if (nowSingingName_.isNotEmpty())
+    {
+        g.setColour (juce::Colour (0xff30daff));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
+        auto nowTitle = queueArea.removeFromTop (30);
+        g.drawText ("Now Singing", nowTitle, juce::Justification::centredLeft, true);
+
+        auto nowCard = queueArea.removeFromTop (72).reduced (0, 6);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (nowCard.toFloat(), 8.0f);
+
+        auto nowText = nowCard.reduced (12, 10);
+        auto nowAvatarBox = nowText.removeFromLeft (48);
+        const int nowAvatarSize = juce::jmax (18, juce::jmin (nowAvatarBox.getWidth(), nowAvatarBox.getHeight()) - 8);
+        auto nowAvatarArea = juce::Rectangle<int> (
+            nowAvatarBox.getX() + (nowAvatarBox.getWidth()  - nowAvatarSize) / 2,
+            nowAvatarBox.getY() + (nowAvatarBox.getHeight() - nowAvatarSize) / 2,
+            nowAvatarSize,
+            nowAvatarSize);
+
+        // Prefer the same avatar source used by the Next Up list for this
+        // singer so both cards render consistently.
+        juce::String resolvedNowAvatarPath;
+        for (const auto& entry : queuePreview_)
+        {
+            if (entry.singerName.trim().equalsIgnoreCase (nowSingingName_.trim())
+                && entry.avatarPath.trim().isNotEmpty())
+            {
+                resolvedNowAvatarPath = entry.avatarPath;
+                break;
+            }
+        }
+
+        if (resolvedNowAvatarPath.isEmpty())
+            resolvedNowAvatarPath = nowSingingAvatarPath_;
+
+        const auto nowAvatar = getQueuePreviewAvatar (resolvedNowAvatarPath);
+        if (! nowAvatar.isValid())
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.70f));
+            g.fillEllipse (nowAvatarArea.toFloat());
+        }
+
+        if (nowAvatar.isValid())
+        {
+            juce::Graphics::ScopedSaveState state (g);
+            juce::Path clipPath;
+            clipPath.addEllipse (nowAvatarArea.toFloat());
+            g.reduceClipRegion (clipPath);
+            g.drawImage (nowAvatar, nowAvatarArea.toFloat(), juce::RectanglePlacement::fillDestination);
+        }
+        g.setColour (juce::Colour (0xff30daff).withAlpha (0.22f));
+        g.drawEllipse (nowAvatarArea.toFloat().reduced (0.5f), 1.2f);
+
+        nowText.removeFromLeft (6);
+        g.setColour (juce::Colours::white);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
+        g.drawText (nowSingingName_, nowText.removeFromTop (24), juce::Justification::centredLeft, true);
+
+        juce::String nowSongLine = nowSingingSong_;
+        if (nowSingingArtist_.isNotEmpty())
+            nowSongLine << " - " << nowSingingArtist_;
+
+        g.setColour (juce::Colours::white.withAlpha (0.80f));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
+        g.drawFittedText (nowSongLine, nowText, juce::Justification::centredLeft, 1);
+
+        queueArea.removeFromTop (4);
+    }
 
     g.setColour (juce::Colour (0xff30daff));
     g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)).boldened());
-    auto queueTitle = queueArea.removeFromTop (36);
-    g.drawText ("Next Up", queueTitle, juce::Justification::centredLeft, true);
+    if (! queuePreview_.empty())
+    {
+        auto queueTitle = queueArea.removeFromTop (36);
+        g.drawText ("Next Up", queueTitle, juce::Justification::centredLeft, true);
+    }
 
     if (queuePreview_.empty())
     {
@@ -533,9 +681,14 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     }
     else
     {
-        const int rowH = juce::jmax (72, queueArea.getHeight() / 3);
+        // Keep queue rows visually stable (similar to the Now Singing card)
+        // so avatar badges stay circular and text rhythm is consistent.
+        const int rowH = 72;
         for (int i = 0; i < (int) queuePreview_.size() && i < 3; ++i)
         {
+            if (queueArea.getHeight() < rowH)
+                break;
+
             auto row = queueArea.removeFromTop (rowH).reduced (0, 6);
 
             g.setColour (juce::Colours::black.withAlpha (0.35f));
@@ -545,6 +698,39 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             g.setColour (juce::Colour (0xff30daff));
             g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
             g.drawText (juce::String (i + 1), text.removeFromLeft (26), juce::Justification::centred);
+
+            auto avatarBox = text.removeFromLeft (44);
+            const int avatarSize = juce::jmax (18, juce::jmin (avatarBox.getWidth(), avatarBox.getHeight()) - 8);
+            auto avatarArea = juce::Rectangle<int> (
+                avatarBox.getX() + (avatarBox.getWidth()  - avatarSize) / 2,
+                avatarBox.getY() + (avatarBox.getHeight() - avatarSize) / 2,
+                avatarSize,
+                avatarSize);
+
+            const auto avatar = getQueuePreviewAvatar (queuePreview_[(size_t) i].avatarPath);
+
+            // Keep real avatars un-tinted. Draw fallback backing only when missing.
+            if (! avatar.isValid())
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.70f));
+                g.fillEllipse (avatarArea.toFloat());
+            }
+
+            if (avatar.isValid())
+            {
+                juce::Graphics::ScopedSaveState state (g);
+                juce::Path clipPath;
+                clipPath.addEllipse (avatarArea.toFloat());
+                g.reduceClipRegion (clipPath);
+                g.drawImage (avatar, avatarArea.toFloat(), juce::RectanglePlacement::fillDestination);
+            }
+
+            // Subtle ring for separation from row background.
+            g.setColour (juce::Colour (0xff30daff).withAlpha (0.22f));
+            g.drawEllipse (avatarArea.toFloat().reduced (0.5f), 1.2f);
+
+            // Breathing room between avatar and singer name.
+            text.removeFromLeft (8);
 
             g.setColour (juce::Colours::white);
             g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
@@ -586,11 +772,6 @@ void LyricDisplayComponent::paintAdPanel (juce::Graphics& g, juce::Rectangle<int
             g.drawImage (currentAdImage_, adArea.toFloat().reduced (10.0f),
                          juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
         }
-
-        g.setColour (juce::Colours::white.withAlpha (0.75f));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
-        g.drawText (currentAd.name.isNotEmpty() ? currentAd.name : "Sponsored", adArea.reduced (14),
-                    juce::Justification::bottomLeft, true);
     }
     else
     {
@@ -667,8 +848,8 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
         }
     }
 
-    // --- Venue code (bottom-centre lower-third, full-width black bar) ---
-    if (venueCode_.isNotEmpty())
+    // --- Bottom lower-third: left Next Up, right Venue Code ---
+    if (venueCode_.isNotEmpty() || lowerThirdNextUpSinger_.isNotEmpty())
     {
         const int codeH = juce::jmax (90, area.getHeight() / 9);
         auto stripe = area.withTop (area.getBottom() - codeH);
@@ -678,22 +859,43 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
         g.fillRect (stripe);
 
         auto inner = stripe.reduced (24, 10);
+        auto leftHalf  = inner.removeFromLeft (inner.getWidth() / 2).reduced (8, 0);
+        auto rightHalf = inner.reduced (8, 0);
 
-        // Auto-scale text to the stripe height.
-        const float promptSize = juce::jmax (18.0f, inner.getHeight() * 0.32f);
-        const float codeSize   = juce::jmax (32.0f, inner.getHeight() * 0.62f);
+        // Divider line between left/right halves.
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (leftHalf.getRight() + 7, stripe.getY() + 12, 1, stripe.getHeight() - 24);
 
-        // Top line: prompt text in white.
-        g.setColour (juce::Colours::white);
-        g.setFont (juce::Font (juce::FontOptions().withHeight (promptSize)));
-        auto promptArea = inner.removeFromTop ((int) (promptSize * 1.15f));
-        g.drawFittedText ("Enter this code to join the karaoke queue",
-                          promptArea, juce::Justification::centred, 1);
+        if (lowerThirdNextUpSinger_.isNotEmpty())
+        {
+            const float titleSize = juce::jmax (16.0f, leftHalf.getHeight() * 0.28f);
+            const float singerSize = juce::jmax (24.0f, leftHalf.getHeight() * 0.48f);
 
-        // Bottom line: the venue code in the bright highlight colour.
-        g.setColour (juce::Colour (0xff30daff));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (codeSize)).boldened());
-        g.drawFittedText (venueCode_, inner, juce::Justification::centred, 1);
+            g.setColour (juce::Colour (0xff30daff));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (titleSize)).boldened());
+            auto titleArea = leftHalf.removeFromTop ((int) (titleSize * 1.15f));
+            g.drawFittedText ("Next Up", titleArea, juce::Justification::centredLeft, 1);
+
+            g.setColour (juce::Colours::white);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (singerSize)).boldened());
+            g.drawFittedText (lowerThirdNextUpSinger_, leftHalf, juce::Justification::centredLeft, 1);
+        }
+
+        if (venueCode_.isNotEmpty())
+        {
+            const float promptSize = juce::jmax (16.0f, rightHalf.getHeight() * 0.28f);
+            const float codeSize   = juce::jmax (28.0f, rightHalf.getHeight() * 0.54f);
+
+            g.setColour (juce::Colours::white);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (promptSize)));
+            auto promptArea = rightHalf.removeFromTop ((int) (promptSize * 1.15f));
+            g.drawFittedText ("Enter this code to join the karaoke queue",
+                              promptArea, juce::Justification::centred, 1);
+
+            g.setColour (juce::Colour (0xff30daff));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (codeSize)).boldened());
+            g.drawFittedText (venueCode_, rightHalf, juce::Justification::centred, 1);
+        }
     }
 }
 
@@ -787,7 +989,7 @@ int LyricDisplayComponent::getAdPanelWidth (juce::Rectangle<int> area, bool idle
 
 int LyricDisplayComponent::getVenueCodeBarHeight (juce::Rectangle<int> area) const
 {
-    if (venueCode_.isEmpty())
+    if (venueCode_.isEmpty() && lowerThirdNextUpSinger_.isEmpty())
         return 0;
 
     const int percent = UserPreferences::getInstance().getLyricVenueCodeBarHeightPercent();
