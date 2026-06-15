@@ -4086,12 +4086,13 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                                 hostUid,
                                 juce::String(hostInfo.stageName),
                                 juce::String(hostInfo.avatarUrl),
-                                [vid, safe](bool ok, juce::String err)
+                                [](bool ok, juce::String err)
                                 {
                                     if (! ok)
                                         DBG("[Queue] ensureHostQueueDoc failed: " << err);
-                                    else if (safe != nullptr)
-                                        safe->reloadQueueFromFirestore(vid);
+                                    // No reload needed — composeQueueWithHost already
+                                    // showed the correct queue; the watcher will pick
+                                    // up the new doc on its next poll cycle.
                                 });
                         }
                     }

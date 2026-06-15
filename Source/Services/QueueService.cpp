@@ -750,7 +750,11 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
         }
 
         bool allOk = true;
-        int writeOrder = 0;
+        // Host is always pinned at order=0 in Firestore.  Non-host singers
+        // must start at 1 so they never collide with the host in the sort.
+        const bool hasHost = std::any_of(orderedSingers.begin(), orderedSingers.end(),
+                                         [](const Singers& s) { return s.isHost; });
+        int writeOrder = hasHost ? 1 : 0;
         int patched = 0;
 
         for (const auto& singer : orderedSingers)
