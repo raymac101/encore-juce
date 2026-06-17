@@ -77,6 +77,7 @@ public:
     void setMusicVolume(float volume);
     void setVocalVolume(float volume);
     void setVocalEffectsLevel(float level);
+    bool triggerOneShotSfx(const juce::File& audioFile, float gain = 0.85f);
 
     float getMasterVolume()      const noexcept { return masterVolume.load(); }
     float getMusicVolume()       const noexcept { return musicVolume.load(); }
@@ -270,6 +271,14 @@ private:
     std::atomic<float> masterLimiterReductionMeter { 0.0f };
 
     //==========================================================================
+    // One-shot SFX overlay (ribbon sound pad)
+    std::mutex sfxMutex;
+    juce::AudioBuffer<float> oneShotSfxBuffer;
+    int oneShotSfxReadPos = 0;
+    float oneShotSfxGain = 0.85f;
+    std::atomic<bool> oneShotSfxActive { false };
+
+    //==========================================================================
     // CDG
     bool cdgLoaded = false;
     std::function<void(double, const juce::String&)> cdgSyncCallback;
@@ -283,6 +292,7 @@ private:
     bool setupAudioDevice();
     void persistActiveAudioDevice() const;
     void handleAudioDeviceError(const juce::String& message);
+    bool mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
     void applyReverb(juce::AudioBuffer<float>& buffer);
     void applyEcho(juce::AudioBuffer<float>& buffer);
     void applyMasterEq(juce::AudioBuffer<float>& buffer);

@@ -125,6 +125,46 @@ queue.clear.partial_title=File vidée avec avertissement
 queue.clear.partial_body=Les chanteurs de la file ont été supprimés, mais les demandes en attente n'ont pas toutes pu être supprimées : 
 queue.clear.cleared=File vidée.
 
+# Ruban de controles rapides
+ribbon.show=Afficher le ruban
+ribbon.hide=Masquer le ruban
+ribbon.back=Retour au ruban
+ribbon.card.background=Musique de fond
+ribbon.card.lyric=Affichage des paroles
+ribbon.card.next_singer=Chanteur suivant
+ribbon.card.sfx=Effets sonores
+ribbon.panel.background.title=Musique de fond
+ribbon.panel.lyric.title=Affichage des paroles
+ribbon.panel.next_singer.title=Chanteur suivant
+ribbon.panel.sfx.title=Effets sonores
+ribbon.state.playing=Lecture
+ribbon.state.paused=Pause
+ribbon.state.visible=Visible
+ribbon.state.hidden=Masque
+ribbon.state.ready=Pret
+ribbon.state.yes=Oui
+ribbon.state.no=Non
+ribbon.background.none=Aucune chanson chargee
+ribbon.next_singer.none=Aucun chanteur en file
+ribbon.action.play=Lecture
+ribbon.action.pause=Pause
+ribbon.volume=Volume
+ribbon.action.show_lyric_window=Afficher la fenetre des paroles
+ribbon.action.hide_lyric_window=Masquer la fenetre des paroles
+ribbon.action.full_screen=Plein ecran
+ribbon.action.exit_full_screen=Quitter le plein ecran
+ribbon.lyric.status=Fenetre: {0}  |  Plein ecran: {1}
+ribbon.action.play_next_singer=Lancer le chanteur suivant
+ribbon.sfx_volume=Volume SFX
+ribbon.sfx.are_you_ready=Vous etes prets
+ribbon.sfx.chicken=Poulet
+ribbon.sfx.burp=Rot
+ribbon.sfx.bruh=Bruh
+ribbon.sfx.woohoo=WooHoo
+ribbon.sfx.drum_fill=Remplissage batterie
+ribbon.sfx.drum_roll=Roulement
+ribbon.sfx.buzzer=Buzzer
+
 # ── Application menu bar ─────────────────────────────────────────────────────
 menu.window=Fenêtre
 menu.window.fullscreen=Plein écran

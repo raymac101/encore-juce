@@ -52,6 +52,7 @@ target_sources(EncoreJUCE
         Source/UI/BottomBar.cpp
         Source/UI/NavBar.cpp
         Source/UI/MainArea.cpp
+        Source/UI/RibbonMenu.cpp
         Source/UI/MixerPage.cpp
         Source/UI/TestingPage.cpp
         Source/UI/QueueBar.cpp
@@ -77,6 +78,7 @@ target_sources(EncoreJUCE
         Source/Services/QueueService.cpp
         Source/Services/RequestService.cpp
         Source/Services/ArchiveService.cpp
+        Source/Services/BackgroundMusicPlayer.cpp
         Source/Services/ApiService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp

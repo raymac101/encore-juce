@@ -389,6 +389,35 @@ void AudioEngine::setMusicVolume(float v)  { musicVolume  = juce::jlimit(0.0f, 1
 void AudioEngine::setVocalVolume(float v)  { vocalVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalEffectsLevel(float l) { vocalEffectsLevel = juce::jlimit(0.0f, 1.0f, l); }
 
+bool AudioEngine::triggerOneShotSfx(const juce::File& audioFile, float gain)
+{
+    if (! initialized || ! audioFile.existsAsFile())
+        return false;
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(audioFile));
+    if (reader == nullptr || reader->lengthInSamples <= 0)
+        return false;
+
+    constexpr double kMaxSfxSeconds = 20.0;
+    const auto maxSamples = (juce::int64) (reader->sampleRate * kMaxSfxSeconds);
+    const int numSamples = (int) juce::jlimit<juce::int64>(1, maxSamples, reader->lengthInSamples);
+    const int channels = juce::jlimit(1, 2, (int) reader->numChannels);
+
+    juce::AudioBuffer<float> decoded(channels, numSamples);
+    if (! reader->read(&decoded, 0, numSamples, 0, true, channels > 1))
+        return false;
+
+    {
+        const std::lock_guard<std::mutex> lock(sfxMutex);
+        oneShotSfxBuffer = std::move(decoded);
+        oneShotSfxReadPos = 0;
+        oneShotSfxGain = juce::jlimit(0.0f, 1.0f, gain);
+        oneShotSfxActive = true;
+    }
+
+    return true;
+}
+
 void AudioEngine::setMasterEqLow(float db)
 {
     masterEqLowDb = juce::jlimit(-18.0f, 18.0f, db);
@@ -545,39 +574,50 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
 {
     bufferToFill.clearActiveBufferRegion();
 
-    if (resamplingSource == nullptr || !playing)
-        return;
-
-    // 1. Pull from the source chain.
-    resamplingSource->getNextAudioBlock(bufferToFill);
-
+    const bool programActive = (resamplingSource != nullptr && playing.load());
     juce::AudioBuffer<float>& buf = *bufferToFill.buffer;
 
-    // 2. Pitch shift + time stretch via RubberBand.
-    pitchShifter.process(buf);
+    if (programActive)
+    {
+        // 1. Pull from the source chain.
+        resamplingSource->getNextAudioBlock(bufferToFill);
 
-    // 3. Apply per-channel style gains (current engine has one program source,
-    // so we treat vocal volume as a trim influencing FX return feel).
-    const float gain = masterVolume.load() * musicVolume.load();
-    buf.applyGain(gain);
+        // 2. Pitch shift + time stretch via RubberBand.
+        pitchShifter.process(buf);
 
-    // 4. Master EQ.
-    applyMasterEq(buf);
+        // 3. Apply per-channel style gains (current engine has one program source,
+        // so we treat vocal volume as a trim influencing FX return feel).
+        const float gain = masterVolume.load() * musicVolume.load();
+        buf.applyGain(gain);
 
-    // 5. Reverb.
-    applyReverb(buf);
+        // 4. Master EQ.
+        applyMasterEq(buf);
 
-    // 6. Echo.
-    applyEcho(buf);
+        // 5. Reverb.
+        applyReverb(buf);
 
-    // 7. Insert saturation on the post-FX bus.
-    applyMasterInsert(buf);
+        // 6. Echo.
+        applyEcho(buf);
+
+        // 7. Insert saturation on the post-FX bus.
+        applyMasterInsert(buf);
+    }
+
+    const bool sfxActive = mixOneShotSfx(buf, bufferToFill.startSample, bufferToFill.numSamples);
+    if (! programActive && ! sfxActive)
+    {
+        currentAudioLevel = 0.0f;
+        masterCompOutputMeter = 0.0f;
+        masterLimiterReductionMeter = 0.0f;
+        return;
+    }
 
     // 8. Always-on master compressor + limiter for song-to-song consistency.
     applyMasterDynamics(buf);
 
     // 9. Update position and VU level.
-    updatePlaybackPosition();
+    if (programActive)
+        updatePlaybackPosition();
 
     if (frequencyAnalysisEnabled)
         performFrequencyAnalysis(buf);
@@ -585,8 +625,49 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     currentAudioLevel = buf.getRMSLevel(0, bufferToFill.startSample, bufferToFill.numSamples);
 
     // 10. CDG sync callback.
-    if (cdgLoaded && cdgSyncCallback)
+    if (programActive && cdgLoaded && cdgSyncCallback)
         cdgSyncCallback(currentPosition.load(), {});
+}
+
+bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
+{
+    if (! oneShotSfxActive.load() || numSamples <= 0)
+        return false;
+
+    const std::lock_guard<std::mutex> lock(sfxMutex);
+    if (! oneShotSfxActive.load() || oneShotSfxBuffer.getNumSamples() <= 0)
+        return false;
+
+    const int available = oneShotSfxBuffer.getNumSamples() - oneShotSfxReadPos;
+    if (available <= 0)
+    {
+        oneShotSfxActive = false;
+        return false;
+    }
+
+    const int toMix = juce::jmin(numSamples, available);
+    const int srcChannels = juce::jmax(1, oneShotSfxBuffer.getNumChannels());
+    const int dstChannels = juce::jmin(buffer.getNumChannels(), 2);
+
+    for (int ch = 0; ch < dstChannels; ++ch)
+    {
+        const int srcCh = juce::jmin(ch, srcChannels - 1);
+        auto* dst = buffer.getWritePointer(ch, startSample);
+        const auto* src = oneShotSfxBuffer.getReadPointer(srcCh, oneShotSfxReadPos);
+
+        for (int i = 0; i < toMix; ++i)
+            dst[i] += src[i] * oneShotSfxGain;
+    }
+
+    oneShotSfxReadPos += toMix;
+    if (oneShotSfxReadPos >= oneShotSfxBuffer.getNumSamples())
+    {
+        oneShotSfxActive = false;
+        oneShotSfxReadPos = 0;
+        oneShotSfxBuffer.setSize(0, 0);
+    }
+
+    return true;
 }
 
 //==============================================================================

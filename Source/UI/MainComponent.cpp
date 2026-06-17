@@ -219,6 +219,29 @@ int randomPitchSemitones(std::mt19937& rng, bool enabled)
     return dist(rng);
 }
 
+juce::File resolveAssetFile(const juce::String& relativePath)
+{
+    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    auto cwd = juce::File::getCurrentWorkingDirectory();
+
+    const juce::Array<juce::File> roots {
+        cwd,
+        exeDir,
+        exeDir.getParentDirectory(),
+        exeDir.getParentDirectory().getParentDirectory(),
+        exeDir.getParentDirectory().getParentDirectory().getParentDirectory()
+    };
+
+    for (const auto& root : roots)
+    {
+        auto candidate = root.getChildFile(relativePath);
+        if (candidate.existsAsFile())
+            return candidate;
+    }
+
+    return {};
+}
+
 int findHostIndexInQueue(const std::vector<Singers>& singers)
 {
     for (int i = 0; i < (int) singers.size(); ++i)
@@ -369,6 +392,34 @@ MainComponent::MainComponent()
     DBG("[Startup] AudioEngine object created: "
         + juce::String(juce::Time::getMillisecondCounterHiRes() - ctorStartMs, 1) + " ms");
 
+    bgPlayer_ = std::make_unique<BackgroundMusicPlayer>();
+    bgPlayer_->initialize();
+    DBG("[Startup] BackgroundMusicPlayer initialized: "
+        + juce::String(juce::Time::getMillisecondCounterHiRes() - ctorStartMs, 1) + " ms");
+
+    bgPlayer_->onTrackChanged = [this]()
+    {
+        juce::MessageManager::callAsync ([this]()
+        {
+            if (ribbonMenu != nullptr && bgPlayer_ != nullptr)
+            {
+                ribbonMenu->setBackgroundTrackInfo (bgPlayer_->getCurrentTrackName(),
+                                                    bgPlayer_->getCurrentPosition(),
+                                                    bgPlayer_->getTotalLength());
+                ribbonMenu->setBackgroundState (bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+            }
+        });
+    };
+
+    bgPlayer_->onPlayStateChanged = [this]()
+    {
+        juce::MessageManager::callAsync ([this]()
+        {
+            if (ribbonMenu != nullptr && bgPlayer_ != nullptr)
+                ribbonMenu->setBackgroundState (bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+        });
+    };
+
     try
     {
         // Setup UI components carefully
@@ -407,6 +458,7 @@ MainComponent::~MainComponent()
     // Close the secondary display before the audio engine goes away — its
     // timer may be trying to poll the engine's position.
     lyricWindow_.reset();
+    if (bgPlayer_) bgPlayer_->shutdown();
     if (audioEngine) audioEngine->shutdown();
 }
 
@@ -634,6 +686,7 @@ void MainComponent::setupUI()
         currentSong = {};
         currentSongImageUrl.clear();
         currentSongDuration = 0.0;
+        currentRibbonCdgFile_ = {};
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->stopVideo();
@@ -647,6 +700,8 @@ void MainComponent::setupUI()
             bottomBar->setProgress(0.0f);
             bottomBar->setWaveformSamples({});
         }
+
+        refreshRibbonState();
     };
 
     // Shared transport-start helper.
@@ -825,6 +880,122 @@ void MainComponent::setupUI()
     mainArea = std::make_unique<MainArea>();
     mainArea->setAudioEngine(audioEngine.get());
     addAndMakeVisible(mainArea.get());
+
+    // Create Ribbon menu (quick-access control surface)
+    ribbonMenu = std::make_unique<RibbonMenu>();
+    addAndMakeVisible(ribbonMenu.get());
+    ribbonMenu->onLayoutChanged = [this]() { resized(); };
+    ribbonMenu->setAudioEngine(audioEngine.get());
+
+    ribbonMenu->onBackgroundPlayPause = [this](bool shouldPlay)
+    {
+        if (bgPlayer_ == nullptr) return;
+        if (shouldPlay)
+            bgPlayer_->play();
+        else
+            bgPlayer_->pause();
+    };
+
+    ribbonMenu->onBackgroundVolumeChanged = [this](float volume01)
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->setVolume(volume01);
+    };
+
+    ribbonMenu->onBackgroundSeekRequested = [this](double positionSeconds)
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->seekToPosition(positionSeconds);
+    };
+
+    ribbonMenu->onBackgroundNextTrack = [this]()
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->skipToNext();
+    };
+
+    ribbonMenu->onBackgroundPrevTrack = [this]()
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->skipToPrev();
+    };
+
+    ribbonMenu->onLyricToggleWindow = [this]()
+    {
+        if (lyricWindow_ == nullptr)
+            lyricWindow_ = std::make_unique<LyricDisplayWindow>(audioEngine.get());
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setVisible(! lyricWindow_->isVisible());
+
+        refreshRibbonState();
+    };
+
+    ribbonMenu->onLyricToggleFullscreen = [this]()
+    {
+        if (lyricWindow_ == nullptr)
+            lyricWindow_ = std::make_unique<LyricDisplayWindow>(audioEngine.get());
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->toggleFullScreen();
+
+        refreshRibbonState();
+    };
+
+    ribbonMenu->onPlayNextSinger = [this]()
+    {
+        const bool ok = queueAndLoadNextSingerSong(true, true);
+        if (! ok)
+            showMaintenanceToast("No queued singer available.");
+    };
+
+    ribbonMenu->onSfxVolumeChanged = [this](float volume01)
+    {
+        sfxGain01_ = juce::jlimit(0.0f, 1.0f, volume01);
+    };
+
+    ribbonMenu->setSfxVolume(sfxGain01_);
+
+    ribbonMenu->onTriggerSfx = [this](const juce::String& effectName)
+    {
+        juce::String soundPath;
+        if (effectName.equalsIgnoreCase("Are You Ready"))
+            soundPath = "assets/sounds/Are You Ready.wav";
+        else if (effectName.equalsIgnoreCase("Chicken"))
+            soundPath = "assets/sounds/Chicken.wav";
+        else if (effectName.equalsIgnoreCase("Burp"))
+            soundPath = "assets/sounds/Burp.wav";
+        else if (effectName.equalsIgnoreCase("Bruh"))
+            soundPath = "assets/sounds/Bruh.wav";
+        else if (effectName.equalsIgnoreCase("Buzzer"))
+            soundPath = "assets/sounds/Buzzer.wav";
+        else if (effectName.equalsIgnoreCase("Drum Fill"))
+            soundPath = "assets/sounds/Drum Fill.wav";
+        else if (effectName.equalsIgnoreCase("Drum Roll"))
+            soundPath = "assets/sounds/Drum Roll.wav";
+        else if (effectName.equalsIgnoreCase("WooHoo"))
+            soundPath = "assets/sounds/WooHoo.wav";
+        else
+            return;
+
+        auto soundFile = resolveAssetFile(soundPath);
+        if (! soundFile.existsAsFile())
+        {
+            showMaintenanceToast("Missing sound file: " + soundPath);
+            return;
+        }
+
+        if (audioEngine == nullptr || ! audioEngine->triggerOneShotSfx(soundFile, sfxGain01_))
+        {
+            showMaintenanceToast("Unable to play sound effect: " + effectName);
+            return;
+        }
+
+        showMaintenanceToast("SFX: " + effectName);
+    };
+
+    refreshRibbonState();
+
     wireTestingPageCallbacks();
 
     // Wire NavBar page selection to MainArea
@@ -1718,6 +1889,7 @@ void MainComponent::setupUI()
     queueBar->onClearQueue = [this]()
     {
         auto& lm = LocalizationManager::getInstance();
+        auto safe = juce::Component::SafePointer<MainComponent>(this);
         const auto noVenueTitle = lm.getText("queue.clear.no_venue_title");
         const auto noVenueBody = lm.getText("queue.clear.no_venue_body");
         const auto confirmTitle = lm.getText("queue.clear.confirm_title");
@@ -1748,7 +1920,7 @@ void MainComponent::setupUI()
             cancelButton,
             this,
             juce::ModalCallbackFunction::create(
-                [safe = juce::Component::SafePointer<MainComponent>(this),
+                [safe,
                  clearingText,
                  failedTitle,
                  failedSingersBody,
@@ -2104,6 +2276,10 @@ void MainComponent::setupUI()
     {
         logPlayHistoryIfNeeded(true);
 
+        // Karaoke song ended — fade background music back in to fill the silence.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
+
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen (true);
 
@@ -2351,12 +2527,45 @@ void MainComponent::resized()
         queueBar->setBounds(queueBounds);
     }
 
-    // MainArea fills the remaining centre space
+    // Ribbon + MainArea fill the remaining centre space.
     if (mainArea)
     {
-        mainArea->setVisible(!queueExpanded_);
-        if (!queueExpanded_)
-            mainArea->setBounds(bounds);
+        const bool workspaceVisible = ! queueExpanded_;
+
+        if (ribbonMenu)
+        {
+            ribbonMenu->setVisible(workspaceVisible);
+
+            if (workspaceVisible)
+            {
+                if (ribbonMenu->isPanelExpanded())
+                {
+                    ribbonMenu->setBounds(bounds);
+                    mainArea->setVisible(false);
+                }
+                else
+                {
+                    const int ribbonHeight = ribbonMenu->isHidden()
+                        ? ribbonMenu->getHiddenHeight()
+                        : ribbonMenu->getCollapsedHeight();
+
+                    mainArea->setVisible(true);
+                    auto ribbonBounds = bounds.removeFromBottom(juce::jmin(ribbonHeight, bounds.getHeight()));
+                    mainArea->setBounds(bounds);
+                    ribbonMenu->setBounds(ribbonBounds);
+                }
+            }
+            else
+            {
+                mainArea->setVisible(false);
+            }
+        }
+        else
+        {
+            mainArea->setVisible(workspaceVisible);
+            if (workspaceVisible)
+                mainArea->setBounds(bounds);
+        }
     }
 
     // Loading overlay always covers the full window when visible.
@@ -2518,6 +2727,8 @@ void MainComponent::timerCallback()
         bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
         bottomBar->setVolume (juce::roundToInt(audioEngine->getMasterVolume() * 10.0f));
     }
+
+    refreshRibbonState();
 }
 
 void MainComponent::showSongUnavailableMessage(const QueueItem& item)
@@ -2918,6 +3129,7 @@ void MainComponent::updateAllText()
         if (navBar)    navBar->updateAllText();
         if (mainArea)  mainArea->updateAllText();
         if (queueBar)  queueBar->updateAllText();
+        if (ribbonMenu) ribbonMenu->updateAllText();
         
         // Trigger repaint to update any drawn text
         repaint();
@@ -3344,6 +3556,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         }
 
         if (self->queueBar) self->queueBar->setPlaying (autoStart);
+        self->currentRibbonCdgFile_ = {};
+        self->refreshRibbonState();
 
         if (onDone)
             onDone(true);
@@ -3365,17 +3579,20 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
 
     // Push the matching CDG file to the secondary lyric display. If no CDG
     // companion exists the window will simply fall back to its idle screen.
+    const auto cdgFile = extractedCdgFile.existsAsFile()
+        ? extractedCdgFile
+        : self->resolveCdgFileFor (audioFile);
+    self->currentRibbonCdgFile_ = cdgFile;
+
     if (self->lyricWindow_)
     {
-        const auto cdgFile = extractedCdgFile.existsAsFile()
-            ? extractedCdgFile
-            : self->resolveCdgFileFor (audioFile);
         self->lyricWindow_->loadCDG (cdgFile);
     }
 
     self->currentSong          = song;
     self->currentSongImageUrl  = juce::String(song.imageUrl);
     self->currentSongDuration  = self->audioEngine->getTotalLength();
+    self->refreshRibbonState();
 
     // Apply pitch (the dialog's semitone adjustment)
     self->audioEngine->setPitchShift((float) pitchSemitones);
@@ -3439,6 +3656,9 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     if (autoStart)
     {
         self->playStartTimeMs_ = juce::Time::currentTimeMillis();
+        // Fade out background music so it doesn't overlap karaoke.
+        if (self->bgPlayer_ != nullptr)
+            self->bgPlayer_->fadeOut (1.5f);
         self->audioEngine->play();
     }
     if (onDone)
@@ -3725,12 +3945,60 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 void MainComponent::syncLyricIdlePreview(const std::vector<Singers>& singers)
 {
     if (lyricWindow_ == nullptr)
+    {
+        refreshRibbonState();
         return;
+    }
 
     lyricWindow_->setVenueContext (activeVenueId_, activeVenueName_);
     lyricWindow_->setQueuePreview (buildLyricQueuePreview (singers));
     syncLyricNowSingingSummary();
     syncLyricLowerThirdNextUp(singers);
+    refreshRibbonState();
+}
+
+void MainComponent::refreshRibbonState()
+{
+    if (ribbonMenu == nullptr)
+        return;
+
+    // Background music state comes from the independent bgPlayer_, not the karaoke engine.
+    if (bgPlayer_ != nullptr)
+    {
+        ribbonMenu->setBackgroundState(bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+        ribbonMenu->setBackgroundTrackInfo(bgPlayer_->getCurrentTrackName(),
+                                           bgPlayer_->getCurrentPosition(),
+                                           bgPlayer_->getTotalLength());
+    }
+    else
+    {
+        ribbonMenu->setBackgroundState(false, 0.5f);
+        ribbonMenu->setBackgroundTrackInfo({}, 0.0, 0.0);
+    }
+
+    ribbonMenu->setLyricPreviewFile(currentRibbonCdgFile_);
+
+    const bool lyricVisible = lyricWindow_ != nullptr && lyricWindow_->isVisible();
+    const bool lyricFull = lyricWindow_ != nullptr && lyricWindow_->isFullScreen();
+    ribbonMenu->setLyricWindowVisible(lyricVisible);
+    ribbonMenu->setLyricWindowFullScreen(lyricFull);
+
+    juce::String nextSingerName;
+    juce::String nextSongName;
+    if (queueBar != nullptr)
+    {
+        for (const auto& singer : queueBar->getSingers())
+        {
+            if (singer.isHost || singer.songs.empty())
+                continue;
+
+            nextSingerName = juce::String(singer.name).trim();
+            nextSongName = juce::String(singer.songs.front().songName).trim();
+            break;
+        }
+    }
+
+    ribbonMenu->setNextSinger(nextSingerName, nextSongName);
 }
 
 juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const

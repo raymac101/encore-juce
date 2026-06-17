@@ -25,8 +25,10 @@
 #include "NavBar.h"
 #include "MainArea.h"
 #include "QueueBar.h"
+#include "RibbonMenu.h"
 #include "SongSelectionDialog.h"
 #include "LyricDisplayWindow.h"
+#include "../Services/BackgroundMusicPlayer.h"
 
 class BottomBar;
 
@@ -97,6 +99,7 @@ private:
     std::unique_ptr<NavBar> navBar;
     std::unique_ptr<MainArea> mainArea;
     std::unique_ptr<QueueBar> queueBar;
+    std::unique_ptr<RibbonMenu> ribbonMenu;
     std::unique_ptr<juce::Label> titleLabel;
     std::unique_ptr<juce::TextButton> languageButton;
     std::unique_ptr<juce::Label> statusLabel;
@@ -108,9 +111,11 @@ private:
     //==============================================================================
     // Audio playback
     std::unique_ptr<AudioEngine> audioEngine;
+    std::unique_ptr<BackgroundMusicPlayer> bgPlayer_;
     CdgSong      currentSong;
     juce::String currentSongImageUrl;
     double       currentSongDuration = 0.0;
+    juce::File   currentRibbonCdgFile_;
 
     //==============================================================================
     // Secondary-monitor lyric / CDG display
@@ -247,6 +252,7 @@ private:
                                     bool showNoSongsMessage = false);
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);
+    void refreshRibbonState();
     void syncLyricNowSingingSummary();
     juce::String buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const;
     void syncLyricLowerThirdNextUp(const std::vector<Singers>& singers);
@@ -258,6 +264,7 @@ private:
     std::unique_ptr<juce::Label> maintenanceToastLabel_;
     int maintenanceToastToken_ = 0;
     bool queueAutoStartRequested_ = false;
+    float sfxGain01_ = 0.85f;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

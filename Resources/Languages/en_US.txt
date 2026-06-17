@@ -134,6 +134,46 @@ queue.songs_prefix=# songs:
 queue.time_prefix=Time: 
 queue.next_in=Next in 
 
+# ── Ribbon quick controls ────────────────────────────────────────────────────
+ribbon.show=Show Ribbon
+ribbon.hide=Hide Ribbon
+ribbon.back=Back to Ribbon
+ribbon.card.background=Background Music
+ribbon.card.lyric=Lyric Display
+ribbon.card.next_singer=Next Singer
+ribbon.card.sfx=Sound Effects
+ribbon.panel.background.title=Background Music
+ribbon.panel.lyric.title=Lyric Display
+ribbon.panel.next_singer.title=Next Singer
+ribbon.panel.sfx.title=Sound Effects
+ribbon.state.playing=Playing
+ribbon.state.paused=Paused
+ribbon.state.visible=Visible
+ribbon.state.hidden=Hidden
+ribbon.state.ready=Ready
+ribbon.state.yes=Yes
+ribbon.state.no=No
+ribbon.background.none=No song loaded
+ribbon.next_singer.none=No singer queued
+ribbon.action.play=Play
+ribbon.action.pause=Pause
+ribbon.volume=Volume
+ribbon.action.show_lyric_window=Show Lyric Window
+ribbon.action.hide_lyric_window=Hide Lyric Window
+ribbon.action.full_screen=Full Screen
+ribbon.action.exit_full_screen=Exit Full Screen
+ribbon.lyric.status=Window: {0}  |  Full Screen: {1}
+ribbon.action.play_next_singer=Play Next Singer
+ribbon.sfx_volume=SFX Volume
+ribbon.sfx.are_you_ready=Are You Ready
+ribbon.sfx.chicken=Chicken
+ribbon.sfx.burp=Burp
+ribbon.sfx.bruh=Bruh
+ribbon.sfx.woohoo=WooHoo
+ribbon.sfx.drum_fill=Drum Fill
+ribbon.sfx.drum_roll=Drum Roll
+ribbon.sfx.buzzer=Buzzer
+
 # ── Testing page ───────────────────────────────────────────────────────────
 testing.title=TESTING
 testing.select_resolution=Select resolution
