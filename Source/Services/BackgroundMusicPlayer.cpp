@@ -187,7 +187,10 @@ void BackgroundMusicPlayer::loadTrack (int index)
     }
 
     currentIndex_ = index;
-    trackChangedFlag_ = true;
+    // NOTE: do NOT set trackChangedFlag_ here.  That flag is exclusively for
+    // advanceToNext() which signals the message thread that a reload is needed.
+    // loadTrack() IS the reload — setting the flag here would create an
+    // infinite timer loop (timer sees flag → calls loadTrack → sets flag → …).
 
     if (sourcePlayer_ != nullptr)
         sourcePlayer_->setSource (this);
@@ -259,26 +262,34 @@ void BackgroundMusicPlayer::stop()
 void BackgroundMusicPlayer::skipToNext()
 {
     const int next = (currentIndex_.load() + 1) % juce::jmax (1, (int) playlist_.size());
+    const bool wasPlaying = playing_.load();
     loadTrack (next);
 
-    if (playing_.load())
+    if (wasPlaying)
     {
         std::lock_guard<std::mutex> lock (chainMutex_);
         if (transportSource_) transportSource_->start();
+        playing_ = true;
     }
+
+    if (onTrackChanged) onTrackChanged();
 }
 
 void BackgroundMusicPlayer::skipToPrev()
 {
     const int count = juce::jmax (1, (int) playlist_.size());
     const int prev  = (currentIndex_.load() + count - 1) % count;
+    const bool wasPlaying = playing_.load();
     loadTrack (prev);
 
-    if (playing_.load())
+    if (wasPlaying)
     {
         std::lock_guard<std::mutex> lock (chainMutex_);
         if (transportSource_) transportSource_->start();
+        playing_ = true;
     }
+
+    if (onTrackChanged) onTrackChanged();
 }
 
 void BackgroundMusicPlayer::seekToPosition (double seconds)
@@ -382,10 +393,10 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
             {
                 gain = 0.0f;
                 fadingOut_ = false;
-                // Pause (but keep position) when fully faded out.
-                transportSource_->stop();
-                playing_ = false;
+                // Request a pause from the message thread; don't touch
+                // the transport source from inside the audio callback.
                 playStateChangedFlag_ = true;
+                pauseAfterFadeFlag_   = true;
             }
         }
         else if (fadingIn_.load())
@@ -428,19 +439,26 @@ void BackgroundMusicPlayer::advanceToNext()
 
 void BackgroundMusicPlayer::timerCallback()
 {
+    // Handle deferred pause (set by fade-out completing on the audio thread).
+    if (pauseAfterFadeFlag_.exchange (false))
+    {
+        std::lock_guard<std::mutex> lock (chainMutex_);
+        if (transportSource_) transportSource_->stop();
+        playing_ = false;
+    }
+
     // Fire state-change callbacks on the message thread.
     if (playStateChangedFlag_.exchange (false))
         if (onPlayStateChanged) onPlayStateChanged();
 
     if (trackChangedFlag_.exchange (false))
     {
-        // Load the new track (may have been set by advanceToNext on the audio thread).
+        // Load the new track (set by advanceToNext on the audio thread).
         const int idx = currentIndex_.load();
         if (idx >= 0 && idx < (int) playlist_.size())
         {
-            const bool wasPlaying = playing_.load();
             loadTrack (idx);
-            if (wasPlaying || (fadingIn_.load()))
+            // Auto-advance always starts the next track playing.
             {
                 std::lock_guard<std::mutex> lock (chainMutex_);
                 if (transportSource_)

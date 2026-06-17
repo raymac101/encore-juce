@@ -104,6 +104,7 @@ private:
     std::atomic<float> fadeRatePerSample_ { 0.0f };
     std::atomic<bool> fadingOut_ { false };
     std::atomic<bool> fadingIn_  { false };
+    std::atomic<bool> pauseAfterFadeFlag_ { false };  // set by audio thread, handled on msg thread
 
     std::atomic<int> currentIndex_ { 0 };
     std::atomic<bool> trackChangedFlag_ { false };
