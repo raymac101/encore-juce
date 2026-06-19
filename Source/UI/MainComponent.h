@@ -183,6 +183,9 @@ private:
     juce::String activeVenueId_;
     juce::String activeVenueName_;
     bool queueExpanded_ = false;
+    bool companyContextEnabled_ = false;
+    juce::String companyId_;
+    juce::String companyRole_;
 
     // Cached venue config — populated from VenueService::loadVenue and used
     // by the rotation/strikes logic when a singer is moved to now-singing.
@@ -197,6 +200,9 @@ private:
 
     void loadVenuePlaylists();
     void applyCurrentIdentityToUi();
+    void applyCompanyContextToUi();
+    void applyStartupPageForCurrentIdentity();
+    void refreshCompanyDashboard();
     void wireTestingPageCallbacks();
     void seedTestingQueue(const TestingPage::SeedOptions& options,
                           std::function<void(float)> onProgress,

@@ -34,7 +34,8 @@ enum class NavPage
     Testing,
     Ads,
     Playlist,
-    VenueManagement
+    VenueManagement,
+    CompanyAdmin
 };
 
 //==============================================================================
@@ -67,6 +68,9 @@ public:
     /** Update menu visibility based on a user role. */
     void setUserRole(UserRole role);
 
+    /** Enable or disable company-mode pages. */
+    void setCompanyContext(bool enabled, const juce::String& role = {});
+
     /** Populate the genre/playlist list in the bottom half. */
     void setGenreList(const juce::StringArray& genres);
 
@@ -93,6 +97,7 @@ private:
         juce::String iconPathData;   // SVG-style path data for the icon
         AccessRight requiredRight;
         bool        visible = true;
+        bool        companyOnly = false;
     };
 
     void buildMenuItems();
@@ -147,6 +152,9 @@ private:
     // State
     NavPage   activePage = NavPage::Home;
     UserRole  currentRole = UserRole::Host;
+    bool      companyModeEnabled = false;
+    bool      companyDashboardVisible = false;
+    juce::String companyRole;
     int       barWidth = 200;
     int       minWidth = 60;
     int       maxWidth = 400;

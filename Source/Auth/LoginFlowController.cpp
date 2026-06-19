@@ -68,6 +68,7 @@ namespace
         h.userId    = FC::readString(doc, "userId").toStdString();
         if (h.userId.empty()) h.userId = uid.toStdString();
         h.email     = FC::readString(doc, "email").toStdString();
+        h.companyId = FC::readString(doc, "companyId").trim().toStdString();
         h.profileId = FC::readString(doc, "profileId").toStdString();
         h.avatarUrl = FC::readString(doc, "avatarUrl").toStdString();
         h.stageName = FC::readString(doc, "stageName").toStdString();
@@ -110,6 +111,7 @@ namespace
         auto fields = FC::makeFields({
             { "userId",     FC::stringValue(uid) },
             { "email",      FC::stringValue(email) },
+            { "companyId",  FC::stringValue("") },
             { "profileId",  FC::stringValue("") },
             { "avatarUrl",  FC::stringValue("assets/images/AvatarWhite.png") },
             { "stageName",  FC::stringValue("Anonymous") },
@@ -235,6 +237,9 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             const auto uid   = fc.getUserId();
             const auto email = fc.getEmail().toLowerCase();
+            const auto claims = fc.getAuthClaims();
+            const auto companyId = FirestoreClient::readString(claims, "companyId").trim();
+            const auto companyRole = FirestoreClient::readString(claims, "companyRole").trim();
 
             // 1) Host bootstrap
             Host host = loadOrCreateHost(uid, email);
@@ -250,16 +255,25 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             const bool canCreate = (host.role == UserRole::Admin
                                   || host.role == UserRole::EnterpriseAdmin
                                   || host.role == UserRole::Tester);
+            const bool hasCompanyContext = companyId.isNotEmpty();
+            const bool companyCanCreate = companyRole.equalsIgnoreCase("company_admin")
+                                       || companyRole.equalsIgnoreCase("enterprise_admin")
+                                       || companyRole.equalsIgnoreCase("platform_admin");
 
             DBG("[LoginFlow] storedVenueId=" << storedVenueId
                 << " associations=" << (int) associations.size()
                 << " invitations="  << (int) invitations.size()
-                << " role=" << juce::String(AccessRightsUtil::userRoleToString(host.role)));
+                << " role=" << juce::String(AccessRightsUtil::userRoleToString(host.role))
+                << " companyId=" << companyId
+                << " companyRole=" << companyRole);
 
             Result result;
             result.host              = host;
-            result.canCreateVenue    = canCreate;
+            result.canCreateVenue    = canCreate || companyCanCreate;
             result.configuredVenueId = storedVenueId;
+            result.hasCompanyContext  = hasCompanyContext;
+            result.companyId         = companyId;
+            result.companyRole       = companyRole;
 
             // 4) Apply the scenario tree (mirrors Angular start.component logic)
             //    - Multiple associations → ALWAYS show picker (the configured

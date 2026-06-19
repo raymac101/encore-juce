@@ -20,6 +20,7 @@
 #include "SearchPage.h"
 #include "LibraryPage.h"
 #include "SettingsPage.h"
+#include "CompanyAdminPage.h"
 #include "MixerPage.h"
 #include "TestingPage.h"
 #include "SongSelectionDialog.h"
@@ -101,6 +102,7 @@ private:
     MixerPage*    mixerPage    = nullptr;
     SettingsPage* settingsPage = nullptr;
     TestingPage*  testingPage  = nullptr;
+    CompanyAdminPage* companyAdminPage = nullptr;
 
 public:
     /** Push a venue snapshot into the settings page (call from FirebaseManager callback). */
@@ -127,6 +129,16 @@ public:
 
     /** Direct access to the testing tool page. */
     TestingPage* getTestingPage() const noexcept { return testingPage; }
+
+    /** Direct access to the company-admin dashboard page. */
+    CompanyAdminPage* getCompanyAdminPage() const noexcept { return companyAdminPage; }
+
+    /** Update company-dashboard context for company-mode users. */
+    void setCompanyContext (const juce::String& companyId, const juce::String& companyRole)
+    {
+        if (companyAdminPage)
+            companyAdminPage->setCompanyContext (companyId, companyRole);
+    }
 
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;

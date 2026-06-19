@@ -61,6 +61,7 @@ target_sources(EncoreJUCE
         Source/UI/SearchPage.cpp
         Source/UI/LibraryPage.cpp
         Source/UI/SettingsPage.cpp
+        Source/UI/CompanyAdminPage.cpp
         Source/UI/SongSelectionDialog.cpp
         Source/UI/SongEditDialog.cpp
         Source/UI/AddSongsDialog.cpp

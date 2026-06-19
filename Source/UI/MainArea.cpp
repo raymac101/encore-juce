@@ -119,6 +119,13 @@ MainArea::MainArea()
         addChildComponent(sp.get());
         pages[static_cast<int>(NavPage::Settings)] = std::move(sp);
     }
+    // Create real Company Admin page
+    {
+        auto cp = std::make_unique<CompanyAdminPage>();
+        companyAdminPage = cp.get();
+        addChildComponent(cp.get());
+        pages[static_cast<int>(NavPage::CompanyAdmin)] = std::move(cp);
+    }
     // Create real Testing page
     {
         auto tp = std::make_unique<TestingPage>();
@@ -203,6 +210,7 @@ void MainArea::updateAllText()
         { NavPage::Ads,             "page.ads" },
         { NavPage::Playlist,        "page.playlist" },
         { NavPage::VenueManagement, "page.venue_management" },
+        { NavPage::CompanyAdmin,    "page.company_admin" },
     };
 
     for (auto& pk : pageKeys)
@@ -221,6 +229,7 @@ void MainArea::updateAllText()
     if (libraryPage)  libraryPage->updateAllText();
     if (mixerPage)    mixerPage->updateAllText();
     if (settingsPage) settingsPage->updateAllText();
+    if (companyAdminPage) companyAdminPage->updateAllText();
     if (testingPage)  testingPage->updateAllText();
 }
 

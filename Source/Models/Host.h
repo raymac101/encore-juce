@@ -24,6 +24,7 @@ struct Host
 {
     std::string userId;
     std::string email;
+  std::string companyId;
     std::string profileId;
     std::string avatarUrl;
     std::string stageName;

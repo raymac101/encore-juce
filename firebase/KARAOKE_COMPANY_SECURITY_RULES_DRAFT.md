@@ -1,20 +1,29 @@
+# Karaoke Company Security Rules Draft
+
+## Purpose
+Draft rules and strategy for Firestore and Storage to enforce company isolation and role-based access.
+
+This model must support two modes at the same time:
+- Standalone users who sign in and use a single venue, without any company membership.
+- Company users who belong to a multi-venue company tenancy.
+
+## Firestore Rules Draft
+
+```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isWorker() {
-      return isSignedIn() && request.auth.token.worker == true;
+    function authUid() {
+      return request.auth.uid;
     }
 
     function isPlatformAdmin() {
       return isSignedIn() && request.auth.token.platformAdmin == true;
-    }
-
-    function authUid() {
-      return request.auth.uid;
     }
 
     function companyRole(companyId) {
@@ -41,7 +50,7 @@ service cloud.firestore {
     }
 
     function legacyVenueLookupPath(venueId) {
-      return /databases/$(database)/documents/user-venue-lookup/$(authUid() + "_" + venueId);
+      return /databases/$(database)/documents/user-venue-lookup/$(request.auth.uid + "_" + venueId);
     }
 
     function isLegacyVenueMember(venueId) {
@@ -64,42 +73,20 @@ service cloud.firestore {
         && legacyVenueRole(venueId) in ['Admin', 'Tester', 'EnterpriseAdmin'];
     }
 
-    // Canonical metadata documents. Client read-only.
-    match /metadataSongs/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isWorker();
-    }
-
-    // Queue is worker-only by default. Requests should go through callable function.
-    match /metadataFetchQueue/{docId} {
-      allow read: if isWorker();
-      allow write: if isWorker();
-    }
-
-    // Daily quota tracking doc(s)
-    match /metadataQuota/{docId} {
-      allow read: if isWorker();
-      allow write: if isWorker();
-    }
-
-    // Legacy standalone account bootstrap and venue access.
+    // Standalone / legacy paths
     match /hosts/{hostId} {
-      allow read: if isPlatformAdmin() || authUid() == hostId;
-      allow create: if isPlatformAdmin() || authUid() == hostId;
-      allow update: if isPlatformAdmin() || authUid() == hostId;
+      allow read, create, update: if isPlatformAdmin() || authUid() == hostId;
       allow delete: if isPlatformAdmin();
     }
 
     match /user-venue-lookup/{lookupId} {
       allow read: if isPlatformAdmin()
-        || (isSignedIn() && lookupId == authUid() + "_" + resource.data.venueId)
-        || (isSignedIn() && resource.data.userId == authUid());
+        || (isSignedIn() && resource.data.userId == authUid())
+        || (isSignedIn() && lookupId == authUid() + "_" + resource.data.venueId);
 
       allow update: if isPlatformAdmin()
         || (isSignedIn()
           && resource.data.userId == authUid()
-          && request.resource.data.userId == resource.data.userId
-          && request.resource.data.venueId == resource.data.venueId
           && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastActive']));
 
       allow create, delete: if isPlatformAdmin();
@@ -164,6 +151,7 @@ service cloud.firestore {
       match /devices/{deviceId} {
         allow read: if isPlatformAdmin() || isCompanyAdmin(companyId) || isHost(companyId);
 
+        // Host app heartbeat only for own assigned device doc.
         allow update: if isSignedIn()
           && request.resource.data.companyId == companyId
           && request.resource.data.deviceId == deviceId
@@ -181,6 +169,7 @@ service cloud.firestore {
 
       match /songPackages/{packageId} {
         allow read: if isPlatformAdmin() || isCompanyMember(companyId);
+        // Restrict direct publish mutations to server paths.
         allow create, update, delete: if isPlatformAdmin() || isCompanyAdmin(companyId);
       }
 
@@ -192,6 +181,7 @@ service cloud.firestore {
       match /deviceUpdateStatus/{statusId} {
         allow read: if isPlatformAdmin() || isCompanyAdmin(companyId) || isHost(companyId);
 
+        // Host app can only update its own device row with bounded fields.
         allow update: if isSignedIn()
           && request.resource.data.companyId == companyId
           && (
@@ -221,8 +211,68 @@ service cloud.firestore {
       }
     }
 
-    match /{document=**} {
-      allow read, write: if false;
+    // Fast lookup assignment docs
+    match /deviceAssignments/{deviceId} {
+      allow read: if isSignedIn();
+      allow write: if isPlatformAdmin();
+    }
+
+    match /hostVenueAssignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if isPlatformAdmin();
     }
   }
 }
+```
+
+## Firebase Storage Rules Draft
+
+```javascript
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isPlatformAdmin() {
+      return isSignedIn() && request.auth.token.platformAdmin == true;
+    }
+
+    function isCompanyMember(companyId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/companies/$(companyId)/members/$(request.auth.uid));
+    }
+
+    function companyRole(companyId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isCompanyAdmin(companyId) {
+      return isCompanyMember(companyId) && companyRole(companyId) == 'company_admin';
+    }
+
+    // Song and manifest distribution
+    match /companies/{companyId}/{allPaths=**} {
+      allow read: if isPlatformAdmin() || isCompanyMember(companyId);
+      allow write: if isPlatformAdmin() || isCompanyAdmin(companyId);
+    }
+  }
+}
+```
+
+## Hardening Checklist
+1. Add App Check enforcement for callable and HTTPS function endpoints.
+2. Avoid wildcard client writes to package and campaign docs.
+3. Keep publish and fan-out logic in Cloud Functions only.
+4. Validate companyId on both auth context and document payload.
+5. Use immutable audit records for privileged actions.
+6. Add rate limits for status updates per device.
+
+## Integration Notes
+- This is a draft. Merge with existing project rules carefully.
+- Test rules in Firebase Emulator Suite before production deploy.
+- Prefer custom claims for coarse role and Firestore membership docs for tenant scoping.
+- Legacy standalone users keep using the top-level hosts/, venues/, user-venue-lookup/, venueInvitations/, and venueJoinRequests/ collections.
+- Company users use the companies/{companyId}/... subtree; company membership is optional, not required for basic sign-in.

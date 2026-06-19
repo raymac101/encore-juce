@@ -217,6 +217,7 @@ NavBar::NavBar()
             case NavPage::Ads:             iconPath = NavIcons::makeAds();      break;
             case NavPage::Playlist:        break;
             case NavPage::VenueManagement: iconPath = NavIcons::makeLocations(); break;
+            case NavPage::CompanyAdmin:    iconPath = NavIcons::makeLocations(); break;
         }
 
         auto* btn = buttons.add(new NavButton(item.label, iconPath));
@@ -270,6 +271,7 @@ void NavBar::buildMenuItems()
         { NavPage::Testing,  lm.getText("nav.testing"),  {}, AccessRight::Testing  },
         { NavPage::Ads,      lm.getText("nav.ads"),      {}, AccessRight::Ads      },
         { NavPage::VenueManagement, lm.getText("nav.venue_management"), {}, AccessRight::VenueManagement },
+        { NavPage::CompanyAdmin,    lm.getText("nav.company_admin"),    {}, AccessRight::VenueManagement, false, true },
     };
 }
 
@@ -361,9 +363,18 @@ void NavBar::setUserRole(UserRole role)
 {
     currentRole = role;
     auto rights = AccessRightsUtil::getRightsForRole(role);
+    const bool roleCanSeeCompany = (role == UserRole::Admin
+                                  || role == UserRole::EnterpriseAdmin
+                                  || role == UserRole::Tester);
 
     for (auto& item : menuItems)
     {
+        if (item.companyOnly)
+        {
+            item.visible = companyDashboardVisible || roleCanSeeCompany;
+            continue;
+        }
+
         item.visible = false;
         for (auto& r : rights)
         {
@@ -373,10 +384,43 @@ void NavBar::setUserRole(UserRole role)
                 break;
             }
         }
+
+        if (item.companyOnly && ! companyModeEnabled)
+            item.visible = false;
     }
 
     // Playlist/genre section visible if user has Playlist right
     genreSectionVisible = AccessRightsUtil::hasAccess(role, AccessRight::Playlist);
+
+    resized();
+    repaint();
+}
+
+void NavBar::setCompanyContext(bool enabled, const juce::String& role)
+{
+    companyModeEnabled = enabled;
+    companyRole = role;
+
+    // Company dashboard is only meaningful for company-admin style roles.
+    companyDashboardVisible = enabled
+        && (role.equalsIgnoreCase("Admin")
+            || role.equalsIgnoreCase("company_admin")
+            || role.equalsIgnoreCase("enterprise_admin")
+            || role.equalsIgnoreCase("platform_admin")
+            || role.equalsIgnoreCase("company_admin"));
+
+    if (role.equalsIgnoreCase("Admin")
+        || role.equalsIgnoreCase("EnterpriseAdmin")
+        || role.equalsIgnoreCase("Tester"))
+    {
+        companyDashboardVisible = true;
+    }
+
+    for (auto& item : menuItems)
+    {
+        if (item.companyOnly)
+            item.visible = companyDashboardVisible;
+    }
 
     resized();
     repaint();
@@ -399,7 +443,8 @@ void NavBar::updateAllText()
     // Rebuild menu item labels
     static const juce::String navKeys[] = {
         "nav.home", "nav.search", "nav.library", "nav.charts",
-        "nav.mixer", "nav.setup", "nav.testing", "nav.ads", "nav.locations"
+        "nav.mixer", "nav.setup", "nav.testing", "nav.ads", "nav.locations",
+        "nav.company_admin"
     };
 
     for (size_t i = 0; i < menuItems.size() && i < std::size(navKeys); ++i)

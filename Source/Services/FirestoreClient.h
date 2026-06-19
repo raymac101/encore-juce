@@ -30,6 +30,7 @@ public:
     juce::String getEmail() const           { return email_; }
     juce::String getDisplayName() const     { return displayName_; }
     juce::String getIdToken() const         { return idToken_; }
+    juce::var    getAuthClaims() const;
 
     void signOut();
 

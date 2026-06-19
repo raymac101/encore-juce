@@ -9,6 +9,43 @@
 #include "FirestoreClient.h"
 #include "../Firebase/FirebaseConfig.h"
 
+namespace
+{
+juce::String decodeBase64UrlToString (juce::String value)
+{
+    value = value.replaceCharacter ('-', '+').replaceCharacter ('_', '/');
+    while ((value.length() % 4) != 0)
+        value << '=';
+
+    juce::MemoryOutputStream output;
+    if (! juce::Base64::convertFromBase64 (output, value))
+        return {};
+
+    auto block = output.getMemoryBlock();
+    const auto* data = static_cast<const char*> (block.getData());
+    return juce::String::fromUTF8 (data, (int) block.getSize());
+}
+
+juce::var parseJwtPayload (const juce::String& jwt)
+{
+    auto payload = jwt.fromFirstOccurrenceOf (".", false, false)
+                      .upToFirstOccurrenceOf (".", false, false);
+    if (payload.isEmpty())
+        return juce::var();
+
+    auto json = decodeBase64UrlToString (payload);
+    if (json.isEmpty())
+        return juce::var();
+
+    juce::var parsed;
+    auto result = juce::JSON::parse (json, parsed);
+    if (result.failed() || ! parsed.isObject())
+        return juce::var();
+
+    return parsed;
+}
+}
+
 //==============================================================================
 FirestoreClient& FirestoreClient::getInstance()
 {
@@ -25,6 +62,14 @@ void FirestoreClient::signOut()
     displayName_.clear();
     tokenIssuedAt_ = {};
     tokenLifetimeSeconds_ = 0;
+}
+
+juce::var FirestoreClient::getAuthClaims() const
+{
+    if (idToken_.isEmpty())
+        return juce::var();
+
+    return parseJwtPayload (idToken_);
 }
 
 //==============================================================================

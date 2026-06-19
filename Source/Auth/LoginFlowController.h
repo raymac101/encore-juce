@@ -47,6 +47,9 @@ public:
         std::vector<UserVenueAssociation>    associations;   // For PickVenue
         std::vector<VenueInvitation>         invitations;    // For AwaitInvitation
         bool                                 canCreateVenue = false; // admin/enterprise
+        bool                                 hasCompanyContext = false;
+        juce::String                         companyId;
+        juce::String                         companyRole;
         Host                                 host;
     };
 

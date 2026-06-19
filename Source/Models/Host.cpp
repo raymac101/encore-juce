@@ -19,6 +19,7 @@ juce::String Host::toJson() const
 
     obj->setProperty("userId", juce::String(userId));
     obj->setProperty("email", juce::String(email));
+    obj->setProperty("companyId", juce::String(companyId));
     obj->setProperty("profileId", juce::String(profileId));
     obj->setProperty("avatarUrl", juce::String(avatarUrl));
     obj->setProperty("stageName", juce::String(stageName));
@@ -51,6 +52,7 @@ Host Host::fromJsonObject(juce::DynamicObject* obj)
 
     h.userId               = obj->getProperty("userId").toString().toStdString();
     h.email                = obj->getProperty("email").toString().toStdString();
+    h.companyId            = obj->getProperty("companyId").toString().toStdString();
     h.profileId            = obj->getProperty("profileId").toString().toStdString();
     h.avatarUrl            = obj->getProperty("avatarUrl").toString().toStdString();
     h.stageName            = obj->getProperty("stageName").toString().toStdString();

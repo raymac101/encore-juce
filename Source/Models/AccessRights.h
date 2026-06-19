@@ -53,6 +53,16 @@ enum class UserRole
 /** Utility functions for AccessRights / UserRole conversion and lookup */
 namespace AccessRightsUtil
 {
+    inline std::string normalizeRoleToken(const std::string& s)
+    {
+        juce::String token(s);
+        token = token.trim().toLowerCase();
+        token = token.replace(" ", "");
+        token = token.replace("_", "");
+        token = token.replace("-", "");
+        return token.toStdString();
+    }
+
     inline std::string userRoleToString(UserRole role)
     {
         switch (role)
@@ -68,10 +78,12 @@ namespace AccessRightsUtil
 
     inline UserRole stringToUserRole(const std::string& s)
     {
-        if (s == "Host")            return UserRole::Host;
-        if (s == "Admin")           return UserRole::Admin;
-        if (s == "Tester")          return UserRole::Tester;
-        if (s == "EnterpriseAdmin") return UserRole::EnterpriseAdmin;
+        const auto token = normalizeRoleToken(s);
+        if (token == "host")            return UserRole::Host;
+        if (token == "basic")           return UserRole::Basic;
+        if (token == "admin")           return UserRole::Admin;
+        if (token == "tester")          return UserRole::Tester;
+        if (token == "enterpriseadmin") return UserRole::EnterpriseAdmin;
         return UserRole::Basic;
     }
 
