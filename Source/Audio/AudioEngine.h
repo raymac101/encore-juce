@@ -144,6 +144,10 @@ public:
     // (optionally after the countdown delay). Never called on stop()/pause().
     std::function<void()> onSongFinished;
 
+    // Fired once per playback pass when the current position reaches the
+    // estimated end of audible content (trimmed trailing silence).
+    std::function<void()> onAudibleEndReached;
+
     //==========================================================================
     // CDG synchronisation callback — fired on the audio thread each block.
     // Signature: void(double positionSeconds, const juce::String& lyricHint)
@@ -261,6 +265,7 @@ private:
     std::atomic<double> currentPosition { 0.0 };
     std::atomic<double> totalLength     { 0.0 };
     std::atomic<double> audibleEndPosition { 0.0 };
+    std::atomic<bool> audibleEndNotified { false };
 
     //==========================================================================
     // Analysis

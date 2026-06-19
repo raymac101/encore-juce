@@ -255,6 +255,7 @@ bool AudioEngine::loadSong(const juce::File& audioFile, const juce::File& cdgFil
     if (audibleEndPosition.load() <= 0.0)
         audibleEndPosition = totalLength.load();
     currentPosition = 0.0;
+    audibleEndNotified = false;
 
     cdgLoaded = cdgFile.exists();
 
@@ -303,6 +304,10 @@ void AudioEngine::play()
     if (transportSource == nullptr)
         return;
 
+    const auto audibleEnd = audibleEndPosition.load();
+    if (audibleEnd > 0.0 && currentPosition.load() < audibleEnd)
+        audibleEndNotified = false;
+
     if (!playing)
     {
         transportSource->start();
@@ -342,7 +347,7 @@ void AudioEngine::stop()
     playing         = false;
     paused          = false;
     currentPosition = 0.0;
-    audibleEndPosition = 0.0;
+    audibleEndNotified = false;
     masterCompOutputMeter = 0.0f;
     masterLimiterReductionMeter = 0.0f;
 }
@@ -355,6 +360,10 @@ void AudioEngine::seekToPosition(double positionInSeconds)
     positionInSeconds = juce::jlimit(0.0, totalLength.load(), positionInSeconds);
     transportSource->setPosition(positionInSeconds);
     currentPosition = positionInSeconds;
+
+    const auto audibleEnd = audibleEndPosition.load();
+    if (audibleEnd > 0.0 && positionInSeconds < audibleEnd)
+        audibleEndNotified = false;
 
     // Flush RubberBand so we don't hear the pre-seek audio at the new position.
     pitchShifter.reset();
@@ -904,6 +913,17 @@ void AudioEngine::updatePlaybackPosition()
         return;
 
     currentPosition = transportSource->getCurrentPosition();
+
+    const auto audibleEnd = audibleEndPosition.load();
+    if (playing.load()
+        && audibleEnd > 0.0
+        && !audibleEndNotified.load()
+        && currentPosition.load() >= audibleEnd)
+    {
+        audibleEndNotified = true;
+        if (onAudibleEndReached)
+            juce::MessageManager::callAsync([cb = onAudibleEndReached]() { cb(); });
+    }
 
     if (currentPosition >= totalLength.load() && playing.load())
     {

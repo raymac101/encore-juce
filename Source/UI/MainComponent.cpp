@@ -686,7 +686,7 @@ void MainComponent::setupUI()
         currentSong = {};
         currentSongImageUrl.clear();
         currentSongDuration = 0.0;
-        currentRibbonCdgFile_ = {};
+        currentRibbonCdgFile_ = juce::File();
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->stopVideo();
@@ -762,6 +762,11 @@ void MainComponent::setupUI()
         if (playStartTimeMs_ == 0)
             playStartTimeMs_ = juce::Time::currentTimeMillis();
 
+        // Fade out background music whenever karaoke playback begins,
+        // including manual play of a preloaded track.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeOut (1.5f);
+
         if (videoLoaded)
             lyricWindow_->playVideo();
         else
@@ -798,6 +803,10 @@ void MainComponent::setupUI()
         }
         else if (audioEngine)
             audioEngine->stop();
+
+        // Optional: bring background music back in smoothly after a manual stop.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(true);
@@ -2272,6 +2281,14 @@ void MainComponent::setupUI()
     };
 
     // ── Song-finished → auto-advance ──────────────────────────────────────────
+    audioEngine->onAudibleEndReached = [this]()
+    {
+        // Start bringing background music up as soon as audible content ends,
+        // instead of waiting for trailing silence/file tail to finish.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
+    };
+
     audioEngine->onSongFinished = [this]()
     {
         logPlayHistoryIfNeeded(true);
@@ -3556,7 +3573,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         }
 
         if (self->queueBar) self->queueBar->setPlaying (autoStart);
-        self->currentRibbonCdgFile_ = {};
+        self->currentRibbonCdgFile_ = juce::File();
         self->refreshRibbonState();
 
         if (onDone)

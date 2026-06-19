@@ -8,9 +8,9 @@
   "configurePresets": [
     {
       "name": "default",
-      "displayName": "Default (Visual Studio 2026)",
-      "description": "Configure EncoreJUCE using Visual Studio 18 2026 into ./build",
-      "generator": "Visual Studio 18 2026",
+      "displayName": "Default (Unix Makefiles)",
+      "description": "Configure EncoreJUCE using Unix Makefiles into ./build",
+      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
