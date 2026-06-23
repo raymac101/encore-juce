@@ -16,6 +16,7 @@ const auto kCardBg = juce::Colour (0xff243047);
 const auto kCardBgHover = juce::Colour (0xff2a3955);
 const auto kAccent = juce::Colour (0xff30daff);
 const auto kText = juce::Colours::white;
+const auto kSfxIconTint = juce::Colour (0xffd3d7de);
 
 juce::String tr (const juce::String& key)
 {
@@ -80,6 +81,38 @@ std::unique_ptr<juce::Drawable> loadSvgDrawable (const juce::File& svgFile)
     auto xml = juce::XmlDocument::parse (svgFile);
     if (xml == nullptr)
         return {};
+
+    std::function<void(juce::XmlElement&)> tintSvgTree = [&tintSvgTree] (juce::XmlElement& node)
+    {
+        const auto tag = node.getTagName().toLowerCase();
+        const bool isShape = tag == "path" || tag == "circle" || tag == "ellipse"
+                          || tag == "rect" || tag == "polygon" || tag == "polyline"
+                          || tag == "line";
+
+        auto tintAttribute = [&node] (const char* attrName)
+        {
+            if (! node.hasAttribute (attrName))
+                return;
+
+            const auto value = node.getStringAttribute (attrName).trim();
+            if (value.equalsIgnoreCase ("none"))
+                return;
+
+            node.setAttribute (attrName, kSfxIconTint.toDisplayString (true));
+        };
+
+        tintAttribute ("fill");
+        tintAttribute ("stroke");
+
+        // Some icon paths omit fill/stroke entirely and default to black.
+        if (isShape && ! node.hasAttribute ("fill") && ! node.hasAttribute ("stroke"))
+            node.setAttribute ("fill", kSfxIconTint.toDisplayString (true));
+
+        for (auto* child = node.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+            tintSvgTree (*child);
+    };
+
+    tintSvgTree (*xml);
     return juce::Drawable::createFromSVG (*xml);
 }
 
@@ -93,8 +126,31 @@ void setSfxButtonIcon (juce::DrawableButton& button, const juce::String& iconRel
     if (normal == nullptr)
         return;
 
+    // Safety pass for SVGs that define dark tones via style blocks/classes.
+    const juce::Colour darksToReplace[] = {
+        juce::Colour (0xff000000),
+        juce::Colour (0xff111111),
+        juce::Colour (0xff1a1a1a),
+        juce::Colour (0xff222222),
+        juce::Colour (0xff333333),
+        juce::Colour (0xff444444),
+        juce::Colour (0xff555555),
+        juce::Colour (0xff666666),
+        juce::Colour (0xff777777)
+    };
+
+    for (auto dark : darksToReplace)
+        normal->replaceColour (dark, kSfxIconTint);
+
     auto over = normal->createCopy();
     auto down = normal->createCopy();
+
+    for (auto dark : darksToReplace)
+    {
+        over->replaceColour (dark, kSfxIconTint);
+        down->replaceColour (dark, kSfxIconTint);
+    }
+
     button.setImages (normal.release(), over.release(), down.release());
 }
 
@@ -114,10 +170,6 @@ juce::String panelTitleFor (RibbonMenu::PanelId panel)
 
 RibbonMenu::RibbonMenu()
 {
-    addAndMakeVisible (showHideButton_);
-    styleActionButton (showHideButton_);
-    showHideButton_.onClick = [this]() { toggleHidden(); };
-
     addAndMakeVisible (backgroundCard_);
     addAndMakeVisible (lyricCard_);
     addAndMakeVisible (nextSingerCard_);
@@ -284,14 +336,20 @@ void RibbonMenu::paint (juce::Graphics& g)
 
     g.setColour (kAccent.withAlpha (0.35f));
     g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.5f), 10.0f, 1.0f);
+
+    auto handleArea = getLocalBounds().reduced (8, 0).removeFromTop (dragHandleHeight_);
+    g.setColour (kText.withAlpha (0.32f));
+    g.fillRoundedRectangle (handleArea.toFloat().reduced (0.0f, 3.0f), 6.0f);
+
+    auto grip = handleArea.withSizeKeepingCentre (38, 5);
+    g.setColour (kText.withAlpha (0.7f));
+    g.fillRoundedRectangle (grip.toFloat(), 2.5f);
 }
 
 void RibbonMenu::resized()
 {
     auto area = getLocalBounds().reduced (8);
-
-    auto topRow = area.removeFromTop (28);
-    showHideButton_.setBounds (topRow.removeFromRight (120));
+    area.removeFromTop (dragHandleHeight_);
 
     if (hidden_)
     {
@@ -504,6 +562,51 @@ void RibbonMenu::resized()
     }
 }
 
+void RibbonMenu::mouseDown (const juce::MouseEvent& event)
+{
+    if (! isInDragHandle (event.getPosition()))
+        return;
+
+    draggingHandle_ = true;
+    dragStartHeight_ = collapsedHeight_;
+    dragStartScreenY_ = event.getScreenY();
+}
+
+void RibbonMenu::mouseDrag (const juce::MouseEvent& event)
+{
+    if (! draggingHandle_)
+        return;
+
+    const int delta = dragStartScreenY_ - event.getScreenY();
+    const int targetHeight = juce::jlimit (minCollapsedHeight_, getMaxCollapsedHeight(), dragStartHeight_ + delta);
+
+    if (hidden_ && delta > 2)
+        hidden_ = false;
+
+    if (! hidden_)
+    {
+        expandedPanel_ = PanelId::none;
+        collapsedHeight_ = targetHeight;
+        lastOpenHeight_ = collapsedHeight_;
+
+        if (onLayoutChanged)
+            onLayoutChanged();
+    }
+}
+
+void RibbonMenu::mouseUp (const juce::MouseEvent&)
+{
+    draggingHandle_ = false;
+}
+
+void RibbonMenu::mouseDoubleClick (const juce::MouseEvent& event)
+{
+    if (! isInDragHandle (event.getPosition()))
+        return;
+
+    toggleHidden();
+}
+
 void RibbonMenu::setBackgroundState (bool playing, float volume01)
 {
     backgroundPlaying_ = playing;
@@ -548,9 +651,18 @@ void RibbonMenu::setNextSinger (const juce::String& singerName, const juce::Stri
 
 void RibbonMenu::toggleHidden()
 {
-    hidden_ = ! hidden_;
     if (hidden_)
+    {
+        hidden_ = false;
         expandedPanel_ = PanelId::none;
+        collapsedHeight_ = juce::jlimit (minCollapsedHeight_, getMaxCollapsedHeight(), lastOpenHeight_);
+    }
+    else
+    {
+        hidden_ = true;
+        lastOpenHeight_ = collapsedHeight_;
+        expandedPanel_ = PanelId::none;
+    }
 
     updateControlState();
     if (onLayoutChanged)
@@ -585,7 +697,6 @@ void RibbonMenu::updateCardTexts()
 
 void RibbonMenu::updateControlState()
 {
-    showHideButton_.setButtonText (hidden_ ? tr ("ribbon.show") : tr ("ribbon.hide"));
     panelTitleLabel_.setText (panelTitleFor (expandedPanel_), juce::dontSendNotification);
     collapsePanelButton_.setButtonText (tr ("ribbon.back"));
 
@@ -624,4 +735,15 @@ void RibbonMenu::updateControlState()
     updateCardTexts();
     resized();
     repaint();
+}
+
+bool RibbonMenu::isInDragHandle (juce::Point<int> p) const noexcept
+{
+    return getLocalBounds().reduced (8, 0).removeFromTop (dragHandleHeight_).contains (p);
+}
+
+int RibbonMenu::getMaxCollapsedHeight() const noexcept
+{
+    const int parentHeight = getParentHeight() > 0 ? getParentHeight() : maxCollapsedHeightCap_;
+    return juce::jmax (minCollapsedHeight_, juce::jmin (maxCollapsedHeightCap_, parentHeight - 48));
 }

@@ -36,13 +36,17 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& event) override;
+    void mouseDrag (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
+    void mouseDoubleClick (const juce::MouseEvent& event) override;
 
     bool isHidden() const noexcept { return hidden_; }
     bool isPanelExpanded() const noexcept { return expandedPanel_ != PanelId::none; }
     PanelId getExpandedPanel() const noexcept { return expandedPanel_; }
 
-    int getCollapsedHeight() const noexcept { return 176; }
-    int getHiddenHeight() const noexcept { return 34; }
+    int getCollapsedHeight() const noexcept { return collapsedHeight_; }
+    int getHiddenHeight() const noexcept { return hiddenHeight_; }
 
     void updateAllText();
     void setAudioEngine (AudioEngine* engine);
@@ -75,12 +79,24 @@ public:
 private:
     void updateCardTexts();
     void updateControlState();
+  bool isInDragHandle (juce::Point<int> p) const noexcept;
+  int getMaxCollapsedHeight() const noexcept;
 
     void toggleHidden();
     void togglePanel (PanelId id);
 
     PanelId expandedPanel_ = PanelId::none;
     bool hidden_ = false;
+    int collapsedHeight_ = 176;
+    int lastOpenHeight_ = 176;
+    bool draggingHandle_ = false;
+    int dragStartHeight_ = 176;
+    int dragStartScreenY_ = 0;
+
+    static constexpr int dragHandleHeight_ = 20;
+    static constexpr int hiddenHeight_ = 20;
+    static constexpr int minCollapsedHeight_ = 96;
+    static constexpr int maxCollapsedHeightCap_ = 420;
 
     bool backgroundPlaying_ = false;
     float backgroundVolume01_ = 0.5f;
@@ -94,8 +110,6 @@ private:
     juce::String nextSingerSong_;
     juce::File lyricPreviewFile_;
     AudioEngine* audioEngine_ = nullptr;
-
-    juce::TextButton showHideButton_ { "showHideRibbon" };
 
     juce::TextButton backgroundCard_ { "backgroundCard" };
     juce::TextButton lyricCard_ { "lyricCard" };
