@@ -19,6 +19,7 @@
 #include "HomePage.h"
 #include "SearchPage.h"
 #include "LibraryPage.h"
+#include "ChartsPage.h"
 #include "SettingsPage.h"
 #include "CompanyAdminPage.h"
 #include "MixerPage.h"
@@ -65,7 +66,7 @@ class MainArea : public juce::Component
 {
 public:
     MainArea();
-    ~MainArea() override = default;
+    ~MainArea() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -99,6 +100,7 @@ private:
     HomePage*     homePage     = nullptr;
     SearchPage*   searchPage   = nullptr;
     LibraryPage*  libraryPage  = nullptr;
+    ChartsPage*   chartsPage   = nullptr;
     MixerPage*    mixerPage    = nullptr;
     SettingsPage* settingsPage = nullptr;
     TestingPage*  testingPage  = nullptr;

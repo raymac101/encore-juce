@@ -10,6 +10,7 @@
 
 #include "MainArea.h"
 #include "SongSelectionDialog.h"
+#include "MenuTheme.h"
 
 //==============================================================================
 void MainArea::loadBackgroundTile()
@@ -27,6 +28,8 @@ void MainArea::loadBackgroundTile()
 //==============================================================================
 MainArea::MainArea()
 {
+    setLookAndFeel(&MenuTheme::getLookAndFeel());
+
     auto& lm = LocalizationManager::getInstance();
 
     // Create real Home page
@@ -96,7 +99,13 @@ MainArea::MainArea()
         pages[static_cast<int>(NavPage::Library)] = std::move(lp);
     }
 
-    addPage(NavPage::Charts,          lm.getText("page.charts"));
+    // Create real Charts page
+    {
+        auto cp = std::make_unique<ChartsPage>();
+        chartsPage = cp.get();
+        addChildComponent(cp.get());
+        pages[static_cast<int>(NavPage::Charts)] = std::move(cp);
+    }
 
     // Create real Mixer page
     {
@@ -143,6 +152,11 @@ MainArea::MainArea()
     loadBackgroundTile();
 }
 
+MainArea::~MainArea()
+{
+    setLookAndFeel(nullptr);
+}
+
 //==============================================================================
 void MainArea::addPage(NavPage page, const juce::String& label)
 {
@@ -154,21 +168,7 @@ void MainArea::addPage(NavPage page, const juce::String& label)
 //==============================================================================
 void MainArea::paint(juce::Graphics& g)
 {
-    if (backgroundTile_.isValid())
-    {
-        float aspect = (float)backgroundTile_.getHeight() / (float)backgroundTile_.getWidth();
-        int tw = tileSize_;
-        int th = juce::roundToInt(tw * aspect);
-        if (th < 1) th = tw;
-        for (int y = 0; y < getHeight(); y += th)
-            for (int x = 0; x < getWidth(); x += tw)
-                g.drawImage(backgroundTile_, x, y, tw, th,
-                            0, 0, backgroundTile_.getWidth(), backgroundTile_.getHeight());
-    }
-    else
-    {
-        g.fillAll(juce::Colour(0xff16213e));
-    }
+    MenuTheme::drawPageBackground(g, getLocalBounds());
 }
 
 //==============================================================================
@@ -186,6 +186,9 @@ void MainArea::setCurrentPage(NavPage page)
 
     for (auto& [key, comp] : pages)
         comp->setVisible(key == static_cast<int>(page));
+
+    // Ensure stale pixels from the previously visible page are fully invalidated.
+    repaint();
 }
 
 const std::vector<CdgSong>& MainArea::getLibrarySongs() const
@@ -227,6 +230,7 @@ void MainArea::updateAllText()
     if (homePage)     homePage->updateAllText();
     if (searchPage)   searchPage->updateAllText();
     if (libraryPage)  libraryPage->updateAllText();
+    if (chartsPage)   chartsPage->updateAllText();
     if (mixerPage)    mixerPage->updateAllText();
     if (settingsPage) settingsPage->updateAllText();
     if (companyAdminPage) companyAdminPage->updateAllText();

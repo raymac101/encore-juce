@@ -7,6 +7,7 @@
 */
 
 #include "ImageCache.h"
+#include "GlobalProgressService.h"
 
 //==============================================================================
 ArtworkCache& ArtworkCache::getInstance()
@@ -45,6 +46,7 @@ juce::Image ArtworkCache::getOrFetch(const juce::String& url,
     juce::String urlCopy = url;
     juce::Thread::launch([this, urlCopy]()
     {
+        const int progressTaskId = GlobalProgressService::getInstance().beginTask("Downloading artwork...");
         juce::Image img;
 
         try
@@ -89,6 +91,8 @@ juce::Image ArtworkCache::getOrFetch(const juce::String& url,
             juce::MessageManager::callAsync([cbs = std::move(cbs)]() {
                 for (auto& cb : cbs) cb();
             });
+
+        GlobalProgressService::getInstance().endTask(progressTaskId);
     });
 
     return {};

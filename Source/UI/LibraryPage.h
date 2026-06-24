@@ -106,9 +106,9 @@ private:
     //==========================================================================
     // UI colours (consistent with the rest of the app)
     static constexpr uint32_t kBg          = 0xff16213e;
-    static constexpr uint32_t kPanel       = 0xff1a2550;
-    static constexpr uint32_t kAccent      = 0xff7b5ea7;
-    static constexpr uint32_t kBtnNormal   = 0xff2d2d3a;
+    static constexpr uint32_t kPanel       = 0xff1a2a52;
+    static constexpr uint32_t kAccent      = 0xff5a8fd8;
+    static constexpr uint32_t kBtnNormal   = 0xff2f4b80;
     static constexpr uint32_t kTextPrimary = 0xffe4e4e4;
     static constexpr uint32_t kTextSecond  = 0xffa3a6a8;
 
@@ -154,6 +154,7 @@ private:
     LibraryScanner                scanner_;
     LibraryScanner::ScanStats     stats_;
     bool                          lastScanWasAppend_ = false;
+    int                           globalScanTaskId_ = 0;
 
     // FileChooser must outlive the callback lambda
     std::shared_ptr<juce::FileChooser> fileChooser_;

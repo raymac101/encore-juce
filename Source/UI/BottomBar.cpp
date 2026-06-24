@@ -128,12 +128,16 @@ namespace
 
 BottomBar::BottomBar()
 {
+    GlobalProgressService::getInstance().addListener(this);
+    globalBusy_ = GlobalProgressService::getInstance().isBusy();
+    globalBusyMessage_ = GlobalProgressService::getInstance().getDisplayMessage();
     setupUI();
     startTimerHz(30);
 }
 
 BottomBar::~BottomBar()
 {
+    GlobalProgressService::getInstance().removeListener(this);
     pitchSlider.setLookAndFeel(nullptr);
     volumeSlider.setLookAndFeel(nullptr);
 }
@@ -296,6 +300,60 @@ void BottomBar::paint(juce::Graphics& g)
     g.fillRect(waveformArea.reduced(2));
     g.fillRect(slidersArea.reduced(2));
 
+    auto drawWaveformFrame = [&](juce::Rectangle<int> area)
+    {
+        constexpr float kFrameCornerRadius = 6.0f;
+        g.setColour(juce::Colours::white.withAlpha(0.18f));
+        g.drawRoundedRectangle(area.toFloat().reduced(0.5f), kFrameCornerRadius, 1.0f);
+
+        if (! globalBusy_)
+            return;
+
+        auto r = area.toFloat().reduced(0.5f);
+        const float perimeter = 2.0f * (r.getWidth() + r.getHeight());
+        if (perimeter <= 1.0f)
+            return;
+
+        auto pointAtDistance = [r, perimeter](float d) -> juce::Point<float>
+        {
+            d = std::fmod(d, perimeter);
+            if (d < 0.0f)
+                d += perimeter;
+
+            if (d <= r.getWidth())
+                return { r.getX() + d, r.getY() };
+            d -= r.getWidth();
+
+            if (d <= r.getHeight())
+                return { r.getRight(), r.getY() + d };
+            d -= r.getHeight();
+
+            if (d <= r.getWidth())
+                return { r.getRight() - d, r.getBottom() };
+            d -= r.getWidth();
+
+            return { r.getX(), r.getBottom() - d };
+        };
+
+        const float head = spinnerPhase_ * perimeter;
+        const float trail = juce::jmax(44.0f, perimeter * 0.24f);
+        constexpr int segments = 28;
+        const float segmentStep = trail / (float) segments;
+
+        for (int i = 0; i < segments; ++i)
+        {
+            const float t = (float) i / (float) juce::jmax(1, segments - 1);
+            const float alpha = juce::jmap(1.0f - t, 0.0f, 1.0f, 0.06f, 0.95f);
+            const float d0 = head - (float) i * segmentStep;
+            const float d1 = d0 - segmentStep;
+
+            g.setColour(kAccent.withAlpha(alpha));
+            g.drawLine(pointAtDistance(d0).x, pointAtDistance(d0).y,
+                       pointAtDistance(d1).x, pointAtDistance(d1).y,
+                       2.0f);
+        }
+    };
+
     // Draw waveform bars and highlight played section.
     auto drawArea = getWaveformDrawArea();
     if (!waveform.empty() && drawArea.getWidth() > 20)
@@ -315,8 +373,7 @@ void BottomBar::paint(juce::Graphics& g)
             g.fillRoundedRectangle(barX, static_cast<float>(y), juce::jmax(1.5f, barWidth - 1.0f), static_cast<float>(barHeight), 1.2f);
         }
 
-        g.setColour(juce::Colours::white.withAlpha(0.2f));
-        g.drawRect(drawArea, 1);
+        drawWaveformFrame(drawArea);
 
         const int markerX = juce::jlimit(drawArea.getX(), drawArea.getRight(), static_cast<int>(playedX));
         g.setColour(juce::Colours::white.withAlpha(0.7f));
@@ -325,12 +382,14 @@ void BottomBar::paint(juce::Graphics& g)
     }
     else if (drawArea.getWidth() > 20)
     {
-        g.setColour(juce::Colours::white.withAlpha(0.14f));
-        g.drawRect(drawArea, 1);
+        drawWaveformFrame(drawArea);
 
         g.setColour(juce::Colours::white.withAlpha(0.9f));
         g.setFont(juce::Font(juce::FontOptions().withHeight(15.0f)).boldened());
-        g.drawFittedText(waveformStatusMessage_, drawArea.reduced(12, 8),
+        const auto msg = waveformStatusMessage_.isNotEmpty()
+            ? waveformStatusMessage_
+            : (globalBusy_ ? globalBusyMessage_ : juce::String());
+        g.drawFittedText(msg, drawArea.reduced(12, 8),
                          juce::Justification::centred, 2);
     }
 }
@@ -505,16 +564,39 @@ void BottomBar::setPlayEnabled(bool enabled)
 
 void BottomBar::timerCallback()
 {
-    if (externalProgressControl_ || !isPlaying)
-        return;
+    bool shouldRepaint = false;
 
-    progress += 0.0015f;
-    if (progress >= 1.0f)
+    if (globalBusy_)
     {
-        progress = 1.0f;
-        isPlaying = false;
-        updateTransportButtonIcons();
+        spinnerPhase_ += 0.012f;
+        if (spinnerPhase_ >= 1.0f)
+            spinnerPhase_ -= 1.0f;
+        shouldRepaint = true;
     }
+
+    if (! externalProgressControl_ && isPlaying)
+    {
+        progress += 0.0015f;
+        if (progress >= 1.0f)
+        {
+            progress = 1.0f;
+            isPlaying = false;
+            updateTransportButtonIcons();
+        }
+
+        shouldRepaint = true;
+    }
+
+    if (shouldRepaint)
+        repaint(getWaveformArea());
+}
+
+void BottomBar::globalProgressChanged(bool isBusy, const juce::String& message)
+{
+    globalBusy_ = isBusy;
+    globalBusyMessage_ = message;
+    if (! globalBusy_)
+        spinnerPhase_ = 0.0f;
 
     repaint(getWaveformArea());
 }

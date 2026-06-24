@@ -1,4 +1,5 @@
 #include "TestingPage.h"
+#include "MenuTheme.h"
 #include "../Localization/LocalizationManager.h"
 
 namespace
@@ -16,18 +17,38 @@ namespace
 TestingPage::TestingPage()
     : progressBar_(progressValue_)
 {
+    setOpaque(true);
+
     auto& lm = LocalizationManager::getInstance();
+
+    auto styleLabel = [](juce::Label& label, float h)
+    {
+        label.setColour(juce::Label::textColourId, juce::Colours::white);
+        label.setFont(juce::Font(juce::FontOptions().withHeight(h)));
+    };
 
     titleLabel_.setText(lm.getText("testing.title"), juce::dontSendNotification);
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(28.0f)).boldened());
+    titleLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
 
     currentResolutionLabel_.setJustificationType(juce::Justification::centredLeft);
-    currentResolutionLabel_.setFont(juce::Font(juce::FontOptions().withHeight(16.0f)));
+    styleLabel(currentResolutionLabel_, 16.0f);
+
+    styleLabel(mobileLabel_, 14.0f);
+    styleLabel(encoreLabel_, 14.0f);
+    styleLabel(songsMinLabel_, 14.0f);
+    styleLabel(songsMaxLabel_, 14.0f);
+    styleLabel(pitchLabel_, 14.0f);
+    styleLabel(progressTextLabel_, 13.0f);
 
     resolutionBox_.setTextWhenNothingSelected(lm.getText("testing.select_resolution"));
+    resolutionBox_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1630));
+    resolutionBox_.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+    resolutionBox_.setColour(juce::ComboBox::outlineColourId, juce::Colour(MenuTheme::kInputBorder));
     populateResolutionDropdown();
 
     applyResolutionButton_.setButtonText(lm.getText("testing.apply_resolution"));
+    applyResolutionButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff4272b8));
     applyResolutionButton_.addListener(this);
 
     mobileLabel_.setText(lm.getText("testing.mobile_singers"), juce::dontSendNotification);
@@ -42,8 +63,11 @@ TestingPage::TestingPage()
     configureNumericSlider(songsMaxSlider_, 1, 10, 3);
 
     randomPitchToggle_.setToggleState(false, juce::dontSendNotification);
+    randomPitchToggle_.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+    randomPitchToggle_.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xff5a8fd8));
 
     createQueueButton_.setButtonText(lm.getText("testing.create_queue"));
+    createQueueButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f7bff));
     createQueueButton_.addListener(this);
 
     progressTextLabel_.setText("", juce::dontSendNotification);
@@ -68,6 +92,8 @@ TestingPage::TestingPage()
     addAndMakeVisible(progressTextLabel_);
 
     progressBar_.setVisible(false);
+    progressBar_.setColour(juce::ProgressBar::backgroundColourId, juce::Colour(0xff0d1630));
+    progressBar_.setColour(juce::ProgressBar::foregroundColourId, juce::Colour(0xff5a8fd8));
 
     if (resolutionBox_.getNumItems() > 0)
         resolutionBox_.setSelectedId((int) ScreenSize::FHD + 1, juce::dontSendNotification);
@@ -78,13 +104,10 @@ TestingPage::TestingPage()
 
 void TestingPage::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff121212));
+    MenuTheme::drawPageBackground(g, getLocalBounds());
 
     auto panel = getLocalBounds().reduced(24);
-    g.setColour(juce::Colour(0xff1d1d1d));
-    g.fillRoundedRectangle(panel.toFloat(), 10.0f);
-    g.setColour(juce::Colour(0xff2a2a2a));
-    g.drawRoundedRectangle(panel.toFloat(), 10.0f, 1.0f);
+    MenuTheme::drawHeaderPanel(g, panel);
 }
 
 void TestingPage::resized()

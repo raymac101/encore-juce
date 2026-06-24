@@ -5,6 +5,7 @@
 */
 
 #include "AddSongsDialog.h"
+#include "../Services/GlobalProgressService.h"
 
 //==============================================================================
 // Colours
@@ -354,6 +355,16 @@ AddSongsDialog::AddSongsDialog(const std::vector<CdgSong>& existingSongs,
 AddSongsDialog::~AddSongsDialog()
 {
     scanner_.stopScan();
+    if (folderScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
+        folderScanTaskId_ = 0;
+    }
+    if (importTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(importTaskId_);
+        importTaskId_ = 0;
+    }
 }
 
 //==============================================================================
@@ -384,6 +395,13 @@ void AddSongsDialog::savePrefs()
 void AddSongsDialog::startFolderScan(const juce::File& dir)
 {
     if (! dir.isDirectory()) return;
+
+    if (folderScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
+        folderScanTaskId_ = 0;
+    }
+    folderScanTaskId_ = GlobalProgressService::getInstance().beginTask("Scanning folder...");
 
     // New token — any previous background thread sees its copy go stale
     folderScanToken_ = std::make_shared<std::atomic<bool>>(false);
@@ -492,6 +510,12 @@ void AddSongsDialog::startFolderScan(const juce::File& dir)
 
 void AddSongsDialog::onFolderScanComplete(std::vector<FileEntry> entries)
 {
+    if (folderScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
+        folderScanTaskId_ = 0;
+    }
+
     fileEntries_ = std::move(entries);
     scanningLabel_->setVisible(false);
     fileListBox_->setVisible(true);
@@ -505,6 +529,12 @@ void AddSongsDialog::onFolderScanComplete(std::vector<FileEntry> entries)
 
 void AddSongsDialog::onFolderScanCancelled()
 {
+    if (folderScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
+        folderScanTaskId_ = 0;
+    }
+
     fileEntries_.clear();
     scanningLabel_->setVisible(false);
     fileListBox_->setVisible(true);
@@ -610,6 +640,13 @@ void AddSongsDialog::onImport()
     const int n = selectedCount();
     if (n == 0) return;
 
+    if (importTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(importTaskId_);
+        importTaskId_ = 0;
+    }
+    importTaskId_ = GlobalProgressService::getInstance().beginTask("Importing songs...");
+
     // Collect selected base names for the scanner filter
     std::vector<juce::String> selectedBaseNames;
     for (const auto& e : fileEntries_)
@@ -659,6 +696,11 @@ void AddSongsDialog::onImport()
     scanner_.onComplete = [safe](std::vector<CdgSong> merged, LibraryScanner::ScanStats scanStats)
     {
         if (safe == nullptr) return;
+        if (safe->importTaskId_ != 0)
+        {
+            GlobalProgressService::getInstance().endTask(safe->importTaskId_);
+            safe->importTaskId_ = 0;
+        }
         safe->mergedSongs_           = std::move(merged);
         safe->stats_.newSongs        = scanStats.numNew;
         safe->stats_.alreadyImported = scanStats.numAlreadyImported;
@@ -682,6 +724,11 @@ void AddSongsDialog::onImport()
     scanner_.onError = [safe](juce::String err)
     {
         if (safe == nullptr) return;
+        if (safe->importTaskId_ != 0)
+        {
+            GlobalProgressService::getInstance().endTask(safe->importTaskId_);
+            safe->importTaskId_ = 0;
+        }
         safe->progressLabel_->setText("Error: " + err, juce::dontSendNotification);
     };
 
@@ -693,6 +740,16 @@ void AddSongsDialog::onCancel()
 {
     folderScanToken_->store(true);   // abort any running folder scan
     scanner_.stopScan();
+    if (folderScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
+        folderScanTaskId_ = 0;
+    }
+    if (importTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(importTaskId_);
+        importTaskId_ = 0;
+    }
     if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
         w->exitModalState(0);
 }

@@ -134,6 +134,8 @@ private:
 
     // File chooser
     std::shared_ptr<juce::FileChooser>  fileChooser_;
+    int                                 folderScanTaskId_ = 0;
+    int                                 importTaskId_ = 0;
 
     //==========================================================================
     void loadPrefs();

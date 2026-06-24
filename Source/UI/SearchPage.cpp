@@ -11,6 +11,7 @@
 */
 
 #include "SearchPage.h"
+#include "MenuTheme.h"
 #include "../Services/UserPreferences.h"
 #include <algorithm>
 #include <cctype>
@@ -47,7 +48,7 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
 
     // Hover highlight
     if (hovering)
-        g.fillAll(juce::Colour(0xff292929));
+        g.fillAll(juce::Colours::white.withAlpha(0.08f));
 
     int totalW = bounds.getWidth();
     // Defaults if no fractions pointer set
@@ -163,6 +164,8 @@ void SearchPage::SongResultRow::mouseUp(const juce::MouseEvent& e)
 //==============================================================================
 SearchPage::SearchPage()
 {
+    setOpaque(true);
+
     auto& lm = LocalizationManager::getInstance();
 
     // Title
@@ -193,8 +196,8 @@ SearchPage::SearchPage()
     // Clear button
     clearButton = std::make_unique<juce::TextButton>(lm.getText("search.clear"));
     clearButton->setColour(juce::TextButton::buttonColourId, accentColour);
-    clearButton->setColour(juce::TextButton::textColourOnId, juce::Colours::black);
-    clearButton->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
+    clearButton->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+    clearButton->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
     clearButton->onClick = [this]() { clearSearch(); };
     addAndMakeVisible(*clearButton);
 
@@ -311,6 +314,8 @@ SearchPage::SearchPage()
 //==============================================================================
 void SearchPage::paint(juce::Graphics& g)
 {
+    MenuTheme::drawPageBackground(g, getLocalBounds());
+
     // Draw rounded translucent "cards" for the controls area and the results
     // area — same visual language as SettingsPage so the app feels consistent.
     for (const auto& r : cardRects_)
@@ -731,7 +736,7 @@ void SearchPage::updateFilterButtonColours()
         btn->setColour(juce::TextButton::buttonColourId,
                        active ? accentColour : darkColour);
         btn->setColour(juce::TextButton::textColourOffId,
-                       active ? juce::Colours::black : textColour);
+                       textColour);
     };
     setActive(filterAllBtn.get(),    filterMode == FilterMode::All);
     setActive(filterSongBtn.get(),   filterMode == FilterMode::Song);

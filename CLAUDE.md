@@ -4,23 +4,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build Commands
 
-JUCE is expected at `/Users/raymac/JUCE` (hardcoded in CMakeLists.txt). The build directory is `build/`.
+The project uses named CMake presets so the same commands work on both platforms — just swap the preset name.
 
-```bash
+### Windows (Visual Studio 2022)
+```bat
 # Configure (first time or after CMakeLists changes)
-cmake -B build -S .
+cmake --preset windows-debug
 
 # Build
-cmake --build build
+cmake --build build --config Debug
 
 # Run
-open "build/EncoreJUCE_artefacts/Encore Karaoke.app"
+build\EncoreJUCE_artefacts\Debug\Encore Karaoke.exe
 ```
 
-Dependencies (macOS):
+### macOS (Xcode)
 ```bash
+# Configure (first time or after CMakeLists changes)
+cmake --preset macos-debug
+
+# Build
+cmake --build build --config Debug
+
+# Run
+open "build/EncoreJUCE_artefacts/Debug/Encore Karaoke.app"
+```
+
+**JUCE path** defaults to `C:/JUCE-Full` on Windows and `/Users/raymac/JUCE` on macOS.
+Override without editing any file:
+```
+cmake --preset windows-debug -DJUCE_SOURCE_DIR=D:/my/JUCE
+```
+
+**Release builds** — replace `debug` with `release` in the preset name and `Debug` with `Release` in `--config`.
+
+Dependencies:
+```bash
+# macOS
 brew install rubberband   # pitch shifting
 # SQLite3 ships with macOS
+
+# Windows (vcpkg)
+vcpkg install rubberband sqlite3
 ```
 
 No test suite exists yet. There is no linter configured.

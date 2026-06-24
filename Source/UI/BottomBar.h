@@ -14,9 +14,11 @@
 
 #include <JuceHeader.h>
 #include "../Localization/LocalizationManager.h"
+#include "../Services/GlobalProgressService.h"
 
 class BottomBar : public juce::Component,
-                  private juce::Timer
+                  private juce::Timer,
+                  private GlobalProgressService::Listener
 {
 public:
     //==============================================================================
@@ -83,6 +85,7 @@ public:
 
 private:
     void timerCallback() override;
+  void globalProgressChanged(bool isBusy, const juce::String& message) override;
     void setupUI();
   void loadTransportIcons();
   void updateTransportButtonIcons();
@@ -116,6 +119,9 @@ private:
     std::vector<float> waveform;
     juce::String waveformStatusMessage_;
     bool externalProgressControl_ = false;
+    bool globalBusy_ = false;
+    juce::String globalBusyMessage_;
+    float spinnerPhase_ = 0.0f;
 
     //==============================================================================
     // Resize handle - Visual Studio style (at the TOP edge for bottom bar)

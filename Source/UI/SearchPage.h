@@ -196,11 +196,11 @@ private:
     // Colours
     juce::Colour bgColour          { 0xff16213e };
     juce::Colour textColour        { 0xffe4e4e4 };
-    juce::Colour accentColour      { 0xff30daff };
-    juce::Colour accentSoftColour  { 0xff70e6ff };
-    juce::Colour darkColour        { 0xff222428 };
-    juce::Colour hoverBgColour     { 0xff292929 };
-    juce::Colour headerLineColour  { 0xff585757 };
+    juce::Colour accentColour      { 0xff5a8fd8 };
+    juce::Colour accentSoftColour  { 0xff8cb6f0 };
+    juce::Colour darkColour        { 0x1affffff };
+    juce::Colour hoverBgColour     { 0x14ffffff };
+    juce::Colour headerLineColour  { 0x55b8caee };
     juce::Colour artistTextColour  { 0xffa3a6a8 };
     juce::Colour cardFillColour    { 0xff1a2030 };
     juce::Colour cardBorderColour  { 0xff2d3a5a };

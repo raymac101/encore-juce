@@ -8,14 +8,20 @@ set(ENCORE_BUILD_NUMBER_FILE "${CMAKE_SOURCE_DIR}/build_number.txt")
 set(ENCORE_BUILD_INFO_HEADER "${CMAKE_BINARY_DIR}/generated/BuildInfo.h")
 
 # Add JUCE subdirectory (using complete JUCE framework)
+# The default paths match the standard install locations per platform.
+# Override on the command line:  cmake -B build -DJUCE_SOURCE_DIR=/your/path
+# or via CMakePresets.json cacheVariables (the platform presets do this).
 if(WIN32)
-    set(JUCE_SOURCE_DIR "C:/JUCE-Full")
+    set(_juce_default "C:/JUCE-Full")
 else()
-    set(JUCE_SOURCE_DIR "/Users/raymac/JUCE")
+    set(_juce_default "/Users/raymac/JUCE")
 endif()
+set(JUCE_SOURCE_DIR "${_juce_default}" CACHE PATH "Path to the JUCE source directory")
 
 if(NOT EXISTS "${JUCE_SOURCE_DIR}")
-    message(FATAL_ERROR "JUCE source directory not found at ${JUCE_SOURCE_DIR}. Set JUCE_SOURCE_DIR in CMakeLists.txt to your local JUCE path.")
+    message(FATAL_ERROR "JUCE source directory not found at ${JUCE_SOURCE_DIR}.\n"
+        "Override with: cmake -B build -DJUCE_SOURCE_DIR=/path/to/JUCE\n"
+        "or set it in CMakePresets.json cacheVariables.")
 endif()
 
 add_subdirectory(${JUCE_SOURCE_DIR} JUCE)
@@ -52,6 +58,7 @@ target_sources(EncoreJUCE
         Source/UI/BottomBar.cpp
         Source/UI/NavBar.cpp
         Source/UI/MainArea.cpp
+        Source/UI/MenuTheme.cpp
         Source/UI/RibbonMenu.cpp
         Source/UI/MixerPage.cpp
         Source/UI/TestingPage.cpp
@@ -60,6 +67,7 @@ target_sources(EncoreJUCE
         Source/UI/HomePage.cpp
         Source/UI/SearchPage.cpp
         Source/UI/LibraryPage.cpp
+        Source/UI/ChartsPage.cpp
         Source/UI/SettingsPage.cpp
         Source/UI/CompanyAdminPage.cpp
         Source/UI/SongSelectionDialog.cpp
@@ -79,8 +87,11 @@ target_sources(EncoreJUCE
         Source/Services/QueueService.cpp
         Source/Services/RequestService.cpp
         Source/Services/ArchiveService.cpp
+        Source/Services/AnalyticsService.cpp
+        Source/Services/AuditService.cpp
         Source/Services/BackgroundMusicPlayer.cpp
         Source/Services/ApiService.cpp
+        Source/Services/GlobalProgressService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp

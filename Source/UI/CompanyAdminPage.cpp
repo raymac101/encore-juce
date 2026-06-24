@@ -7,6 +7,7 @@
 */
 
 #include "CompanyAdminPage.h"
+#include "MenuTheme.h"
 #include "../Services/FirestoreClient.h"
 #include "../Firebase/FirebaseConfig.h"
 
@@ -25,16 +26,18 @@ juce::String mimeTypeForFile (const juce::File& file)
 
 namespace
 {
-const juce::Colour kBg     { 0xff0f1722 };
-const juce::Colour kPanel  { 0xff16213e };
-const juce::Colour kBorder { 0xff2c3e57 };
-const juce::Colour kAccent { 0xff30daff };
+const juce::Colour kBg     { 0xff16213e };
+const juce::Colour kPanel  { 0x99182a52 };
+const juce::Colour kBorder { 0x664f78c4 };
+const juce::Colour kAccent { 0xff5a8fd8 };
 const juce::Colour kText   { 0xffffffff };
 const juce::Colour kMuted  { 0xffc7d2e0 };
 }
 
 CompanyAdminPage::CompanyAdminPage()
 {
+    setOpaque(true);
+
     auto& lm = LocalizationManager::getInstance();
 
     title_.setFont (juce::Font (juce::FontOptions().withHeight (30.0f)).boldened());
@@ -603,27 +606,19 @@ void CompanyAdminPage::updateAllText()
 
 void CompanyAdminPage::paint (juce::Graphics& g)
 {
-    g.fillAll (kBg);
+    MenuTheme::drawPageBackground (g, getLocalBounds());
 
     auto bounds = getLocalBounds().reduced (22);
-    g.setColour (kBorder);
-    g.drawRoundedRectangle (bounds.toFloat(), 20.0f, 1.5f);
+    MenuTheme::drawHeaderPanel (g, bounds);
 
     auto header = bounds.removeFromTop (110);
-    g.setColour (kPanel);
-    g.fillRoundedRectangle (header.toFloat(), 20.0f);
-
-    g.setColour (kAccent.withAlpha (0.15f));
-    g.fillRoundedRectangle (header.removeFromTop (6).toFloat(), 20.0f);
+    MenuTheme::drawHeaderPanel (g, header);
 
     auto infoArea = getLocalBounds().reduced (28);
     infoArea.removeFromTop (110);
     infoArea.removeFromTop (12);
     auto formArea = infoArea.removeFromTop (220);
-    g.setColour (kPanel);
-    g.fillRoundedRectangle (formArea.toFloat(), 18.0f);
-    g.setColour (kBorder);
-    g.drawRoundedRectangle (formArea.toFloat(), 18.0f, 1.0f);
+    MenuTheme::drawHeaderPanel (g, formArea);
 
     auto preview = formArea.removeFromRight (180).reduced (16);
     g.setColour (kBorder);
@@ -644,10 +639,19 @@ void CompanyAdminPage::paint (juce::Graphics& g)
     }
 
     infoArea.removeFromTop (12);
-    g.setColour (kPanel);
-    g.fillRoundedRectangle (infoArea.toFloat(), 18.0f);
-    g.setColour (kBorder);
-    g.drawRoundedRectangle (infoArea.toFloat(), 18.0f, 1.0f);
+    MenuTheme::drawHeaderPanel (g, infoArea);
+
+    auto drawStatCard = [&g](const StatCard& card)
+    {
+        auto rect = card.title.getBounds().getUnion(card.value.getBounds()).expanded(10, 8).toFloat();
+        MenuTheme::drawGlassCard(g, rect, 12.0f);
+    };
+
+    drawStatCard(venueCard_);
+    drawStatCard(hostCard_);
+    drawStatCard(deviceCard_);
+    drawStatCard(packageCard_);
+    drawStatCard(campaignCard_);
 }
 
 void CompanyAdminPage::layoutCard (StatCard& card, juce::Rectangle<int> area)

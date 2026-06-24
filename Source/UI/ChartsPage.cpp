@@ -1,0 +1,790 @@
+/*
+  ==============================================================================
+
+    ChartsPage.cpp
+
+  ==============================================================================
+*/
+
+#include "ChartsPage.h"
+#include "MenuTheme.h"
+#include "../Services/VenueService.h"
+#include "../Services/GlobalProgressService.h"
+#include "../Localization/LocalizationManager.h"
+#include <numeric>
+
+namespace
+{
+    const juce::Colour kBorder(0x7A4CC9FF);
+    const juce::Colour kText(0xffe7ebff);
+    const juce::Colour kMuted(0xff99a8d6);
+    const juce::Colour kCardBg(0xfff9fbff);
+    const juce::Colour kCardBorder(0x26000000);
+    const juce::Colour kCardTitle(0xff213560);
+
+    juce::Colour palette(int idx)
+    {
+        static const juce::Colour c[] = {
+            juce::Colour(0xff36a2eb), juce::Colour(0xffff6384), juce::Colour(0xffffce56),
+            juce::Colour(0xff4bc0c0), juce::Colour(0xff9966ff), juce::Colour(0xffff9f40),
+            juce::Colour(0xff9ad0f5), juce::Colour(0xff7bc96f), juce::Colour(0xfff67019),
+            juce::Colour(0xffd45087)
+        };
+        return c[idx % (int) std::size(c)];
+    }
+}
+
+class ChartsPage::BarChart : public juce::Component
+{
+public:
+    BarChart()
+    {
+        setOpaque(true);
+    }
+
+    void setNoDataText(const juce::String& text)
+    {
+        noDataText_ = text;
+        repaint();
+    }
+
+    void setData(const juce::String& title, std::vector<juce::String> labels, std::vector<double> values, bool horizontal = false)
+    {
+        title_ = title;
+        labels_ = std::move(labels);
+        values_ = std::move(values);
+        horizontal_ = horizontal;
+        repaint();
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setGradientFill(juce::ColourGradient(kCardBg, r.getX(), r.getY(), juce::Colour(0xffedf3ff), r.getX(), r.getBottom(), false));
+        g.fillRoundedRectangle(r, 10.0f);
+        g.setColour(kCardBorder);
+        g.drawRoundedRectangle(r.reduced(0.5f), 10.0f, 1.0f);
+
+        g.setColour(kCardTitle);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)).boldened());
+        g.drawFittedText(title_, getLocalBounds().removeFromTop(24), juce::Justification::centred, 1);
+
+        auto area = getLocalBounds().reduced(10);
+        area.removeFromTop(22);
+        if (labels_.empty() || values_.empty())
+        {
+            g.setColour(juce::Colour(0xff7987ad));
+            g.drawFittedText(noDataText_, area, juce::Justification::centred, 1);
+            return;
+        }
+
+        const double maxV = juce::jmax(1.0, *std::max_element(values_.begin(), values_.end()));
+        const int n = juce::jmin((int) labels_.size(), (int) values_.size());
+
+        if (horizontal_)
+        {
+            const int rowH = juce::jmax(16, area.getHeight() / juce::jmax(1, n));
+            for (int i = 0; i < n; ++i)
+            {
+                auto row = area.removeFromTop(rowH).reduced(0, 2);
+                auto labelArea = row.removeFromLeft(juce::jmin(130, row.getWidth() / 2));
+                g.setColour(juce::Colour(0xff33456f));
+                g.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
+                g.drawFittedText(labels_[(size_t) i], labelArea, juce::Justification::centredLeft, 1);
+
+                auto pct = values_[(size_t) i] / maxV;
+                auto barW = (int) std::round((double) row.getWidth() * pct);
+                g.setColour(palette(i).withAlpha(0.85f));
+                g.fillRoundedRectangle(row.removeFromLeft(barW).toFloat(), 4.0f);
+            }
+        }
+        else
+        {
+            const int gap = 6;
+            const int w = juce::jmax(10, (area.getWidth() - gap * juce::jmax(0, n - 1)) / juce::jmax(1, n));
+            int x = area.getX();
+            for (int i = 0; i < n; ++i)
+            {
+                auto pct = values_[(size_t) i] / maxV;
+                auto h = (int) std::round((double) area.getHeight() * pct);
+                juce::Rectangle<int> bar(x, area.getBottom() - h, w, h);
+                g.setColour(palette(i).withAlpha(0.85f));
+                g.fillRoundedRectangle(bar.toFloat(), 4.0f);
+                x += w + gap;
+            }
+        }
+    }
+
+private:
+    juce::String title_;
+    juce::String noDataText_ = "No data";
+    std::vector<juce::String> labels_;
+    std::vector<double> values_;
+    bool horizontal_ = false;
+};
+
+class ChartsPage::PieChart : public juce::Component
+{
+public:
+    PieChart()
+    {
+        setOpaque(true);
+    }
+
+    void setNoDataText(const juce::String& text)
+    {
+        noDataText_ = text;
+        repaint();
+    }
+
+    void setData(const juce::String& title,
+                 std::vector<juce::String> labels,
+                 std::vector<double> values)
+    {
+        title_ = title;
+        labels_ = std::move(labels);
+        values_ = std::move(values);
+        repaint();
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setGradientFill(juce::ColourGradient(kCardBg, r.getX(), r.getY(), juce::Colour(0xffedf3ff), r.getX(), r.getBottom(), false));
+        g.fillRoundedRectangle(r, 10.0f);
+        g.setColour(kCardBorder);
+        g.drawRoundedRectangle(r.reduced(0.5f), 10.0f, 1.0f);
+
+        g.setColour(kCardTitle);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)).boldened());
+        g.drawFittedText(title_, getLocalBounds().removeFromTop(24), juce::Justification::centred, 1);
+
+        auto area = getLocalBounds().reduced(10);
+        area.removeFromTop(22);
+        if (labels_.empty() || values_.empty())
+        {
+            g.setColour(juce::Colour(0xff7987ad));
+            g.drawFittedText(noDataText_, area, juce::Justification::centred, 1);
+            return;
+        }
+
+        auto pieArea = area.removeFromLeft(juce::jmin(area.getWidth() / 2, area.getHeight()));
+        pieArea = pieArea.withSizeKeepingCentre(juce::jmin(pieArea.getWidth(), pieArea.getHeight()),
+                                                juce::jmin(pieArea.getWidth(), pieArea.getHeight()));
+
+        const double total = std::accumulate(values_.begin(), values_.end(), 0.0);
+        if (total <= 0.0)
+            return;
+
+        float start = -juce::MathConstants<float>::halfPi;
+        for (size_t i = 0; i < values_.size(); ++i)
+        {
+            const float angle = juce::MathConstants<float>::twoPi * (float) (values_[i] / total);
+            juce::Path p;
+            p.addPieSegment(pieArea.toFloat(), start, start + angle, 0.55f);
+            g.setColour(palette((int) i).withAlpha(0.9f));
+            g.fillPath(p);
+            start += angle;
+        }
+
+        g.setColour(juce::Colour(0xff2f446f));
+        g.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
+        int y = area.getY();
+        for (size_t i = 0; i < labels_.size(); ++i)
+        {
+            auto row = juce::Rectangle<int>(area.getX(), y, area.getWidth(), 16);
+            g.setColour(palette((int) i));
+            g.fillRoundedRectangle(row.removeFromLeft(10).toFloat(), 2.0f);
+            row.removeFromLeft(6);
+            g.setColour(juce::Colour(0xff33456f));
+            g.drawFittedText(labels_[i], row, juce::Justification::centredLeft, 1);
+            y += 18;
+            if (y > area.getBottom() - 14)
+                break;
+        }
+    }
+
+private:
+    juce::String title_;
+    juce::String noDataText_ = "No data";
+    std::vector<juce::String> labels_;
+    std::vector<double> values_;
+};
+
+ChartsPage::~ChartsPage() = default;
+
+juce::String ChartsPage::tr(const juce::String& key, const juce::String& fallback) const
+{
+    auto txt = LocalizationManager::getInstance().getText(key);
+    if (txt.isEmpty() || txt.startsWith("["))
+        return fallback;
+    return txt;
+}
+
+ChartsPage::ChartsPage()
+{
+    setOpaque(true);
+
+    addAndMakeVisible(titleLabel_);
+    titleLabel_.setText(tr("charts.title", "Analytics Dashboard"), juce::dontSendNotification);
+    titleLabel_.setColour(juce::Label::textColourId, kText);
+    titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(24.0f)).boldened());
+
+    addAndMakeVisible(timeRangeBox_);
+    rebuildTimeRangeOptions();
+    timeRangeBox_.onChange = [this]()
+    {
+        const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
+        const bool custom = (! timeRangeKeys_.empty() && timeRangeKeys_[(size_t) idx] == "custom");
+        customStartDate_.setVisible(custom);
+        customEndDate_.setVisible(custom);
+        customStartLabel_.setVisible(custom);
+        customEndLabel_.setVisible(custom);
+        refreshAnalytics();
+    };
+
+    addAndMakeVisible(customStartLabel_);
+    addAndMakeVisible(customEndLabel_);
+    addAndMakeVisible(customStartDate_);
+    addAndMakeVisible(customEndDate_);
+    customStartLabel_.setText(tr("charts.custom_start", "Start"), juce::dontSendNotification);
+    customEndLabel_.setText(tr("charts.custom_end", "End"), juce::dontSendNotification);
+    customStartDate_.setText("2026-01-01", juce::dontSendNotification);
+    customEndDate_.setText(juce::Time::getCurrentTime().formatted("%Y-%m-%d"), juce::dontSendNotification);
+    customStartDate_.onTextChange = [this]()
+    {
+        const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
+        if (! timeRangeKeys_.empty() && timeRangeKeys_[(size_t) idx] == "custom")
+            refreshAnalytics();
+    };
+    customEndDate_.onTextChange = [this]()
+    {
+        const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
+        if (! timeRangeKeys_.empty() && timeRangeKeys_[(size_t) idx] == "custom")
+            refreshAnalytics();
+    };
+
+    addAndMakeVisible(refreshButton_);
+    addAndMakeVisible(exportButton_);
+    refreshButton_.onClick = [this]() { refreshAnalytics(); };
+    exportButton_.onClick = [this]() { exportData(); };
+    refreshButton_.setButtonText(tr("charts.refresh", "Refresh"));
+    exportButton_.setButtonText(tr("charts.export", "Export JSON"));
+
+    refreshButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f7bff));
+    refreshButton_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    exportButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1f8f63));
+    exportButton_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+
+    customStartDate_.setInputRestrictions(10, "0123456789-");
+    customEndDate_.setInputRestrictions(10, "0123456789-");
+    customStartDate_.setJustification(juce::Justification::centred);
+    customEndDate_.setJustification(juce::Justification::centred);
+    customStartDate_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0d1630));
+    customEndDate_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0d1630));
+    customStartDate_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+    customEndDate_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+    customStartDate_.setColour(juce::TextEditor::outlineColourId, kBorder);
+    customEndDate_.setColour(juce::TextEditor::outlineColourId, kBorder);
+
+    timeRangeBox_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1630));
+    timeRangeBox_.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+    timeRangeBox_.setColour(juce::ComboBox::outlineColourId, kBorder);
+
+    addAndMakeVisible(loadingLabel_);
+    loadingLabel_.setColour(juce::Label::textColourId, kMuted);
+
+    auto makeMetric = [this](juce::Label& lbl)
+    {
+        addAndMakeVisible(lbl);
+        lbl.setJustificationType(juce::Justification::centred);
+        lbl.setColour(juce::Label::textColourId, juce::Colours::white);
+        lbl.setColour(juce::Label::backgroundColourId, juce::Colour(0xff1f3564));
+        lbl.setFont(juce::Font(juce::FontOptions().withHeight(16.0f)).boldened());
+        lbl.setOpaque(true);
+    };
+    makeMetric(metricSongsPerMember_);
+    makeMetric(metricSessionDuration_);
+    makeMetric(metricActiveMembers_);
+    makeMetric(metricSessionCount_);
+
+    membersPerNightChart_ = std::make_unique<BarChart>();
+    topMembersChart_ = std::make_unique<BarChart>();
+    topSongsChart_ = std::make_unique<PieChart>();
+    peakHoursChart_ = std::make_unique<BarChart>();
+    sourceBreakdownChart_ = std::make_unique<PieChart>();
+    deviceBreakdownChart_ = std::make_unique<PieChart>();
+
+    addAndMakeVisible(*membersPerNightChart_);
+    addAndMakeVisible(*topMembersChart_);
+    addAndMakeVisible(*topSongsChart_);
+    addAndMakeVisible(*peakHoursChart_);
+    addAndMakeVisible(*sourceBreakdownChart_);
+    addAndMakeVisible(*deviceBreakdownChart_);
+
+    auto prepGroup = [this](juce::GroupComponent& g, const juce::String& title)
+    {
+        addAndMakeVisible(g);
+        g.setText(title);
+        g.setColour(juce::GroupComponent::textColourId, kText);
+        g.setColour(juce::GroupComponent::outlineColourId, kBorder);
+    };
+    prepGroup(topMembersGroup_, tr("charts.top_members", "Top Members"));
+    prepGroup(topSongsGroup_, tr("charts.top_songs", "Top Songs"));
+    prepGroup(dailyStatsGroup_, tr("charts.daily_stats", "Daily Statistics"));
+    prepGroup(weeklyStatsGroup_, tr("charts.weekly_summary", "Weekly Summary"));
+    prepGroup(insightsGroup_, tr("charts.insights", "Insights"));
+
+    auto prepText = [this](juce::TextEditor& t)
+    {
+        addAndMakeVisible(t);
+        t.setMultiLine(true);
+        t.setReadOnly(true);
+        t.setScrollbarsShown(true);
+        t.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff13264d));
+        t.setColour(juce::TextEditor::textColourId, kText);
+        t.setFont(juce::Font(juce::FontOptions().withHeight(12.0f)));
+        t.setOpaque(true);
+    };
+    prepText(topMembersText_);
+    prepText(topSongsText_);
+    prepText(dailyStatsText_);
+    prepText(weeklyStatsText_);
+    prepText(insightsText_);
+
+    const auto noData = tr("charts.no_data", "No data");
+    membersPerNightChart_->setNoDataText(noData);
+    topMembersChart_->setNoDataText(noData);
+    topSongsChart_->setNoDataText(noData);
+    peakHoursChart_->setNoDataText(noData);
+    sourceBreakdownChart_->setNoDataText(noData);
+    deviceBreakdownChart_->setNoDataText(noData);
+
+    customStartLabel_.setVisible(false);
+    customEndLabel_.setVisible(false);
+    customStartDate_.setVisible(false);
+    customEndDate_.setVisible(false);
+
+    refreshAnalytics();
+}
+
+void ChartsPage::paint(juce::Graphics& g)
+{
+    MenuTheme::drawPageBackground(g, getLocalBounds());
+    MenuTheme::drawHeaderPanel(g, getLocalBounds().reduced(8).removeFromTop(74));
+}
+
+void ChartsPage::resized()
+{
+    auto area = getLocalBounds().reduced(12);
+
+    auto header = area.removeFromTop(70).reduced(12, 8);
+    titleLabel_.setBounds(header.removeFromLeft(320));
+
+    auto controls = header;
+    timeRangeBox_.setBounds(controls.removeFromLeft(170));
+    controls.removeFromLeft(8);
+    customStartLabel_.setBounds(controls.removeFromLeft(36));
+    customStartDate_.setBounds(controls.removeFromLeft(108));
+    controls.removeFromLeft(6);
+    customEndLabel_.setBounds(controls.removeFromLeft(28));
+    customEndDate_.setBounds(controls.removeFromLeft(108));
+    controls.removeFromLeft(8);
+    refreshButton_.setBounds(controls.removeFromLeft(90));
+    controls.removeFromLeft(6);
+    exportButton_.setBounds(controls.removeFromLeft(110));
+    controls.removeFromLeft(8);
+    loadingLabel_.setBounds(controls);
+
+    auto metrics = area.removeFromTop(58);
+    const int gap = 8;
+    const int w = (metrics.getWidth() - gap * 3) / 4;
+    metricSongsPerMember_.setBounds(metrics.removeFromLeft(w).reduced(2));
+    metrics.removeFromLeft(gap);
+    metricSessionDuration_.setBounds(metrics.removeFromLeft(w).reduced(2));
+    metrics.removeFromLeft(gap);
+    metricActiveMembers_.setBounds(metrics.removeFromLeft(w).reduced(2));
+    metrics.removeFromLeft(gap);
+    metricSessionCount_.setBounds(metrics.removeFromLeft(w).reduced(2));
+
+    area.removeFromTop(6);
+
+    auto chartsGrid = area.removeFromTop(420);
+    const int colGap = 10;
+    auto left = chartsGrid.removeFromLeft((chartsGrid.getWidth() - colGap) / 2);
+    chartsGrid.removeFromLeft(colGap);
+    auto right = chartsGrid;
+
+    membersPerNightChart_->setBounds(left.removeFromTop(136));
+    left.removeFromTop(6);
+    topMembersChart_->setBounds(left.removeFromTop(136));
+    left.removeFromTop(6);
+    topSongsChart_->setBounds(left.removeFromTop(136));
+
+    peakHoursChart_->setBounds(right.removeFromTop(136));
+    right.removeFromTop(6);
+    sourceBreakdownChart_->setBounds(right.removeFromTop(136));
+    right.removeFromTop(6);
+    deviceBreakdownChart_->setBounds(right.removeFromTop(136));
+
+    area.removeFromTop(8);
+
+    auto tablesTop = area.removeFromTop(220);
+    auto tleft = tablesTop.removeFromLeft((tablesTop.getWidth() - colGap) / 2);
+    tablesTop.removeFromLeft(colGap);
+    auto tright = tablesTop;
+
+    topMembersGroup_.setBounds(tleft);
+    topMembersText_.setBounds(tleft.reduced(8, 22));
+
+    topSongsGroup_.setBounds(tright);
+    topSongsText_.setBounds(tright.reduced(8, 22));
+
+    area.removeFromTop(8);
+
+    auto tablesBottom = area.removeFromTop(220);
+    auto bleft = tablesBottom.removeFromLeft((tablesBottom.getWidth() - colGap) / 2);
+    tablesBottom.removeFromLeft(colGap);
+    auto bright = tablesBottom;
+
+    dailyStatsGroup_.setBounds(bleft);
+    dailyStatsText_.setBounds(bleft.reduced(8, 22));
+
+    weeklyStatsGroup_.setBounds(bright);
+    weeklyStatsText_.setBounds(bright.reduced(8, 22));
+
+    area.removeFromTop(8);
+    insightsGroup_.setBounds(area);
+    insightsText_.setBounds(area.reduced(8, 22));
+}
+
+void ChartsPage::updateAllText()
+{
+    titleLabel_.setText(tr("charts.title", "Analytics Dashboard"), juce::dontSendNotification);
+    customStartLabel_.setText(tr("charts.custom_start", "Start"), juce::dontSendNotification);
+    customEndLabel_.setText(tr("charts.custom_end", "End"), juce::dontSendNotification);
+    refreshButton_.setButtonText(tr("charts.refresh", "Refresh"));
+    exportButton_.setButtonText(tr("charts.export", "Export JSON"));
+
+    topMembersGroup_.setText(tr("charts.top_members", "Top Members"));
+    topSongsGroup_.setText(tr("charts.top_songs", "Top Songs"));
+    dailyStatsGroup_.setText(tr("charts.daily_stats", "Daily Statistics"));
+    weeklyStatsGroup_.setText(tr("charts.weekly_summary", "Weekly Summary"));
+    insightsGroup_.setText(tr("charts.insights", "Insights"));
+
+    rebuildTimeRangeOptions();
+}
+
+void ChartsPage::rebuildTimeRangeOptions()
+{
+    presets_ = AnalyticsService::getInstance().getTimeRangePresets();
+
+    const int prevId = timeRangeBox_.getSelectedId();
+
+    struct Item { const char* key; const char* labelKey; const char* fallback; };
+    const Item items[] = {
+        { "today", "charts.range.today", "Today" },
+        { "yesterday", "charts.range.yesterday", "Yesterday" },
+        { "thisWeek", "charts.range.this_week", "This Week" },
+        { "lastWeek", "charts.range.last_week", "Last Week" },
+        { "thisMonth", "charts.range.this_month", "This Month" },
+        { "lastMonth", "charts.range.last_month", "Last Month" },
+        { "thisYear", "charts.range.this_year", "This Year" },
+        { "allTime", "charts.range.all_time", "All Time" },
+        { "custom", "charts.range.custom", "Custom Range" },
+    };
+
+    timeRangeBox_.clear();
+    timeRangeKeys_.clear();
+    int id = 1;
+    for (auto& i : items)
+    {
+        timeRangeBox_.addItem(tr(i.labelKey, i.fallback), id++);
+        timeRangeKeys_.push_back(i.key);
+    }
+
+    const int defaultId = (prevId > 0 && prevId <= (int) timeRangeKeys_.size()) ? prevId : 3;
+    timeRangeBox_.setSelectedId(defaultId, juce::dontSendNotification); // thisWeek
+}
+
+AnalyticsService::TimeRange ChartsPage::currentRange() const
+{
+    const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
+    const auto selectedKey = timeRangeKeys_.empty() ? juce::String("thisWeek") : timeRangeKeys_[(size_t) idx];
+
+    if (selectedKey == "custom")
+    {
+        auto s = juce::Time::fromISO8601(customStartDate_.getText().trim() + "T00:00:00Z");
+        auto e = juce::Time::fromISO8601(customEndDate_.getText().trim() + "T23:59:59Z");
+        if (s.toMilliseconds() <= 0 || e.toMilliseconds() <= 0 || s > e)
+            return presets_.at("thisWeek");
+        return { s, e, tr("charts.range.custom", "Custom Range") };
+    }
+
+    auto it = presets_.find(selectedKey);
+    if (it != presets_.end())
+        return it->second;
+
+    return presets_.at("thisWeek");
+}
+
+void ChartsPage::refreshAnalytics()
+{
+    const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
+    const auto selectedKey = timeRangeKeys_.empty() ? juce::String("thisWeek") : timeRangeKeys_[(size_t) idx];
+    if (selectedKey == "custom")
+    {
+        auto s = juce::Time::fromISO8601(customStartDate_.getText().trim() + "T00:00:00Z");
+        auto e = juce::Time::fromISO8601(customEndDate_.getText().trim() + "T23:59:59Z");
+        if (s.toMilliseconds() <= 0 || e.toMilliseconds() <= 0 || s > e)
+        {
+            loadingLabel_.setText(tr("charts.invalid_custom_range", "Invalid custom date range (use YYYY-MM-DD)"), juce::dontSendNotification);
+            return;
+        }
+    }
+
+    const auto venueId = VenueService::getInstance().getCurrentVenueId();
+    if (venueId.isEmpty())
+    {
+        loadingLabel_.setText(tr("charts.no_active_venue", "No active venue"), juce::dontSendNotification);
+        return;
+    }
+
+    loading_ = true;
+    loadingLabel_.setText(tr("charts.loading", "Loading analytics..."), juce::dontSendNotification);
+    refreshButton_.setEnabled(false);
+
+    const int taskId = GlobalProgressService::getInstance().beginTask(tr("charts.loading", "Loading analytics..."));
+    AnalyticsService::getInstance().loadAnalytics(venueId, currentRange(),
+        [this, taskId](bool ok, AnalyticsService::Snapshot data, juce::String error)
+        {
+            GlobalProgressService::getInstance().endTask(taskId);
+            loading_ = false;
+            refreshButton_.setEnabled(true);
+
+            if (! ok)
+            {
+                loadingLabel_.setText(tr("charts.load_failed", "Load failed") + ": " + error, juce::dontSendNotification);
+                return;
+            }
+
+            loadingLabel_.setText({}, juce::dontSendNotification);
+            applySnapshot(std::move(data));
+        });
+}
+
+void ChartsPage::applySnapshot(AnalyticsService::Snapshot data)
+{
+    snapshot_ = std::move(data);
+
+    metricSongsPerMember_.setText(tr("charts.metric.avg_songs_member", "Avg Songs/Member") + "\n"
+                                  + juce::String(snapshot_.performanceMetrics.averageSongsPerMember, 1), juce::dontSendNotification);
+    metricSessionDuration_.setText(tr("charts.metric.avg_session", "Avg Session") + "\n"
+                                   + juce::String(snapshot_.performanceMetrics.averageSessionDuration)
+                                   + tr("charts.minutes_suffix", "m"), juce::dontSendNotification);
+    metricActiveMembers_.setText(tr("charts.metric.active_members", "Active Members") + "\n"
+                                 + juce::String((int) snapshot_.topMembers.size()), juce::dontSendNotification);
+    metricSessionCount_.setText(tr("charts.metric.sessions", "Sessions") + "\n"
+                                + juce::String((int) snapshot_.dailyStats.size()), juce::dontSendNotification);
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& d : snapshot_.dailyStats)
+        {
+            labels.push_back(d.date);
+            values.push_back((double) d.totalMembers);
+        }
+        membersPerNightChart_->setData(tr("charts.chart.members_per_night", "Members per Night"), std::move(labels), std::move(values));
+    }
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& m : snapshot_.topMembers)
+        {
+            labels.push_back(m.memberName);
+            values.push_back((double) m.totalSongs);
+        }
+        topMembersChart_->setData(tr("charts.chart.top_members", "Top Members by Songs Sang"), std::move(labels), std::move(values), true);
+    }
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& s : snapshot_.topSongs)
+        {
+            labels.push_back(s.songName + " - " + s.artistName + " (" + juce::String(s.timesPlayed) + ")");
+            values.push_back((double) s.timesPlayed);
+        }
+        topSongsChart_->setData(tr("charts.chart.top_songs", "Most Popular Songs"), std::move(labels), std::move(values));
+    }
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& p : snapshot_.performanceMetrics.peakHours)
+        {
+            labels.push_back(juce::String(p.hour) + ":00");
+            values.push_back((double) p.count);
+        }
+        peakHoursChart_->setData(tr("charts.chart.peak_hours", "Peak Hours Activity"), std::move(labels), std::move(values));
+    }
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& b : snapshot_.sourceBreakdown)
+        {
+            labels.push_back(b.name + " (" + juce::String(b.percentage) + "%)");
+            values.push_back((double) b.count);
+        }
+        sourceBreakdownChart_->setData(tr("charts.chart.source_breakdown", "Song Addition Source"), std::move(labels), std::move(values));
+    }
+
+    {
+        std::vector<juce::String> labels;
+        std::vector<double> values;
+        for (auto& b : snapshot_.deviceBreakdown)
+        {
+            labels.push_back(b.name + " (" + juce::String(b.percentage) + "%)");
+            values.push_back((double) b.count);
+        }
+        deviceBreakdownChart_->setData(tr("charts.chart.device_breakdown", "Device Types Used"), std::move(labels), std::move(values));
+    }
+
+    rebuildReportingText();
+}
+
+void ChartsPage::rebuildReportingText()
+{
+    juce::String topMembers;
+    topMembers << tr("charts.col.rank", "Rank") << "\t"
+               << tr("charts.col.member", "Member") << "\t"
+               << tr("charts.col.songs", "Songs") << "\t"
+               << tr("charts.col.last_sung", "Last Sung") << "\n";
+    for (size_t i = 0; i < snapshot_.topMembers.size(); ++i)
+    {
+        auto& m = snapshot_.topMembers[i];
+        topMembers << juce::String((int) i + 1) << "\t"
+                   << m.memberName << "\t"
+                   << juce::String(m.totalSongs) << "\t"
+                   << m.lastSung.formatted("%Y-%m-%d %H:%M") << "\n";
+    }
+    topMembersText_.setText(topMembers, juce::dontSendNotification);
+
+    juce::String topSongs;
+    topSongs << tr("charts.col.rank", "Rank") << "\t"
+             << tr("charts.col.song", "Song") << "\t"
+             << tr("charts.col.artist", "Artist") << "\t"
+             << tr("charts.col.plays", "Plays") << "\t"
+             << tr("charts.col.last_played", "Last Played") << "\n";
+    for (size_t i = 0; i < snapshot_.topSongs.size(); ++i)
+    {
+        auto& s = snapshot_.topSongs[i];
+        topSongs << juce::String((int) i + 1) << "\t"
+                 << s.songName << "\t"
+                 << s.artistName << "\t"
+                 << juce::String(s.timesPlayed) << "\t"
+                 << s.lastPlayed.formatted("%Y-%m-%d %H:%M") << "\n";
+    }
+    topSongsText_.setText(topSongs, juce::dontSendNotification);
+
+    juce::String daily;
+        daily << tr("charts.col.date", "Date") << "\t"
+            << tr("charts.col.members", "Members") << "\t"
+            << tr("charts.col.songs", "Songs") << "\t"
+            << tr("charts.col.duration", "Duration") << "\t"
+            << tr("charts.metric.avg_songs_member", "Avg Songs/Member") << "\n";
+    for (auto& d : snapshot_.dailyStats)
+    {
+        const double avg = d.totalMembers > 0 ? (double) d.totalSongs / (double) d.totalMembers : 0.0;
+        daily << d.date << "\t"
+              << juce::String(d.totalMembers) << "\t"
+              << juce::String(d.totalSongs) << "\t"
+              << juce::String(d.sessionDuration) << tr("charts.minutes_suffix", "m") << "\t"
+              << juce::String(avg, 1) << "\n";
+    }
+    dailyStatsText_.setText(daily, juce::dontSendNotification);
+
+    juce::String weekly;
+        weekly << tr("charts.col.week", "Week") << "\t"
+            << tr("charts.col.total_members", "Total Members") << "\t"
+            << tr("charts.col.total_songs", "Total Songs") << "\t"
+            << tr("charts.col.avg_members_night", "Avg Members/Night") << "\t"
+            << tr("charts.col.avg_songs_night", "Avg Songs/Night") << "\t"
+            << tr("charts.col.best_night", "Best Night") << "\n";
+    for (auto& w : snapshot_.weeklyStats)
+    {
+        weekly << w.week << "\t"
+               << juce::String(w.totalMembers) << "\t"
+               << juce::String(w.totalSongs) << "\t"
+               << juce::String(w.avgMembersPerNight) << "\t"
+               << juce::String(w.avgSongsPerNight) << "\t"
+               << w.topNight << "\n";
+    }
+    weeklyStatsText_.setText(weekly, juce::dontSendNotification);
+
+    juce::String insights;
+    insights << tr("charts.insight.peak_hours", "Peak Hours") << "\n";
+    for (auto& p : snapshot_.performanceMetrics.peakHours)
+        insights << "  " << juce::String(p.hour) << ":00 - " << juce::String(p.count) << " songs\n";
+
+    insights << "\n" << tr("charts.insight.source_breakdown", "Source Breakdown") << "\n";
+    for (auto& b : snapshot_.sourceBreakdown)
+        insights << "  " << b.name << ": " << juce::String(b.count) << " (" << juce::String(b.percentage) << "%)\n";
+
+    insights << "\n" << tr("charts.insight.device_breakdown", "Device Breakdown") << "\n";
+    for (auto& b : snapshot_.deviceBreakdown)
+        insights << "  " << b.name << ": " << juce::String(b.count) << " (" << juce::String(b.percentage) << "%)\n";
+
+    insightsText_.setText(insights, juce::dontSendNotification);
+}
+
+void ChartsPage::exportData()
+{
+    juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    root->setProperty("rangeLabel", currentRange().label);
+
+    juce::Array<juce::var> members;
+    for (auto& m : snapshot_.topMembers)
+    {
+        juce::DynamicObject::Ptr o = new juce::DynamicObject();
+        o->setProperty("memberName", m.memberName);
+        o->setProperty("totalSongs", m.totalSongs);
+        o->setProperty("lastSung", m.lastSung.toISO8601(true));
+        members.add(juce::var(o.get()));
+    }
+    root->setProperty("topMembers", juce::var(members));
+
+    juce::Array<juce::var> songs;
+    for (auto& s : snapshot_.topSongs)
+    {
+        juce::DynamicObject::Ptr o = new juce::DynamicObject();
+        o->setProperty("songName", s.songName);
+        o->setProperty("artistName", s.artistName);
+        o->setProperty("timesPlayed", s.timesPlayed);
+        o->setProperty("lastPlayed", s.lastPlayed.toISO8601(true));
+        songs.add(juce::var(o.get()));
+    }
+    root->setProperty("topSongs", juce::var(songs));
+
+    const auto jsonText = juce::JSON::toString(juce::var(root.get()), true);
+
+    auto suggested = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+        .getChildFile("karaoke-analytics-" + juce::Time::getCurrentTime().formatted("%Y-%m-%d") + ".json");
+
+    exportChooser_ = std::make_shared<juce::FileChooser>(tr("charts.save_dialog_title", "Save analytics JSON"), suggested, "*.json");
+    exportChooser_->launchAsync(juce::FileBrowserComponent::saveMode
+                              | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, jsonText](const juce::FileChooser& chooser)
+        {
+            auto out = chooser.getResult();
+            if (out == juce::File())
+                return;
+
+            out.replaceWithText(jsonText);
+            exportChooser_.reset();
+        });
+}

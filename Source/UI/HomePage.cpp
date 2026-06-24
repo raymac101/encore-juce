@@ -65,6 +65,7 @@ void SongCard::loadArtwork()
 void SongCard::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
+
     int artSize = bounds.getWidth();
 
     // Artwork area (square, top portion)

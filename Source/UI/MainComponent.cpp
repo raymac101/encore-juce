@@ -22,10 +22,13 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/ArchiveService.h"
 #include "../Services/ApiService.h"
+#include "../Services/AuditService.h"
+#include "../Services/GlobalProgressService.h"
 #include "EditSingerModal.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <numeric>
@@ -3401,21 +3404,34 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         }
     }
 
+    const auto progressMessage = "Loading \"" + juce::String(song.songName) + "\"...";
+    const int progressTaskId = GlobalProgressService::getInstance().beginTask(progressMessage);
+
     if (bottomBar != nullptr)
     {
         bottomBar->setWaveformSamples({});
-        bottomBar->setWaveformStatusMessage("Loading \"" + juce::String(song.songName) + "\"...");
+        bottomBar->setWaveformStatusMessage(progressMessage);
     }
 
     // Defer the actual load work to the next message-loop tick so the loading
     // message paints in the waveform area before any file I/O starts.
     juce::Component::SafePointer<MainComponent> self(this);
-    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart, onDone = std::move(onDone)]()
+    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart,
+                                     progressTaskId, onDone = std::move(onDone)]() mutable
     {
+        auto taskEnded = std::make_shared<std::atomic<bool>>(false);
+        auto finish = [progressTaskId, taskEnded, onDone = std::move(onDone)](bool ok) mutable
+        {
+            if (! taskEnded->exchange(true))
+                GlobalProgressService::getInstance().endTask(progressTaskId);
+
+            if (onDone)
+                onDone(ok);
+        };
+
         if (! self || ! self->audioEngine)
         {
-            if (onDone)
-                onDone(false);
+            finish(false);
             return;
         }
 
@@ -3487,8 +3503,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         "No playable file path is recorded for this song.");
-        if (onDone)
-            onDone(false);
+        finish(false);
         return;
     }
 
@@ -3503,8 +3518,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         resolveError.isNotEmpty() ? resolveError : "Could not read ZIP archive.",
                                         sourceFile.getFullPathName());
-        if (onDone)
-            onDone(false);
+        finish(false);
         return;
     }
 
@@ -3547,8 +3561,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         "The song file was not found on this computer.",
                                         audioFile.getFullPathName());
-        if (onDone)
-            onDone(false);
+        finish(false);
         return;
     }
 
@@ -3572,8 +3585,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->showSongLoadFailedMessage(song.songName,
                                             "The video file could not be opened for playback.",
                                             audioFile.getFullPathName());
-            if (onDone)
-                onDone(false);
+            finish(false);
             return;
         }
 
@@ -3625,8 +3637,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->currentRibbonCdgFile_ = juce::File();
         self->refreshRibbonState();
 
-        if (onDone)
-            onDone(true);
+        finish(true);
         return;
     }
 
@@ -3638,8 +3649,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         "The audio file format is unsupported or the file could not be opened.",
                                         audioFile.getFullPathName());
-        if (onDone)
-            onDone(false);
+        finish(false);
         return;
     }
 
@@ -3727,8 +3737,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->bgPlayer_->fadeOut (1.5f);
         self->audioEngine->play();
     }
-    if (onDone)
-        onDone(true);
+    finish(true);
     });
 }
 
@@ -4147,6 +4156,14 @@ void MainComponent::hideLoadingOverlay()
 
 void MainComponent::startDeferredAudioServices(const juce::String& venueId, int startupToken)
 {
+    const int progressTaskId = GlobalProgressService::getInstance().beginTask("Starting audio engine...");
+    auto taskEnded = std::make_shared<std::atomic<bool>>(false);
+    auto endProgressTask = [progressTaskId, taskEnded]()
+    {
+        if (! taskEnded->exchange(true))
+            GlobalProgressService::getInstance().endTask(progressTaskId);
+    };
+
     juce::Component::SafePointer<MainComponent> safeThis(this);
     updateLoadingOverlay("Starting audio engine...", 0.92);
     audioStartupInProgress_ = true;
@@ -4162,10 +4179,13 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
         safeThis->hideLoadingOverlay();
     });
 
-    juce::Thread::launch([safeThis, venueId, startupToken]()
+    juce::Thread::launch([safeThis, venueId, startupToken, endProgressTask]()
     {
         if (safeThis == nullptr || safeThis->audioEngine == nullptr)
+        {
+            endProgressTask();
             return;
+        }
 
         const auto startMs = juce::Time::getMillisecondCounterHiRes();
         DBG("[AudioStartup] Background audio startup begin");
@@ -4173,10 +4193,13 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             safeThis->audioEngine->initialize();
         const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
 
-        juce::MessageManager::callAsync([safeThis, venueId, startupToken, initMs]()
+        juce::MessageManager::callAsync([safeThis, venueId, startupToken, initMs, endProgressTask]()
         {
             if (safeThis == nullptr || safeThis->startupLoadToken_ != startupToken || safeThis->activeVenueId_ != venueId)
+            {
+                endProgressTask();
                 return;
+            }
 
             const auto lyricStartMs = juce::Time::getMillisecondCounterHiRes();
 
@@ -4206,6 +4229,7 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             DBG("[AudioStartup] Deferred audio init finished in " + juce::String(initMs, 1)
                 + " ms; lyric window setup in " + juce::String(lyricMs, 1) + " ms");
             safeThis->hideLoadingOverlay();
+            endProgressTask();
         });
     });
 }
@@ -5457,4 +5481,22 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
         {
             if (! ok) DBG("[History] addPlayHistory failed: " << err);
         });
+
+    // Write the full audit trail — mirrors audit.service.ts addAudit().
+    // Requires the first QueueItem from the now-playing singer so we have
+    // pitch, version, profileId, deviceId, foxId.
+    if (hasLocalNowPlaying_ && ! localNowPlaying_.songs.empty())
+    {
+        const auto& firstItem = localNowPlaying_.songs.front();
+        const auto  venueName = juce::String(VenueService::getInstance().getCurrent().name);
+        const auto  kjId      = juce::String(FirestoreClient::getInstance().getUserId());
+
+        AuditService::getInstance().addAudit(
+            currentSong,
+            localNowPlaying_,
+            firstItem,
+            venueId,
+            venueName,
+            kjId);
+    }
 }

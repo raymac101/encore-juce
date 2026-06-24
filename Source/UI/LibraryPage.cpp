@@ -10,8 +10,10 @@
 
 #include "LibraryPage.h"
 #include "AddSongsDialog.h"
+#include "MenuTheme.h"
 #include "../Services/ApiService.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/GlobalProgressService.h"
 #include "../Localization/LocalizationManager.h"
 
 #include <unordered_set>
@@ -42,6 +44,8 @@ static bool needsRemoteMetadata(const CdgSong& song)
 LibraryPage::LibraryPage()
     : juce::Timer()
 {
+    setOpaque(true);
+
     auto& lm = LocalizationManager::getInstance();
 
     //--------------------------------------------------------------------------
@@ -212,6 +216,11 @@ LibraryPage::~LibraryPage()
 {
     stopTimer();
     scanner_.stopScan();
+    if (globalScanTaskId_ != 0)
+    {
+        GlobalProgressService::getInstance().endTask(globalScanTaskId_);
+        globalScanTaskId_ = 0;
+    }
     scanner_.setSongDatabase(nullptr);
     songDb_.close();
 }
@@ -424,8 +433,11 @@ void LibraryPage::timerCallback()
 //==============================================================================
 void LibraryPage::paint(juce::Graphics& g)
 {
-    // Semi-transparent dark grey panel behind the stats area so the textured
-    // tile background from MainArea still shows through subtly.
+    MenuTheme::drawPageBackground(g, getLocalBounds());
+
+    auto header = getLocalBounds().reduced(12).removeFromTop(128);
+    MenuTheme::drawHeaderPanel(g, header);
+
     auto bounds = getLocalBounds();
     int panelY = titleLabel_->getBottom() + 8
                + pathLabel_->getHeight() + 4
@@ -436,10 +448,7 @@ void LibraryPage::paint(juce::Graphics& g)
 
     int panelH = bounds.getHeight() - panelY - 12;
     if (panelH > 0)
-    {
-        g.setColour(juce::Colour(0xff202428).withAlpha(0.55f));
-        g.fillRoundedRectangle(juce::Rectangle<int>(12, panelY, bounds.getWidth() - 24, panelH).toFloat(), 6.f);
-    }
+        MenuTheme::drawHeaderPanel(g, juce::Rectangle<int>(12, panelY, bounds.getWidth() - 24, panelH));
 }
 
 void LibraryPage::resized()
@@ -1088,12 +1097,26 @@ void LibraryPage::setScanningState(bool scanning)
 
     if (scanning)
     {
+        if (globalScanTaskId_ == 0)
+        {
+            juce::String msg = progressLabel_ != nullptr ? progressLabel_->getText().trim() : juce::String();
+            if (msg.isEmpty())
+                msg = "Scanning library...";
+            globalScanTaskId_ = GlobalProgressService::getInstance().beginTask(msg);
+        }
+
         progressLabel_->setText(LocalizationManager::getInstance().getText("library.scanning"), juce::dontSendNotification);
         messageLabel_->setVisible(false);
         startTimerHz(10);
     }
     else
     {
+        if (globalScanTaskId_ != 0)
+        {
+            GlobalProgressService::getInstance().endTask(globalScanTaskId_);
+            globalScanTaskId_ = 0;
+        }
+
         stopTimer();
         progressValue_ = 1.0;
         progressBar_->repaint();

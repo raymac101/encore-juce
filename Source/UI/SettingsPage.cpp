@@ -9,6 +9,7 @@
 */
 
 #include "SettingsPage.h"
+#include "MenuTheme.h"
 #include "../Services/UserPreferences.h"
 
 //==============================================================================
@@ -30,11 +31,11 @@ namespace
 
     constexpr uint32_t kBg          = 0xff16213e;
     constexpr uint32_t kSectionBg   = 0xff1e2d5a;
-    constexpr uint32_t kCardFill    = 0xff1a2030;   // card background (alpha applied at paint)
-    constexpr uint32_t kCardBorder  = 0xff2d3a5a;   // card border
-    constexpr uint32_t kAccent      = 0xff7b5ea7;
-    constexpr uint32_t kAccentSoft  = 0xff9d7fc9;   // lighter accent for headers
-    constexpr uint32_t kBtnNormal   = 0xff2d2d3a;
+    constexpr uint32_t kCardFill    = 0xff1a2a52;   // card background (alpha applied at paint)
+    constexpr uint32_t kCardBorder  = 0xff3a568f;   // card border
+    constexpr uint32_t kAccent      = 0xff4272b8;
+    constexpr uint32_t kAccentSoft  = 0xff5a8fd8;   // lighter accent for headers
+    constexpr uint32_t kBtnNormal   = 0xff2f4b80;
     constexpr uint32_t kBtnDanger   = 0xff7b2d2d;
     constexpr uint32_t kBtnSuccess  = 0xff2d6b3a;
     constexpr uint32_t kTextPrimary = 0xffe4e4e4;
@@ -1280,6 +1281,8 @@ private:
 //==============================================================================
 SettingsPage::SettingsPage()
 {
+    setOpaque(true);
+
     loadFromCache();
 
     panel_ = std::make_unique<SettingsContentPanel>(*this);
@@ -1297,7 +1300,7 @@ SettingsPage::~SettingsPage() = default;
 
 void SettingsPage::paint(juce::Graphics& g)
 {
-    juce::ignoreUnused(g);
+    MenuTheme::drawPageBackground(g, getLocalBounds());
 }
 
 void SettingsPage::resized()

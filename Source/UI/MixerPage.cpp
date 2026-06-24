@@ -7,6 +7,7 @@
 */
 
 #include "MixerPage.h"
+#include "MenuTheme.h"
 
 namespace
 {
@@ -209,6 +210,8 @@ namespace
 
 MixerPage::MixerPage()
 {
+    setOpaque(true);
+
     titleLabel.setText({}, juce::dontSendNotification);
     titleLabel.setFont(juce::Font(22.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId, juce::Colour(0xffd8dde3));
@@ -457,17 +460,8 @@ void MixerPage::showLimiterDialog(juce::Component& anchor)
 void MixerPage::paint(juce::Graphics& g)
 {
     auto area = getLocalBounds();
-
-    juce::ColourGradient bg(juce::Colour(0xff0a0f17),
-                            0.0f, 0.0f,
-                            juce::Colour(0xff131a25),
-                            0.0f, (float) area.getBottom(),
-                            false);
-    g.setGradientFill(bg);
-    g.fillAll();
-
-    g.setColour(juce::Colour(0xff0f141d).withAlpha(0.7f));
-    g.fillRect(area.removeFromTop(74));
+    MenuTheme::drawPageBackground(g, area);
+    MenuTheme::drawHeaderPanel(g, area.removeFromTop(74).reduced(12, 6));
 
     auto stripBounds = getLocalBounds().reduced(14).withTrimmedTop(80);
     const int stripW = stripBounds.getWidth() / stripCount;
@@ -476,10 +470,7 @@ void MixerPage::paint(juce::Graphics& g)
     {
         auto col = stripBounds.removeFromLeft(stripW).reduced(4, 0);
 
-        g.setColour(juce::Colour(0xff101722));
-        g.fillRoundedRectangle(col.toFloat(), 10.0f);
-        g.setColour(juce::Colour(0xff263245));
-        g.drawRoundedRectangle(col.toFloat().reduced(0.5f), 10.0f, 1.0f);
+        MenuTheme::drawGlassCard(g, col.toFloat(), 10.0f);
 
         auto meter = col.removeFromRight(10).reduced(3, 36);
         g.setColour(juce::Colour(0xff0a0f16));
