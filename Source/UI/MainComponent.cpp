@@ -1001,8 +1001,29 @@ void MainComponent::setupUI()
 
     ribbonMenu->onPlayNextSinger = [this]()
     {
+        // If no song is loaded, load the next singer and play
+        if (!currentSong.isValid())
+        {
+            const bool ok = queueAndLoadNextSingerSong(true, true);
+            if (!ok)
+                showMaintenanceToast("No queued singer available.");
+            return;
+        }
+
+        // If a song is loaded but not playing, resume playback
+        if (audioEngine && !audioEngine->isPlaying())
+        {
+            audioEngine->play();
+            if (bottomBar)
+                bottomBar->setPlaying(true);
+            if (queueBar)
+                queueBar->setPlaying(true);
+            return;
+        }
+
+        // If a song is loaded and playing, load the next singer
         const bool ok = queueAndLoadNextSingerSong(true, true);
-        if (! ok)
+        if (!ok)
             showMaintenanceToast("No queued singer available.");
     };
 
@@ -3998,7 +4019,7 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         LyricDisplayComponent::QueuePreviewEntry entry;
@@ -4060,11 +4081,23 @@ void MainComponent::refreshRibbonState()
 
     juce::String nextSingerName;
     juce::String nextSongName;
-    if (queueBar != nullptr)
+
+    // If a song is loaded but not yet playing, show that singer in the ribbon.
+    // Once they start playing, we'll show the next person in queue.
+    if (hasLocalNowPlaying_ && audioEngine != nullptr && !audioEngine->isPlaying())
     {
+        if (!localNowPlaying_.songs.empty())
+        {
+            nextSingerName = juce::String(localNowPlaying_.name).trim();
+            nextSongName = juce::String(localNowPlaying_.songs.front().songName).trim();
+        }
+    }
+    else if (queueBar != nullptr)
+    {
+        // Otherwise show the next singer in queue
         for (const auto& singer : queueBar->getSingers())
         {
-            if (singer.isHost || singer.songs.empty())
+            if (singer.songs.empty())
                 continue;
 
             nextSingerName = juce::String(singer.name).trim();
@@ -4080,7 +4113,7 @@ juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<S
 {
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         const auto name = juce::String(singer.name).trim();

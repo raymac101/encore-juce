@@ -154,6 +154,159 @@ void setSfxButtonIcon (juce::DrawableButton& button, const juce::String& iconRel
     button.setImages (normal.release(), over.release(), down.release());
 }
 
+std::unique_ptr<juce::Drawable> createSpriteIcon (const juce::String& symbolId, const juce::Colour& colour)
+{
+    auto createInlineIcon = [&]() -> std::unique_ptr<juce::Drawable>
+    {
+        juce::String pathData;
+
+        if (symbolId == "icon-play3" || symbolId == "icon-play")
+            pathData = "M6 4l20 12-20 12z";
+        else if (symbolId == "icon-pause2")
+            pathData = "M4 4h10v24h-10zM18 4h10v24h-10z";
+        else if (symbolId == "icon-previous2")
+            pathData = "M8 28v-24h4v11l10-10v22l-10-10v11z";
+        else if (symbolId == "icon-next2")
+            pathData = "M24 4v24h-4v-11l-10 10v-22l10 10v-11z";
+        else if (symbolId == "icon-stop2")
+            pathData = "M6 6h20v20h-20z";
+
+        if (pathData.isEmpty())
+            return {};
+
+        const juce::String inlineSvg =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\">"
+            "<path fill=\"" + colour.toDisplayString(true) + "\" d=\"" + pathData + "\"/>"
+            "</svg>";
+
+        if (auto xml = juce::XmlDocument::parse(inlineSvg))
+            return juce::Drawable::createFromSVG(*xml);
+
+        return {};
+    };
+
+    const auto spriteFile = resolveAssetFile("assets/images/sprite.svg");
+    if (!spriteFile.existsAsFile())
+        return createInlineIcon();
+
+    auto root = juce::XmlDocument::parse(spriteFile);
+    if (!root)
+        return createInlineIcon();
+
+    juce::XmlElement* symbol = nullptr;
+
+    if (auto* defs = root->getChildByName("defs"))
+    {
+        for (auto* child = defs->getFirstChildElement(); child != nullptr; child = child->getNextElement())
+        {
+            if (child->hasTagName("symbol") && child->getStringAttribute("id") == symbolId)
+            {
+                symbol = child;
+                break;
+            }
+        }
+    }
+
+    if (symbol == nullptr)
+    {
+        for (auto* child = root->getFirstChildElement(); child != nullptr; child = child->getNextElement())
+        {
+            if (child->hasTagName("symbol") && child->getStringAttribute("id") == symbolId)
+            {
+                symbol = child;
+                break;
+            }
+        }
+    }
+
+    if (symbol == nullptr)
+        return createInlineIcon();
+
+    juce::XmlElement iconSvg("svg");
+    iconSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    iconSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    iconSvg.setAttribute("width", "32");
+    iconSvg.setAttribute("height", "32");
+    iconSvg.setAttribute("viewBox", symbol->getStringAttribute("viewBox"));
+    
+    for (auto* child = symbol->getFirstChildElement(); child != nullptr; child = child->getNextElement())
+    {
+        auto* newChild = new juce::XmlElement(*child);
+        iconSvg.addChildElement(newChild);
+    }
+
+    std::function<void(juce::XmlElement&)> tintElements = [&tintElements, &colour] (juce::XmlElement& elem)
+    {
+        const auto tag = elem.getTagName().toLowerCase();
+        const bool isShape = tag == "path" || tag == "circle" || tag == "ellipse"
+                          || tag == "rect" || tag == "polygon" || tag == "polyline"
+                          || tag == "line";
+
+        if (isShape)
+        {
+            auto tintAttribute = [&elem, &colour] (const char* attrName)
+            {
+                if (!elem.hasAttribute(attrName))
+                    return;
+
+                const auto value = elem.getStringAttribute(attrName).trim();
+                if (value.equalsIgnoreCase("none"))
+                    return;
+
+                elem.setAttribute(attrName, colour.toDisplayString(true));
+            };
+
+            tintAttribute("fill");
+            tintAttribute("stroke");
+
+            if (!elem.hasAttribute("fill") && !elem.hasAttribute("stroke"))
+                elem.setAttribute("fill", colour.toDisplayString(true));
+        }
+
+        for (auto* child = elem.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+            tintElements(*child);
+    };
+
+    tintElements(iconSvg);
+
+    return juce::Drawable::createFromSVG(iconSvg);
+}
+
+void setSpriteButtonIcon (juce::DrawableButton& button, const juce::String& symbolId)
+{
+    auto normal = createSpriteIcon(symbolId, juce::Colours::white);
+    if (normal == nullptr)
+        return;
+
+    // Use the same colour replacement approach as setSfxButtonIcon
+    // to ensure dark tones are replaced with the light grey icon colour
+    const juce::Colour darksToReplace[] = {
+        juce::Colour (0xff000000),
+        juce::Colour (0xff111111),
+        juce::Colour (0xff1a1a1a),
+        juce::Colour (0xff222222),
+        juce::Colour (0xff333333),
+        juce::Colour (0xff444444),
+        juce::Colour (0xff555555),
+        juce::Colour (0xff666666),
+        juce::Colour (0xff777777)
+    };
+
+    for (auto dark : darksToReplace)
+        normal->replaceColour (dark, kSfxIconTint);
+
+    auto over = normal->createCopy();
+    auto down = normal->createCopy();
+
+    for (auto dark : darksToReplace)
+    {
+        over->replaceColour (dark, kSfxIconTint);
+        down->replaceColour (dark, kSfxIconTint);
+    }
+
+    button.setImages(normal.release(), over.release(), down.release());
+}
+
 juce::String panelTitleFor (RibbonMenu::PanelId panel)
 {
     if (panel == RibbonMenu::PanelId::backgroundMusic)
@@ -195,11 +348,12 @@ RibbonMenu::RibbonMenu()
 
     addAndMakeVisible (bgPrevButton_);
     styleActionButton (bgPrevButton_);
-    bgPrevButton_.setButtonText ("<|");  // prev
+    setSpriteButtonIcon (bgPrevButton_, "icon-previous2");
     bgPrevButton_.onClick = [this]() { if (onBackgroundPrevTrack) onBackgroundPrevTrack(); };
 
     addAndMakeVisible (bgPlayPauseButton_);
     styleActionButton (bgPlayPauseButton_);
+    setSpriteButtonIcon (bgPlayPauseButton_, "icon-play3");
     bgPlayPauseButton_.onClick = [this]()
     {
         if (onBackgroundPlayPause)
@@ -208,7 +362,7 @@ RibbonMenu::RibbonMenu()
 
     addAndMakeVisible (bgNextButton_);
     styleActionButton (bgNextButton_);
-    bgNextButton_.setButtonText ("|>");  // next
+    setSpriteButtonIcon (bgNextButton_, "icon-next2");
     bgNextButton_.onClick = [this]() { if (onBackgroundNextTrack) onBackgroundNextTrack(); };
 
     addAndMakeVisible (bgVolumeSlider_);
@@ -700,7 +854,7 @@ void RibbonMenu::updateControlState()
     panelTitleLabel_.setText (panelTitleFor (expandedPanel_), juce::dontSendNotification);
     collapsePanelButton_.setButtonText (tr ("ribbon.back"));
 
-    bgPlayPauseButton_.setButtonText (backgroundPlaying_ ? tr ("ribbon.action.pause") : tr ("ribbon.action.play"));
+    setSpriteButtonIcon (bgPlayPauseButton_, backgroundPlaying_ ? "icon-pause2" : "icon-play3");
     bgVolumeSlider_.setValue (backgroundVolume01_, juce::dontSendNotification);
     bgVolumeLabel_.setText (tr ("ribbon.volume"), juce::dontSendNotification);
     bgTrackLabel_.setText (backgroundSongName_.isNotEmpty() ? backgroundSongName_ : tr ("ribbon.background.none"),

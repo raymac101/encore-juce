@@ -120,9 +120,9 @@ private:
 
     juce::Label panelTitleLabel_;
 
-    juce::TextButton bgPrevButton_    { "bgPrev" };
-    juce::TextButton bgPlayPauseButton_ { "bgPlayPause" };
-    juce::TextButton bgNextButton_    { "bgNext" };
+    juce::DrawableButton bgPrevButton_       { "bgPrev", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton bgPlayPauseButton_  { "bgPlayPause", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton bgNextButton_       { "bgNext", juce::DrawableButton::ImageOnButtonBackground };
     juce::Slider bgVolumeSlider_;
     juce::Label bgVolumeLabel_;
     juce::Slider bgProgressSlider_;
@@ -138,14 +138,14 @@ private:
     juce::Label nextSingerSongLabel_;
     juce::TextButton nextSingerPlayButton_ { "nextSingerPlay" };
 
-    juce::DrawableButton sfxAreYouReadyButton_ { "sfxAreYouReady", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxChickenButton_ { "sfxChicken", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxBurpButton_ { "sfxBurp", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxBruhButton_ { "sfxBruh", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxBuzzerButton_ { "sfxBuzzer", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxDrumFillButton_ { "sfxDrumFill", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxDrumRollButton_ { "sfxDrumRoll", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton sfxWooHooButton_ { "sfxWooHoo", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton sfxAreYouReadyButton_ { "sfxAreYouReady", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxChickenButton_ { "sfxChicken", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxBurpButton_ { "sfxBurp", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxBruhButton_ { "sfxBruh", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxBuzzerButton_ { "sfxBuzzer", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxDrumFillButton_ { "sfxDrumFill", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxDrumRollButton_ { "sfxDrumRoll", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton sfxWooHooButton_ { "sfxWooHoo", juce::DrawableButton::ImageOnButtonBackground };
     juce::Slider sfxVolumeSlider_;
     juce::Label sfxVolumeLabel_;
 

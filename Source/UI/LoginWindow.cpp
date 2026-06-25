@@ -1063,7 +1063,7 @@ private:
             {
                 const juce::String pillText = "Configured on this PC";
                 auto font = juce::Font(juce::FontOptions(11.0f, juce::Font::bold));
-                const int pillW = (int) font.getStringWidthFloat(pillText) + 20;
+                const int pillW = (int) juce::GlyphArrangement::getStringWidth(font, pillText) + 20;
                 juce::Rectangle<float> pill((float) textX, (float) y, (float) pillW, 22.0f);
                 g.setColour(juce::Colour(0xffd1fae5));
                 g.fillRoundedRectangle(pill, 11.0f);
