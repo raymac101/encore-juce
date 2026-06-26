@@ -145,10 +145,23 @@ void MenuTheme::drawHeaderPanel(juce::Graphics& g, juce::Rectangle<int> bounds)
 
 void MenuTheme::drawGlassCard(juce::Graphics& g, juce::Rectangle<float> bounds, float radius)
 {
-    g.setGradientFill(juce::ColourGradient(juce::Colour(kCardFill), bounds.getX(), bounds.getY(),
-                                           juce::Colour(kCardFillBottom), bounds.getX(), bounds.getBottom(), false));
+    // Soft drop shadow
+    juce::DropShadow shadow(juce::Colours::black.withAlpha(0.35f), 10, {0, 2});
+    juce::Path shadowPath;
+    shadowPath.addRoundedRectangle(bounds, radius);
+    shadow.drawForPath(g, shadowPath);
+
+    // Gradient fill with slight transparency
+    juce::ColourGradient gradient(juce::Colour(kCardFill), bounds.getX(), bounds.getY(),
+                                   juce::Colour(kCardFillBottom), bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill(gradient);
     g.fillRoundedRectangle(bounds, radius);
 
-    g.setColour(juce::Colour(kCardBorder));
+    // Subtle highlight at the top (white fade)
+    g.setColour(juce::Colours::white.withAlpha(0.06f));
+    g.fillRoundedRectangle(juce::Rectangle<float>(bounds.getX(), bounds.getY(), bounds.getWidth(), 16.0f), radius);
+
+    // Single pixel border
+    g.setColour(juce::Colour(kCardBorder).withAlpha(0.5f));
     g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.0f);
 }

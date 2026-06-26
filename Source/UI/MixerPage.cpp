@@ -11,6 +11,47 @@
 
 namespace
 {
+    class FaderLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
+                             float sliderPos, float minSliderPos, float maxSliderPos,
+                             const juce::Slider::SliderStyle style, juce::Slider& slider) override
+        {
+            if (style == juce::Slider::LinearVertical)
+            {
+                const float trackWidth = 8.0f;
+                const float trackX = x + (width - trackWidth) * 0.5f;
+                
+                // Draw background track (full height)
+                g.setColour(juce::Colour(0xff2a3445));
+                g.fillRoundedRectangle(trackX, (float)y, trackWidth, (float)height, 2.0f);
+                
+                // Draw filled portion (from bottom up to thumb)
+                float filledHeight = maxSliderPos - sliderPos;
+                if (filledHeight > 0.0f)
+                {
+                    auto filledBounds = juce::Rectangle<float>(trackX, sliderPos, trackWidth, filledHeight);
+                    g.setColour(slider.findColour(juce::Slider::trackColourId));
+                    g.fillRoundedRectangle(filledBounds, 2.0f);
+                }
+                
+                // Draw the thumb
+                auto thumbBounds = juce::Rectangle<float>(trackX - 4.0f, sliderPos - 6.0f, trackWidth + 8.0f, 12.0f);
+                g.setColour(slider.findColour(juce::Slider::thumbColourId));
+                g.fillRoundedRectangle(thumbBounds, 3.0f);
+            }
+            else
+            {
+                // Fallback for horizontal sliders
+                juce::LookAndFeel_V4::drawLinearSlider(g, x, y, width, height, sliderPos, 
+                                                       minSliderPos, maxSliderPos, style, slider);
+            }
+        }
+    };
+    
+    static FaderLookAndFeel kFaderLookAndFeel;
+
     juce::Slider* makeFader()
     {
         auto* s = new juce::Slider(juce::Slider::LinearVertical, juce::Slider::TextBoxBelow);
@@ -18,6 +59,7 @@ namespace
         s->setTextValueSuffix(" dB");
         s->setNumDecimalPlacesToDisplay(2);
         s->setDoubleClickReturnValue(true, 0.8);
+        s->setOpaque(false);
         return s;
     }
 
@@ -253,11 +295,13 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
     addAndMakeVisible(*sw.name);
 
     sw.fader.reset(makeFader());
+    sw.fader->setLookAndFeel(&kFaderLookAndFeel);
     sw.fader->setColour(juce::Slider::thumbColourId, accent);
     sw.fader->setColour(juce::Slider::trackColourId, accent.withAlpha(0.85f));
-    sw.fader->setColour(juce::Slider::backgroundColourId, juce::Colour(0xff161c26));
+    sw.fader->setColour(juce::Slider::backgroundColourId, juce::Colour(0x1affffff));
     sw.fader->setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xffd9dee7));
     sw.fader->setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(0xff2a3445));
+    sw.fader->setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0x1affffff));
     addAndMakeVisible(*sw.fader);
 
     sw.mute = std::make_unique<juce::ToggleButton>(name);

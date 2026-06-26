@@ -8,8 +8,8 @@ namespace MenuTheme
     static constexpr uint32_t kBgBottom        = 0xff0f1832;
     static constexpr uint32_t kPanelFill       = 0xff182a52;
     static constexpr uint32_t kPanelBorder     = 0xff4f78c4;
-    static constexpr uint32_t kCardFill        = 0xfff8fbff;
-    static constexpr uint32_t kCardFillBottom  = 0xffe7efff;
+    static constexpr uint32_t kCardFill        = 0xff1a1f2a;
+    static constexpr uint32_t kCardFillBottom  = 0xff141820;
     static constexpr uint32_t kCardBorder      = 0x24000000;
     static constexpr uint32_t kInputFill       = 0x1affffff;
     static constexpr uint32_t kInputFillFocus  = 0x26ffffff;
