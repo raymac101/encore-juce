@@ -357,6 +357,14 @@ void AudioEngine::seekToPosition(double positionInSeconds)
     if (transportSource == nullptr)
         return;
 
+    // Detach the audio callback before touching the pitch shifter's internal
+    // buffers/stretcher — pitchShifter.reset() reallocates them with no
+    // locking, and the audio thread may be mid-process() on the same
+    // objects. Mirrors the detach/reattach already done in loadSong()/
+    // unloadSong() for the same reason.
+    if (audioSourcePlayer != nullptr)
+        audioSourcePlayer->setSource(nullptr);
+
     positionInSeconds = juce::jlimit(0.0, totalLength.load(), positionInSeconds);
     transportSource->setPosition(positionInSeconds);
     currentPosition = positionInSeconds;
@@ -367,6 +375,9 @@ void AudioEngine::seekToPosition(double positionInSeconds)
 
     // Flush RubberBand so we don't hear the pre-seek audio at the new position.
     pitchShifter.reset();
+
+    if (audioSourcePlayer != nullptr)
+        audioSourcePlayer->setSource(this);
 }
 
 //==============================================================================
@@ -912,13 +923,19 @@ void AudioEngine::updatePlaybackPosition()
     if (transportSource == nullptr)
         return;
 
-    currentPosition = transportSource->getCurrentPosition();
+    // Clamp for display/comparison purposes only — the transport itself
+    // keeps advancing (returning silence) past end-of-file while we drain
+    // the pitch shifter's backlog below.
+    currentPosition = juce::jmin(transportSource->getCurrentPosition(), totalLength.load());
+
+    const bool backlogPending = pitchShifter.getPendingOutputFrames() > 0;
 
     const auto audibleEnd = audibleEndPosition.load();
     if (playing.load()
         && audibleEnd > 0.0
         && !audibleEndNotified.load()
-        && currentPosition.load() >= audibleEnd)
+        && currentPosition.load() >= audibleEnd
+        && !backlogPending)
     {
         audibleEndNotified = true;
         if (onAudibleEndReached)
@@ -927,9 +944,30 @@ void AudioEngine::updatePlaybackPosition()
 
     if (currentPosition >= totalLength.load() && playing.load())
     {
-        stop();
-        if (onSongFinished)
-            juce::MessageManager::callAsync([cb = onSongFinished]() { cb(); });
+        if (! draining_)
+        {
+            draining_ = true;
+            // At a slow time ratio, RubberBand can still be holding several
+            // seconds of unretrieved audio once the input file is fully
+            // consumed. Keep the transport running (it emits silence past
+            // its own end, which continues to drain the stretcher) until
+            // the backlog empties — capped so a numerical edge case in the
+            // stretcher can never hang playback indefinitely.
+            drainDeadlineMs_ = juce::Time::getMillisecondCounterHiRes() + 8000.0;
+        }
+
+        const bool deadlinePassed = juce::Time::getMillisecondCounterHiRes() >= drainDeadlineMs_;
+        if (! backlogPending || deadlinePassed)
+        {
+            draining_ = false;
+            stop();
+            if (onSongFinished)
+                juce::MessageManager::callAsync([cb = onSongFinished]() { cb(); });
+        }
+    }
+    else
+    {
+        draining_ = false;
     }
 }
 

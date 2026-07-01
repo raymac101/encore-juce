@@ -59,6 +59,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseMove(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
 
     //==============================================================================
     /** Set which page is currently active (highlights the item). */

@@ -177,13 +177,24 @@ void LocalizationManager::loadLanguageFile(const juce::String& languageCode)
     {
         // Clear existing translations
         translations.clear();
-        
-        // Always load fallback translations first
+
+        // Always load the small hardcoded fallback first as a last-resort
+        // safety net (covers the case where en_US.txt itself is missing).
         loadFallbackTranslations();
-        
+
+        // Load the full English file as the base layer so any key missing
+        // from a non-English locale file still resolves to real English
+        // text instead of falling through to "[key]".
+        if (languageCode != "en_US")
+        {
+            juce::File englishFile = findLanguageFile("en_US");
+            if (englishFile.existsAsFile())
+                parseTranslationFile(englishFile);
+        }
+
         // Try to load language file
         juce::File languageFile = findLanguageFile(languageCode);
-        
+
         if (languageFile.existsAsFile())
         {
             parseTranslationFile(languageFile);

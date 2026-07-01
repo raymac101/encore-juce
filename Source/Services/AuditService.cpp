@@ -225,7 +225,7 @@ void AuditService::addAudit(const CdgSong&     song,
     }
 
     // Capture all data by value for the background thread.
-    juce::Thread::launch([song, singer, item, venueId, venueName, kjId]()
+    juce::Thread::launch([this, song, singer, item, venueId, venueName, kjId]()
     {
         const juce::int64 now = juce::Time::currentTimeMillis();
 
@@ -309,7 +309,11 @@ void AuditService::addAudit(const CdgSong&     song,
         //    Mirrors Angular behaviour: if the singer already has a doc,
         //    append a new MemberHistory entry and update lastDate;
         //    otherwise create a new Member doc.
+        //
+        //    Locked end-to-end (query -> mutate -> write) so two addAudit()
+        //    calls for the same singer can't race on the same stale snapshot.
         //----------------------------------------------------------------------
+        const juce::ScopedLock membersAuditLock(membersAuditLock_);
 
         // Build the new MemberHistory entry.
         MemberHistory history;

@@ -770,22 +770,26 @@ private:
         const bool signUp = ! isLoginMode_;
         setBusy(true, signUp ? "Creating your account..." : "Signing in...");
 
-        juce::Thread::launch([this, email, password, signUp]
+        juce::Component::SafePointer<LoginContent> safe(this);
+        juce::Thread::launch([safe, email, password, signUp]
         {
             auto& fc = FirestoreClient::getInstance();
             auto result = signUp ? fc.signUpWithEmailPassword(email, password)
                                  : fc.signInWithEmailPassword(email, password);
 
-            juce::MessageManager::callAsync([this, result]()
+            juce::MessageManager::callAsync([safe, result]()
             {
+                if (safe == nullptr)
+                    return;
+
                 if (! result.ok)
                 {
-                    setBusy(false, {});
-                    statusLabel_.setText(formatAuthError(result.errorMessage),
+                    safe->setBusy(false, {});
+                    safe->statusLabel_.setText(safe->formatAuthError(result.errorMessage),
                                          juce::dontSendNotification);
                     return;
                 }
-                runFlow();
+                safe->runFlow();
             });
         });
     }
@@ -793,20 +797,24 @@ private:
     void handleOAuth(const juce::String& providerId)
     {
         setBusy(true, "Opening browser...");
-        juce::Thread::launch([this, providerId]
+        juce::Component::SafePointer<LoginContent> safe(this);
+        juce::Thread::launch([safe, providerId]
         {
             auto& fc = FirestoreClient::getInstance();
             auto result = fc.signInWithOAuthProvider(providerId);
 
-            juce::MessageManager::callAsync([this, result]()
+            juce::MessageManager::callAsync([safe, result]()
             {
-                setBusy(false, {});
+                if (safe == nullptr)
+                    return;
+
+                safe->setBusy(false, {});
                 if (! result.ok)
                 {
-                    statusLabel_.setText(result.errorMessage, juce::dontSendNotification);
+                    safe->statusLabel_.setText(result.errorMessage, juce::dontSendNotification);
                     return;
                 }
-                runFlow();
+                safe->runFlow();
             });
         });
     }
@@ -910,21 +918,25 @@ private:
         setBusy(true, "Sending request...");
 
         // Look up venue name (best effort) for the request payload.
-        juce::Thread::launch([this, venueId = flowResult_.venueId, msg = messageEditor_.getText()]()
+        juce::Component::SafePointer<LoginContent> safe(this);
+        juce::Thread::launch([safe, venueId = flowResult_.venueId, msg = messageEditor_.getText()]()
         {
             auto doc = FirestoreClient::getInstance().getDocument("venues/" + venueId);
             const auto venueName = FirestoreClient::readString(doc, "name");
 
             LoginFlowController::requestVenueAccess(venueId, venueName, msg,
-                [this](bool ok, juce::String error)
+                [safe](bool ok, juce::String error)
                 {
-                    setBusy(false, {});
-                    statusLabel_.setText(
+                    if (safe == nullptr)
+                        return;
+
+                    safe->setBusy(false, {});
+                    safe->statusLabel_.setText(
                         ok ? "Request sent. The venue admin has been notified."
                            : juce::String("Failed: ") + error,
                         juce::dontSendNotification);
 
-                    requestAccessButton_.setEnabled(! ok);
+                    safe->requestAccessButton_.setEnabled(! ok);
                 });
         });
     }

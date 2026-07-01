@@ -1064,6 +1064,33 @@ void QueueBar::mouseMove(const juce::MouseEvent& e)
                        : juce::MouseCursor::NormalCursor);
 }
 
+void QueueBar::mouseUp(const juce::MouseEvent&)
+{
+    if (draggingResize)
+    {
+        draggingResize = false;
+        repaint();
+    }
+}
+
+//==============================================================================
+// Singer-row drag lifetime — see setSingers()/rebuildSingerRows().
+//==============================================================================
+void QueueBar::dragOperationStarted(const juce::DragAndDropTarget::SourceDetails&)
+{
+    dragInProgress = true;
+}
+
+void QueueBar::dragOperationEnded(const juce::DragAndDropTarget::SourceDetails&)
+{
+    dragInProgress = false;
+    if (hasPendingSingers_)
+    {
+        hasPendingSingers_ = false;
+        setSingers(pendingSingers_);
+    }
+}
+
 //==============================================================================
 // Data setters
 //==============================================================================
@@ -1095,6 +1122,13 @@ void QueueBar::clearNowPlaying()
 
 void QueueBar::setSingers(const std::vector<Singers>& newSingers)
 {
+    if (dragInProgress)
+    {
+        pendingSingers_ = newSingers;
+        hasPendingSingers_ = true;
+        return;
+    }
+
     singers = newSingers;
     rebuildSingerRows();
     updateStatusLabels();

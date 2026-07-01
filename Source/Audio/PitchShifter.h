@@ -68,6 +68,16 @@ public:
     int  getLatency() const noexcept;
     bool isReady()    const noexcept { return stretcher != nullptr; }
 
+    // Output frames RubberBand is currently holding that haven't been
+    // retrieved yet. At time ratios other than 1.0 this can exceed one
+    // block's worth of samples — the caller must keep pumping process()
+    // (with silence once the input file is exhausted) until this reaches
+    // zero, or audible content gets truncated. Audio-thread only.
+    int getPendingOutputFrames() const noexcept
+    {
+        return stretcher != nullptr ? juce::jmax (0, (int) stretcher->available()) : 0;
+    }
+
 private:
     //==========================================================================
     std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;

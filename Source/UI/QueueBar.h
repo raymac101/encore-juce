@@ -45,6 +45,12 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseMove(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+
+    // juce::DragAndDropContainer — track singer-row drag lifetime so a
+    // watcher reload landing mid-drag doesn't destroy the drag source.
+    void dragOperationStarted(const juce::DragAndDropTarget::SourceDetails&) override;
+    void dragOperationEnded(const juce::DragAndDropTarget::SourceDetails&) override;
 
     // juce::Timer — drives countdown between songs
     void timerCallback() override;
@@ -286,6 +292,10 @@ private:
     void rebuildSingerRows();
     void updateStatusLabels();
     bool isOverResizeHandle(const juce::Point<int>& pos) const;
+
+    bool                  dragInProgress = false;
+    bool                  hasPendingSingers_ = false;
+    std::vector<Singers>  pendingSingers_;
 
     static constexpr int venueHeaderHeight   = 56;
     static constexpr int nowPlayingHeight    = 100;

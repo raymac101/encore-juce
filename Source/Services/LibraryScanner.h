@@ -27,6 +27,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <memory>
 #include "../Models/CdgSong.h"
 #include "SongDatabase.h"
 
@@ -191,6 +192,12 @@ private:
     bool       appendCopy_   = false;
     bool       appendDelete_ = false;
     juce::File appendDest_;
+
+    // Shared flag observed by any in-flight callAsync lambdas so they can
+    // detect that this LibraryScanner has been destroyed (stopScan() only
+    // guarantees run() has returned, not that queued callbacks have been
+    // dispatched yet).
+    std::shared_ptr<std::atomic<bool>> destroyedFlag_ = std::make_shared<std::atomic<bool>>(false);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryScanner)
 };

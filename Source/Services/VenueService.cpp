@@ -428,8 +428,8 @@ void VenueService::addVenue(const VenueItem& venue, AddVenueCallback onDone)
     juce::Thread::launch([v, onDone = std::move(onDone)]()
     {
         auto fields = fieldsFromVenue(v);
-        auto resp = FC::getInstance().createDocument("venues", fields);
-        const bool ok = resp.isObject();
+        bool ok = false;
+        auto resp = FC::getInstance().createDocument("venues", fields, {}, &ok);
         const auto newId = ok ? docIdFromName(resp.getProperty("name", "").toString())
                               : juce::String();
         if (onDone)
@@ -598,8 +598,8 @@ void VenueService::addCurrentSongPlaying(const Playing& playing, WriteCallback o
         w->setProperty("fields", fields);
         // createDocument's signature takes the fields directly (sets up
         // "fields" wrapper itself), so pass the inner var.
-        auto resp = FC::getInstance().createDocument("venues/" + venueId + "/playing", fields);
-        const bool ok = resp.isObject();
+        bool ok = false;
+        FC::getInstance().createDocument("venues/" + venueId + "/playing", fields, {}, &ok);
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]()
                 { onDone(ok, ok ? juce::String() : juce::String("createDocument failed")); });
@@ -818,8 +818,9 @@ void VenueService::addSongToLists(const CdgSong& song,
         for (auto& list : listNames)
         {
             auto fields = playlistFields(p);
-            auto resp = FC::getInstance().createDocument(playlistsRoot(venueId, list), fields);
-            if (! resp.isObject()) allOk = false;
+            bool ok = false;
+            FC::getInstance().createDocument(playlistsRoot(venueId, list), fields, {}, &ok);
+            if (! ok) allOk = false;
         }
 
         if (onDone)
@@ -941,8 +942,7 @@ void VenueService::addSongToNewSongs(const CdgSong& song, WriteCallback onDone)
         }
         else
         {
-            auto resp = FC::getInstance().createDocument(root, fields);
-            ok = resp.isObject();
+            FC::getInstance().createDocument(root, fields, {}, &ok);
         }
 
         // Cap the list at 20 entries (oldest first).
@@ -1264,8 +1264,8 @@ void VenueService::addPlayHistory(const PlayHistoryEntry& entry, WriteCallback o
         const auto when    = juce::Time::getCurrentTime().toMilliseconds();
         auto       fields  = playHistoryFields(entry, when);
 
-        auto resp = FC::getInstance().createDocument(root, fields);
-        const bool ok = resp.isObject();
+        bool ok = false;
+        FC::getInstance().createDocument(root, fields, {}, &ok);
 
         // Keep at most 20 docs — delete the oldest ones.
         if (ok)

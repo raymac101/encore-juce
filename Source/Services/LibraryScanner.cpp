@@ -60,6 +60,7 @@ LibraryScanner::LibraryScanner()
 
 LibraryScanner::~LibraryScanner()
 {
+    destroyedFlag_->store(true);
     stopScan();
 }
 
@@ -317,7 +318,8 @@ void LibraryScanner::run()
 
     if (! scanRoot_.isDirectory())
     {
-        juce::MessageManager::callAsync([this]() {
+        juce::MessageManager::callAsync([this, destroyed = destroyedFlag_]() {
+            if (*destroyed) return;
             isScanning.store(false);
             if (onError) onError("Invalid directory: " + scanRoot_.getFullPathName());
         });
@@ -459,7 +461,8 @@ void LibraryScanner::run()
                 juce::ScopedLock sl(currentSongLock);
                 songName = currentSong;
             }
-            juce::MessageManager::callAsync([this, cur, tot, songName]() {
+            juce::MessageManager::callAsync([this, destroyed = destroyedFlag_, cur, tot, songName]() {
+                if (*destroyed) return;
                 if (onProgress) onProgress(cur, tot, songName);
             });
         }
@@ -580,7 +583,8 @@ void LibraryScanner::run()
     isScanning.store(false);
 
     // Fire completion on message thread
-    juce::MessageManager::callAsync([this, songs, stats]() mutable {
+    juce::MessageManager::callAsync([this, destroyed = destroyedFlag_, songs, stats]() mutable {
+        if (*destroyed) return;
         if (onComplete) onComplete(std::move(songs), stats);
     });
 }

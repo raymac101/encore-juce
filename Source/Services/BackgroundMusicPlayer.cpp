@@ -111,29 +111,35 @@ void BackgroundMusicPlayer::setPlaylistDirectory (const juce::File& directory)
     if (! directory.isDirectory())
         return;
 
-    playlist_.clear();
-
-    for (auto it = juce::RangedDirectoryIterator (directory, false, "*", juce::File::findFiles); it != juce::RangedDirectoryIterator(); ++it)
+    bool hasTracks = false;
     {
-        const auto ext = it->getFile().getFileExtension().toLowerCase();
-        if (kAudioExtensions.contains (ext))
-            playlist_.push_back (it->getFile());
+        std::lock_guard<std::mutex> lock (playlistMutex_);
+        playlist_.clear();
+
+        for (auto it = juce::RangedDirectoryIterator (directory, false, "*", juce::File::findFiles); it != juce::RangedDirectoryIterator(); ++it)
+        {
+            const auto ext = it->getFile().getFileExtension().toLowerCase();
+            if (kAudioExtensions.contains (ext))
+                playlist_.push_back (it->getFile());
+        }
+
+        // Sort alphabetically so the order is deterministic across platforms.
+        std::sort (playlist_.begin(), playlist_.end(), [] (const juce::File& a, const juce::File& b) {
+            return a.getFileName().compareNatural (b.getFileName()) < 0;
+        });
+
+        DBG ("[BGMusic] Playlist built: " + juce::String ((int) playlist_.size()) + " tracks");
+        hasTracks = ! playlist_.empty();
     }
 
-    // Sort alphabetically so the order is deterministic across platforms.
-    std::sort (playlist_.begin(), playlist_.end(), [] (const juce::File& a, const juce::File& b) {
-        return a.getFileName().compareNatural (b.getFileName()) < 0;
-    });
-
-    DBG ("[BGMusic] Playlist built: " + juce::String ((int) playlist_.size()) + " tracks");
-
-    if (! playlist_.empty())
+    if (hasTracks)
         loadTrack (0);
 }
 
 juce::String BackgroundMusicPlayer::getCurrentTrackName() const
 {
     const int idx = currentIndex_.load();
+    std::lock_guard<std::mutex> lock (playlistMutex_);
     if (idx < 0 || idx >= (int) playlist_.size())
         return {};
     return playlist_[(size_t) idx].getFileNameWithoutExtension();
@@ -142,8 +148,13 @@ juce::String BackgroundMusicPlayer::getCurrentTrackName() const
 //==============================================================================
 void BackgroundMusicPlayer::loadTrack (int index)
 {
-    if (index < 0 || index >= (int) playlist_.size())
-        return;
+    juce::File trackFile;
+    {
+        std::lock_guard<std::mutex> lock (playlistMutex_);
+        if (index < 0 || index >= (int) playlist_.size())
+            return;
+        trackFile = playlist_[(size_t) index];
+    }
 
     const bool wasPlaying = playing_.load();
 
@@ -158,10 +169,10 @@ void BackgroundMusicPlayer::loadTrack (int index)
         readerSource_.reset();
     }
 
-    auto* reader = formatManager_.createReaderFor (playlist_[(size_t) index]);
+    auto* reader = formatManager_.createReaderFor (trackFile);
     if (reader == nullptr)
     {
-        DBG ("[BGMusic] Cannot read: " + playlist_[(size_t) index].getFullPathName());
+        DBG ("[BGMusic] Cannot read: " + trackFile.getFullPathName());
         if (sourcePlayer_ != nullptr)
             sourcePlayer_->setSource (this);
         return;
@@ -431,7 +442,12 @@ void BackgroundMusicPlayer::advanceToNext()
     // Called from the audio thread — just update the index and set a flag;
     // the actual loadTrack is triggered from the timer callback on the message
     // thread to avoid allocations on the audio thread.
-    const int next = (currentIndex_.load() + 1) % juce::jmax (1, (int) playlist_.size());
+    int playlistSize = 1;
+    {
+        std::lock_guard<std::mutex> lock (playlistMutex_);
+        playlistSize = (int) playlist_.size();
+    }
+    const int next = (currentIndex_.load() + 1) % juce::jmax (1, playlistSize);
     currentIndex_ = next;
     trackChangedFlag_ = true;
     playing_ = false;  // will be restarted in timerCallback
@@ -455,7 +471,12 @@ void BackgroundMusicPlayer::timerCallback()
     {
         // Load the new track (set by advanceToNext on the audio thread).
         const int idx = currentIndex_.load();
-        if (idx >= 0 && idx < (int) playlist_.size())
+        int playlistSize = 0;
+        {
+            std::lock_guard<std::mutex> lock (playlistMutex_);
+            playlistSize = (int) playlist_.size();
+        }
+        if (idx >= 0 && idx < playlistSize)
         {
             loadTrack (idx);
             // Auto-advance always starts the next track playing.

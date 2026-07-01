@@ -267,6 +267,13 @@ private:
     std::atomic<double> audibleEndPosition { 0.0 };
     std::atomic<bool> audibleEndNotified { false };
 
+    // At time ratios other than 1.0, the pitch shifter can still be holding
+    // buffered output once the input file position reaches totalLength —
+    // draining_/drainDeadlineMs_ (audio-thread only) keep playback running
+    // until that backlog empties instead of truncating the song early.
+    bool   draining_ = false;
+    double drainDeadlineMs_ = 0.0;
+
     //==========================================================================
     // Analysis
     bool               frequencyAnalysisEnabled = false;

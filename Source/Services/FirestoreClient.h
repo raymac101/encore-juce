@@ -25,11 +25,11 @@ public:
 
     //==============================================================================
     // Authentication state
-    bool        isSignedIn() const noexcept { return idToken_.isNotEmpty(); }
-    juce::String getUserId() const          { return localId_; }
-    juce::String getEmail() const           { return email_; }
-    juce::String getDisplayName() const     { return displayName_; }
-    juce::String getIdToken() const         { return idToken_; }
+    bool        isSignedIn() const noexcept { const juce::ScopedLock l(stateLock_); return idToken_.isNotEmpty(); }
+    juce::String getUserId() const          { const juce::ScopedLock l(stateLock_); return localId_; }
+    juce::String getEmail() const           { const juce::ScopedLock l(stateLock_); return email_; }
+    juce::String getDisplayName() const     { const juce::ScopedLock l(stateLock_); return displayName_; }
+    juce::String getIdToken() const         { const juce::ScopedLock l(stateLock_); return idToken_; }
     juce::var    getAuthClaims() const;
 
     void signOut();
@@ -66,10 +66,14 @@ public:
         object ({ field: { stringValue: ... } }) — use the helpers below. */
     bool patchDocument(const juce::String& path, const juce::var& fields);
 
-    /** POST projects/.../documents/<collectionPath>?documentId=<id> (id optional). */
+    /** POST projects/.../documents/<collectionPath>?documentId=<id> (id optional).
+        `outOk` (if non-null) is set to true only on an actual 2xx response —
+        Firestore error bodies (401/403/etc.) parse as valid JSON objects, so
+        callers must check `outOk` rather than the returned var's isObject(). */
     juce::var createDocument(const juce::String& collectionPath,
                              const juce::var& fields,
-                             const juce::String& documentId = {});
+                             const juce::String& documentId = {},
+                             bool* outOk = nullptr);
 
     /** DELETE projects/.../documents/<path>. Returns true on 2xx (also true
         on 404 — the doc is gone either way). */
@@ -110,12 +114,34 @@ private:
     FirestoreClient() = default;
     ~FirestoreClient() = default;
 
+    /** Refreshes idToken_ via the securetoken endpoint if it's close to
+        expiry. No-op if signed out or if the current token still has more
+        than 5 minutes of life left. Safe to call from any background thread;
+        does not recurse into itself (uses httpJsonRaw directly). */
+    void ensureFreshToken();
+
+    /** Issues the HTTP request. Checks/refreshes the token first, then
+        delegates to httpJsonRaw with the Firestore/Auth JSON content type. */
     juce::var httpJson(const juce::URL& url,
                        const juce::String& httpMethod,
                        const juce::String& jsonBody,
                        int* httpStatus,
                        juce::StringArray extraHeaders = {});
 
+    /** Low-level request with no auto-refresh — used by httpJson and by
+        ensureFreshToken itself (which must not trigger another refresh). */
+    juce::var httpJsonRaw(const juce::URL& url,
+                          const juce::String& httpMethod,
+                          const juce::String& body,
+                          int* httpStatus,
+                          juce::StringArray extraHeaders,
+                          const juce::String& contentType);
+
+    // Guards all auth-state fields below: they're written by sign-in/sign-up/
+    // refresh/sign-out and read by every background thread that issues a
+    // Firestore/Auth request (QueueService, RequestService, VenueService,
+    // AuditService, ...), so plain juce::String access here is a data race.
+    mutable juce::CriticalSection stateLock_;
     juce::String idToken_;
     juce::String refreshToken_;
     juce::String localId_;

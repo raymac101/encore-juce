@@ -399,24 +399,28 @@ MainComponent::MainComponent()
 
     bgPlayer_->onTrackChanged = [this]()
     {
-        juce::MessageManager::callAsync ([this]()
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::MessageManager::callAsync ([safe]()
         {
-            if (ribbonMenu != nullptr && bgPlayer_ != nullptr)
+            if (safe == nullptr) return;
+            if (safe->ribbonMenu != nullptr && safe->bgPlayer_ != nullptr)
             {
-                ribbonMenu->setBackgroundTrackInfo (bgPlayer_->getCurrentTrackName(),
-                                                    bgPlayer_->getCurrentPosition(),
-                                                    bgPlayer_->getTotalLength());
-                ribbonMenu->setBackgroundState (bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+                safe->ribbonMenu->setBackgroundTrackInfo (safe->bgPlayer_->getCurrentTrackName(),
+                                                    safe->bgPlayer_->getCurrentPosition(),
+                                                    safe->bgPlayer_->getTotalLength());
+                safe->ribbonMenu->setBackgroundState (safe->bgPlayer_->isPlaying(), safe->bgPlayer_->getVolume());
             }
         });
     };
 
     bgPlayer_->onPlayStateChanged = [this]()
     {
-        juce::MessageManager::callAsync ([this]()
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::MessageManager::callAsync ([safe]()
         {
-            if (ribbonMenu != nullptr && bgPlayer_ != nullptr)
-                ribbonMenu->setBackgroundState (bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+            if (safe == nullptr) return;
+            if (safe->ribbonMenu != nullptr && safe->bgPlayer_ != nullptr)
+                safe->ribbonMenu->setBackgroundState (safe->bgPlayer_->isPlaying(), safe->bgPlayer_->getVolume());
         });
     };
 
@@ -1009,6 +1013,8 @@ void MainComponent::setupUI()
     {
         if (r.action == SongSelectionResult::Action::PlayNow)
         {
+            if (currentSong.isValid())
+                logPlayHistoryIfNeeded(false); // logs only if played > 30 s
             loadAndPlaySong(r.song, r.versionIndex, r.pitchSemitones);
             return;
         }
@@ -3054,38 +3060,6 @@ void MainComponent::configureForHighResolution()
         }
     }
 }
-
-//==============================================================================
-void MainComponent::updateUIForScreenSize()
-{
-    ResponsiveLayout::updateUIForScreenSize();
-    
-    // Apply font scaling based on screen size
-    if (titleLabel != nullptr)
-    {
-        auto baseFont = 28.0f * getScaleFactor();
-        titleLabel->setFont(juce::Font(juce::FontOptions().withHeight(baseFont)).boldened());
-    }
-    
-    if (languageButton != nullptr)
-    {
-        // TextButton font is handled by LookAndFeel, not setFont
-    }
-    
-    if (statusLabel != nullptr)
-    {
-        auto baseFont = 14.0f * getScaleFactor();
-        statusLabel->setFont(juce::Font(juce::FontOptions().withHeight(baseFont)));
-    }
-    
-    #if JUCE_DEBUG
-    if (debugLabel != nullptr)
-    {
-        auto baseFont = 12.0f * getScaleFactor();
-        debugLabel->setFont(juce::Font(juce::FontOptions().withHeight(baseFont)));
-    }
-    #endif
-}
 */
 
 //==============================================================================
@@ -3166,29 +3140,6 @@ void MainComponent::changeLanguage(const juce::String& languageCode)
     statusLabel->setText(message, juce::dontSendNotification);
 }
 
-void MainComponent::showLanguageSelector()
-{
-    // Simplified language selector - no LocalizationManager for now
-    DBG("Language selector clicked - functionality temporarily disabled");
-    
-    // Show a simple popup menu with basic options
-    juce::PopupMenu languageMenu;
-    languageMenu.addItem(1, "English", true, true);
-    languageMenu.addItem(2, "Español", true, false);
-    languageMenu.addItem(3, "Français", true, false);
-    
-    languageMenu.showMenuAsync(
-        juce::PopupMenu::Options()
-            .withTargetComponent(languageButton.get())
-            .withStandardItemHeight(30),
-        [this](int result)
-        {
-            DBG("Selected language option: " + juce::String(result));
-            // Language change functionality disabled for now
-        }
-    );
-}
-
 //==============================================================================
 void MainComponent::detectAndConfigureScreens()
 {
@@ -3227,35 +3178,6 @@ void MainComponent::setupDualScreenLayout()
     // For now, just log that we detected multiple screens
     auto& lm = LocalizationManager::getInstance();
     statusLabel->setText(lm.getText("status.dual_screen_detected"), juce::dontSendNotification);
-}
-
-//==============================================================================
-void MainComponent::timerCallback()
-{
-    updateConnectionStatus();
-    updateDebugInfo();
-}
-
-void MainComponent::updateConnectionStatus()
-{
-    // Simplified - no LocalizationManager for now
-    static int statusCounter = 0;
-    statusCounter++;
-    
-    juce::String statusText = "Status Update #" + juce::String(statusCounter);
-    
-    if (statusLabel != nullptr)
-        statusLabel->setText(statusText, juce::dontSendNotification);
-}
-
-void MainComponent::updateDebugInfo()
-{
-    // Simplified debug info - no LocalizationManager calls
-    juce::String debugText = "Size: " + juce::String(getWidth()) + "x" + juce::String(getHeight());
-    debugText += " | Debug Mode Active";
-    
-    if (debugLabel != nullptr)
-        debugLabel->setText(debugText, juce::dontSendNotification);
 }
 
 //==============================================================================
@@ -3592,6 +3514,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     self->currentSong          = song;
     self->currentSongImageUrl  = juce::String(song.imageUrl);
     self->currentSongDuration  = self->audioEngine->getTotalLength();
+    self->playStartTimeMs_     = 0;
     self->refreshRibbonState();
 
     // Apply pitch (the dialog's semitone adjustment)
@@ -3895,19 +3818,13 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
             continue;
         }
 
-        if (s.songsPerformed > 0)
-        {
-            s.isNewlyAdded = false;
-            continue;
-        }
-
         juce::String key = juce::String(s.id).trim();
         if (key.isEmpty())
             key = "name:" + juce::String(s.name).trim().toLowerCase();
 
         const auto it = existingNewFlags.find(key.toStdString());
         if (it != existingNewFlags.end())
-            s.isNewlyAdded = it->second;
+            s.isNewlyAdded = false; // already present last cycle: highlight window has elapsed
         else
             s.isNewlyAdded = ! s.songs.empty();
     }

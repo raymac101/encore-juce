@@ -396,6 +396,8 @@ void MixerPage::bindControlCallbacks()
         sw.eqHigh->onValueChange = [this] { pushStateToEngine(); };
         sw.insertA->onChange = [this] { pushStateToEngine(); };
         sw.insertB->onChange = [this] { pushStateToEngine(); };
+        sw.mute->onClick = [this] { pushStateToEngine(); };
+        sw.solo->onClick = [this] { pushStateToEngine(); };
     }
 
     auto& master = strips[stripMaster];
@@ -443,20 +445,39 @@ void MixerPage::pushStateToEngine()
     if (audioEngine == nullptr)
         return;
 
-    audioEngine->setMusicVolume((float) strips[stripMusic].fader->getValue());
-    audioEngine->setVocalVolume((float) strips[stripVocal].fader->getValue());
-    audioEngine->setVocalEffectsLevel((float) strips[stripFx].fader->getValue());
+    // Solo semantics: if any input strip (everything but Master) has solo
+    // engaged, every non-soloed input strip is silenced regardless of its
+    // own mute state — matches a standard hardware mixer.
+    const bool anySolo = strips[stripMusic].solo->getToggleState()
+                       || strips[stripVocal].solo->getToggleState()
+                       || strips[stripFx].solo->getToggleState()
+                       || strips[stripPlugin].solo->getToggleState();
+
+    auto effectiveLevel = [anySolo](const StripWidgets& sw, float rawLevel)
+    {
+        const bool muted = sw.mute->getToggleState()
+                         || (anySolo && ! sw.solo->getToggleState());
+        return muted ? 0.0f : rawLevel;
+    };
+
+    audioEngine->setMusicVolume(effectiveLevel(strips[stripMusic], (float) strips[stripMusic].fader->getValue()));
+    audioEngine->setVocalVolume(effectiveLevel(strips[stripVocal], (float) strips[stripVocal].fader->getValue()));
+    audioEngine->setVocalEffectsLevel(effectiveLevel(strips[stripFx], (float) strips[stripFx].fader->getValue()));
 
     const int insertA = strips[stripPlugin].insertA->getSelectedId();
     const int insertB = strips[stripPlugin].insertB->getSelectedId();
     const bool saturatorSelected = (insertA == 3 || insertB == 3);
-    const float drive = saturatorSelected ? (float) strips[stripPlugin].fader->getValue() : 0.0f;
-    audioEngine->setMasterInsertDrive(drive);
+    const float rawDrive = saturatorSelected ? (float) strips[stripPlugin].fader->getValue() : 0.0f;
+    audioEngine->setMasterInsertDrive(effectiveLevel(strips[stripPlugin], rawDrive));
 
     audioEngine->setMasterEqLow((float) strips[stripMaster].eqLow->getValue());
     audioEngine->setMasterEqMid((float) strips[stripMaster].eqMid->getValue());
     audioEngine->setMasterEqHigh((float) strips[stripMaster].eqHigh->getValue());
-    audioEngine->setMasterVolume((float) strips[stripMaster].fader->getValue());
+
+    // Master isn't gated by other strips' solo — it's the summed output bus,
+    // so its own mute checkbox is the only thing that should silence it.
+    const float rawMaster = (float) strips[stripMaster].fader->getValue();
+    audioEngine->setMasterVolume(strips[stripMaster].mute->getToggleState() ? 0.0f : rawMaster);
 }
 
 void MixerPage::refreshMasterDynamicsButtons()

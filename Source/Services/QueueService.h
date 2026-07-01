@@ -130,5 +130,13 @@ private:
     juce::String      lastFingerprint_;
     ChangeCallback    onChange_;
 
+    // Serializes read-modify-write sequences (list -> mutate -> PATCH/POST)
+    // across appendSong/removeSong/patchSingerSongs/persistSingerOrder/
+    // ensureHostQueueDoc, each of which runs on its own background thread.
+    // Without this, two near-simultaneous writes can both read the same
+    // stale songs[] snapshot and the second PATCH silently clobbers the
+    // first (lost update).
+    juce::CriticalSection writeLock_;
+
     JUCE_DECLARE_NON_COPYABLE(QueueService)
 };

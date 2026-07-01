@@ -509,3 +509,12 @@ void NavBar::mouseMove(const juce::MouseEvent& e)
     else
         setMouseCursor(juce::MouseCursor::NormalCursor);
 }
+
+void NavBar::mouseUp(const juce::MouseEvent&)
+{
+    if (draggingResize)
+    {
+        draggingResize = false;
+        repaint();
+    }
+}

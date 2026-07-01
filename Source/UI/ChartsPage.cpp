@@ -555,21 +555,26 @@ void ChartsPage::refreshAnalytics()
     refreshButton_.setEnabled(false);
 
     const int taskId = GlobalProgressService::getInstance().beginTask(tr("charts.loading", "Loading analytics..."));
+    juce::Component::SafePointer<ChartsPage> safe(this);
     AnalyticsService::getInstance().loadAnalytics(venueId, currentRange(),
-        [this, taskId](bool ok, AnalyticsService::Snapshot data, juce::String error)
+        [safe, taskId](bool ok, AnalyticsService::Snapshot data, juce::String error)
         {
             GlobalProgressService::getInstance().endTask(taskId);
-            loading_ = false;
-            refreshButton_.setEnabled(true);
+
+            if (safe == nullptr)
+                return;
+
+            safe->loading_ = false;
+            safe->refreshButton_.setEnabled(true);
 
             if (! ok)
             {
-                loadingLabel_.setText(tr("charts.load_failed", "Load failed") + ": " + error, juce::dontSendNotification);
+                safe->loadingLabel_.setText(safe->tr("charts.load_failed", "Load failed") + ": " + error, juce::dontSendNotification);
                 return;
             }
 
-            loadingLabel_.setText({}, juce::dontSendNotification);
-            applySnapshot(std::move(data));
+            safe->loadingLabel_.setText({}, juce::dontSendNotification);
+            safe->applySnapshot(std::move(data));
         });
 }
 

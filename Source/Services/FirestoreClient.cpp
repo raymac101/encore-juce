@@ -55,6 +55,7 @@ FirestoreClient& FirestoreClient::getInstance()
 
 void FirestoreClient::signOut()
 {
+    const juce::ScopedLock lock(stateLock_);
     idToken_.clear();
     refreshToken_.clear();
     localId_.clear();
@@ -66,28 +67,82 @@ void FirestoreClient::signOut()
 
 juce::var FirestoreClient::getAuthClaims() const
 {
-    if (idToken_.isEmpty())
+    const juce::String token = getIdToken();
+    if (token.isEmpty())
         return juce::var();
 
-    return parseJwtPayload (idToken_);
+    return parseJwtPayload (token);
 }
 
 //==============================================================================
+void FirestoreClient::ensureFreshToken()
+{
+    juce::String refreshTok;
+    {
+        const juce::ScopedLock lock(stateLock_);
+        if (idToken_.isEmpty() || refreshToken_.isEmpty())
+            return;
+
+        const auto elapsedSeconds = (juce::Time::getCurrentTime() - tokenIssuedAt_).inSeconds();
+        const auto lifetime = tokenLifetimeSeconds_ > 0 ? tokenLifetimeSeconds_ : 3600;
+
+        // Refresh 5 minutes before actual expiry so in-flight requests don't
+        // race a token that expires mid-call.
+        if (elapsedSeconds < (lifetime - 300))
+            return;
+
+        refreshTok = refreshToken_;
+    }
+
+    juce::URL url("https://securetoken.googleapis.com/v1/token?key=" + FirebaseConfig::apiKey);
+    const juce::String form = "grant_type=refresh_token&refresh_token="
+                             + juce::URL::addEscapeChars(refreshTok, true);
+
+    int status = 0;
+    auto resp = httpJsonRaw(url, "POST", form, &status, {}, "application/x-www-form-urlencoded");
+
+    if (status >= 200 && status < 300 && resp.isObject())
+    {
+        const juce::ScopedLock lock(stateLock_);
+        idToken_       = resp.getProperty("id_token", idToken_).toString();
+        refreshToken_  = resp.getProperty("refresh_token", refreshToken_).toString();
+        tokenIssuedAt_ = juce::Time::getCurrentTime();
+        tokenLifetimeSeconds_ = resp.getProperty("expires_in", juce::String(tokenLifetimeSeconds_)).toString().getIntValue();
+    }
+    else
+    {
+        DBG("FirestoreClient: token refresh failed, status=" << status);
+    }
+}
+
 juce::var FirestoreClient::httpJson(const juce::URL& url,
                                     const juce::String& httpMethod,
                                     const juce::String& jsonBody,
                                     int* httpStatus,
                                     juce::StringArray extraHeaders)
 {
+    ensureFreshToken();
+    return httpJsonRaw(url, httpMethod, jsonBody, httpStatus, extraHeaders, "application/json");
+}
+
+juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
+                                       const juce::String& httpMethod,
+                                       const juce::String& body,
+                                       int* httpStatus,
+                                       juce::StringArray extraHeaders,
+                                       const juce::String& contentType)
+{
     juce::URL u = url;
-    if (jsonBody.isNotEmpty())
-        u = u.withPOSTData(jsonBody);
+    if (body.isNotEmpty())
+        u = u.withPOSTData(body);
+
+    const juce::String bearerToken = getIdToken();
 
     juce::StringArray headers;
-    headers.add("Content-Type: application/json");
+    headers.add("Content-Type: " + contentType);
     headers.add("Accept: application/json");
-    if (isSignedIn())
-        headers.add("Authorization: Bearer " + idToken_);
+    if (bearerToken.isNotEmpty())
+        headers.add("Authorization: Bearer " + bearerToken);
     headers.addArray(extraHeaders);
 
     auto headersStr = headers.joinIntoString("\r\n");
@@ -111,15 +166,15 @@ juce::var FirestoreClient::httpJson(const juce::URL& url,
         return juce::var();
     }
 
-    auto body = stream->readEntireStreamAsString();
-    if (body.isEmpty())
+    auto responseBody = stream->readEntireStreamAsString();
+    if (responseBody.isEmpty())
         return juce::var();
 
     juce::var parsed;
-    auto result = juce::JSON::parse(body, parsed);
+    auto result = juce::JSON::parse(responseBody, parsed);
     if (result.failed())
     {
-        DBG("FirestoreClient: JSON parse failed (" << status << "): " << body.substring(0, 400));
+        DBG("FirestoreClient: JSON parse failed (" << status << "): " << responseBody.substring(0, 400));
         return juce::var();
     }
     return parsed;
@@ -159,6 +214,7 @@ FirestoreClient::AuthResult FirestoreClient::signInWithEmailPassword(const juce:
 
     if (status >= 200 && status < 300 && resp.isObject())
     {
+        const juce::ScopedLock lock(stateLock_);
         idToken_      = resp.getProperty("idToken", "").toString();
         refreshToken_ = resp.getProperty("refreshToken", "").toString();
         localId_      = resp.getProperty("localId", "").toString();
@@ -187,6 +243,7 @@ FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce:
 
     if (status >= 200 && status < 300 && resp.isObject())
     {
+        const juce::ScopedLock lock(stateLock_);
         idToken_      = resp.getProperty("idToken", "").toString();
         refreshToken_ = resp.getProperty("refreshToken", "").toString();
         localId_      = resp.getProperty("localId", "").toString();
@@ -251,7 +308,8 @@ bool FirestoreClient::patchDocument(const juce::String& path, const juce::var& f
 
 juce::var FirestoreClient::createDocument(const juce::String& collectionPath,
                                           const juce::var& fields,
-                                          const juce::String& documentId)
+                                          const juce::String& documentId,
+                                          bool* outOk)
 {
     juce::String path = FirebaseConfig::firestoreBaseUrl() + "/" + collectionPath;
     if (documentId.isNotEmpty())
@@ -263,7 +321,10 @@ juce::var FirestoreClient::createDocument(const juce::String& collectionPath,
     body->setProperty("fields", fields);
 
     int status = 0;
-    return httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    auto resp = httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    if (outOk != nullptr)
+        *outOk = (status >= 200 && status < 300);
+    return resp;
 }
 
 bool FirestoreClient::deleteDocument(const juce::String& path)

@@ -424,8 +424,10 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, authUid, stageName, avatarUrl, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, authUid, stageName, avatarUrl, onDone = std::move(onDone)]()
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
@@ -462,9 +464,9 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
         arrWrapper->setProperty("arrayValue", juce::var(arrInner.get()));
         fields->setProperty("songs", juce::var(arrWrapper.get()));
 
-        auto resp = FirestoreClient::getInstance()
-                        .createDocument(collPath, juce::var(fields.get()), authUid);
-        const bool ok = resp.isObject();
+        bool ok = false;
+        FirestoreClient::getInstance()
+            .createDocument(collPath, juce::var(fields.get()), authUid, &ok);
 
         DBG ("[Queue] ensureHostQueueDoc created host doc '" << authUid << "' ok=" << (ok ? 1 : 0));
 
@@ -483,8 +485,10 @@ void QueueService::appendSong(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, item, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
@@ -570,9 +574,9 @@ void QueueService::appendSong(const juce::String& venueId,
         fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
         fields->setProperty("songs",          songsArrayValue(initialSongs));
 
-        auto resp = FirestoreClient::getInstance()
-                        .createDocument(collPath, juce::var(fields.get()), docId);
-        const bool ok = resp.isObject();
+        bool ok = false;
+        FirestoreClient::getInstance()
+            .createDocument(collPath, juce::var(fields.get()), docId, &ok);
 
         DBG ("[Queue] appendSong new singer '" << juce::String(item.singerName)
                << "' docId='" << docId << "'"
@@ -594,8 +598,10 @@ void QueueService::removeSong(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, item, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
@@ -666,8 +672,10 @@ void QueueService::deleteSinger(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, singerName, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, singerName, onDone = std::move(onDone)]()
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
@@ -703,8 +711,10 @@ void QueueService::patchSingerSongs(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, singerName, newSongs, onDone = std::move(onDone)]() mutable
+    juce::Thread::launch([this, venueId, singerName, newSongs, onDone = std::move(onDone)]() mutable
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
@@ -752,8 +762,10 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, orderedSingers, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, orderedSingers, onDone = std::move(onDone)]()
     {
+        const juce::ScopedLock lock(writeLock_);
+
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 300);
 

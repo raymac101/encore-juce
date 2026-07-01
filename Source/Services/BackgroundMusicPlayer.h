@@ -122,7 +122,11 @@ private:
     std::unique_ptr<juce::AudioTransportSource>    transportSource_;
     std::unique_ptr<juce::ResamplingAudioSource>   resamplingSource_;
 
-    // Playlist
+    // Playlist — rescanned on the message thread (setPlaylistDirectory) but
+    // its size/contents are also read from the audio thread (advanceToNext),
+    // so all access goes through playlistMutex_. Kept separate from
+    // chainMutex_ so the two never nest.
+    mutable std::mutex playlistMutex_;
     std::vector<juce::File> playlist_;
     double deviceSampleRate_ { 44100.0 };
 

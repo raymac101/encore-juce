@@ -80,5 +80,13 @@ private:
     /** Build a single MemberHistory entry as a Firestore mapValue. */
     static juce::var memberHistoryMapValue(const MemberHistory& h);
 
+    // Serializes the membersAudit upsert (query existing doc -> append to
+    // memberHistory -> PATCH, or create new doc). Each addAudit() call runs
+    // on its own background thread, so without this lock two songs finishing
+    // close together for the same singer can both read the same pre-append
+    // snapshot and the second write silently clobbers the first's history
+    // entry (or both create duplicate Member docs).
+    juce::CriticalSection membersAuditLock_;
+
     JUCE_DECLARE_NON_COPYABLE(AuditService)
 };

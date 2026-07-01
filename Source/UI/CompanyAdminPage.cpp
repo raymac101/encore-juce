@@ -1,8 +1,7 @@
 /*
-  ============================================================================== 
+  ==============================================================================
 
     CompanyAdminPage.cpp
-    selectedLogoFile_ = juce::File();
   ==============================================================================
 */
 
@@ -151,23 +150,26 @@ CompanyAdminPage::CompanyAdminPage()
             juce::File::getSpecialLocation (juce::File::userHomeDirectory),
             "*.png;*.jpg;*.jpeg;*.gif;*.webp");
 
+        juce::Component::SafePointer<CompanyAdminPage> safe (this);
         fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [this] (const juce::FileChooser& chooser)
+            [safe] (const juce::FileChooser& chooser)
             {
+                if (safe == nullptr)
+                    return;
+
                 auto file = chooser.getResult();
                 if (! file.existsAsFile())
                     return;
 
-                selectedLogoFile_ = file;
-                companyLogoFileName_ = file.getFileName();
-                logoPathLabel_.setText (companyLogoFileName_, juce::dontSendNotification);
-                updateLogoPreviewFromFile (file);
+                safe->selectedLogoFile_ = file;
+                safe->companyLogoFileName_ = file.getFileName();
+                safe->logoPathLabel_.setText (safe->companyLogoFileName_, juce::dontSendNotification);
+                safe->updateLogoPreviewFromFile (file);
             });
     };
 
     clearLogoButton_.onClick = [this]() { clearLogo(); };
     saveCompanyButton_.onClick = [this]() { saveCompanyInfo(); };
-        selectedLogoFile_ = juce::File();
     refreshMembersButton_.onClick = [this]() { loadMembers(); };
 
     configureCard (venueCard_,    lm.getText ("company_admin.venues"),    "0");

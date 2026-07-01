@@ -147,13 +147,15 @@ void EditSingerModal::buttonClicked(juce::Button* b)
         if (b == &row->upBtn && i > 0)
         {
             std::swap(songs[(size_t) i], songs[(size_t) i - 1]);
-            rebuildRows();
+            juce::Component::SafePointer<EditSingerModal> safe(this);
+            juce::MessageManager::callAsync([safe]() { if (safe != nullptr) safe->rebuildRows(); });
             return;
         }
         if (b == &row->downBtn && i < (int) songs.size() - 1)
         {
             std::swap(songs[(size_t) i], songs[(size_t) i + 1]);
-            rebuildRows();
+            juce::Component::SafePointer<EditSingerModal> safe(this);
+            juce::MessageManager::callAsync([safe]() { if (safe != nullptr) safe->rebuildRows(); });
             return;
         }
         if (b == &row->minusBtn)
@@ -173,7 +175,8 @@ void EditSingerModal::buttonClicked(juce::Button* b)
         if (b == &row->trashBtn)
         {
             songs.erase(songs.begin() + i);
-            rebuildRows();
+            juce::Component::SafePointer<EditSingerModal> safe(this);
+            juce::MessageManager::callAsync([safe]() { if (safe != nullptr) safe->rebuildRows(); });
             return;
         }
     }

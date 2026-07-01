@@ -756,6 +756,12 @@ void AddSongsDialog::onCancel()
 
 void AddSongsDialog::onImportMore()
 {
+    // Update existingSongs_ with the latest merged result (if available)
+    // before mergedSongs_ is cleared below, so the just-imported songs are
+    // excluded from the next folder scan's "new song" list.
+    if (! mergedSongs_.empty())
+        existingSongs_ = mergedSongs_;
+
     importRecords_.clear();
     stats_         = {};
     progressValue_ = 0.0;
@@ -765,13 +771,7 @@ void AddSongsDialog::onImportMore()
 
     // Refresh the file list from the same path (new songs may have been added)
     if (sourcePath_.isNotEmpty())
-    {
-        // Update existingSongs_ with the latest merged result if available
-        if (! mergedSongs_.empty())
-            existingSongs_ = mergedSongs_;
-
         startFolderScan(juce::File(sourcePath_));
-    }
 
     setPhase(Phase::Setup);
 }

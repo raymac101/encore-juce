@@ -93,52 +93,62 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer)
     const int numSamples = buffer.getNumSamples();
     const int channels   = juce::jmin(buffer.getNumChannels(), currentNumChannels);
 
-    // Grow intermediate buffers if needed (e.g. first block after prepare).
-    for (int ch = 0; ch < channels; ++ch)
+    // Process in chunks no larger than currentMaxBlockSize so inBuf/outBuf
+    // (sized once in rebuild()) never need to grow on the audio thread —
+    // std::vector::resize() here would be a real-time-unsafe allocation.
+    // In the normal case (numSamples <= currentMaxBlockSize, i.e. the block
+    // size prepare() was called with) this loop runs exactly once and is
+    // numerically identical to a single-shot process/retrieve.
+    int samplesDone = 0;
+    while (samplesDone < numSamples)
     {
-        if (static_cast<int>(inBuf[ch].size()) < numSamples)
-            inBuf[ch].resize(numSamples);
-
-        std::memcpy(inBuf[ch].data(),
-                    buffer.getReadPointer(ch),
-                    static_cast<size_t>(numSamples) * sizeof(float));
-
-        inPtrs[ch] = inBuf[ch].data();
-    }
-
-    stretcher->process(inPtrs.data(), static_cast<size_t>(numSamples), false);
-
-    const int available = stretcher->available();
-
-    if (available > 0)
-    {
-        const int toRetrieve = std::min(available, numSamples);
+        const int chunk = juce::jmin(numSamples - samplesDone, currentMaxBlockSize);
 
         for (int ch = 0; ch < channels; ++ch)
         {
-            if (static_cast<int>(outBuf[ch].size()) < toRetrieve)
-                outBuf[ch].resize(toRetrieve);
-
-            outPtrs[ch] = outBuf[ch].data();
+            std::memcpy(inBuf[ch].data(),
+                        buffer.getReadPointer(ch, samplesDone),
+                        static_cast<size_t>(chunk) * sizeof(float));
+            inPtrs[ch] = inBuf[ch].data();
         }
 
-        stretcher->retrieve(outPtrs.data(), static_cast<size_t>(toRetrieve));
+        stretcher->process(inPtrs.data(), static_cast<size_t>(chunk), false);
 
-        for (int ch = 0; ch < channels; ++ch)
+        const int available  = stretcher->available();
+        const int toRetrieve  = available > 0 ? std::min(available, chunk) : 0;
+
+        if (toRetrieve > 0)
         {
-            std::memcpy(buffer.getWritePointer(ch),
-                        outBuf[ch].data(),
-                        static_cast<size_t>(toRetrieve) * sizeof(float));
+            for (int ch = 0; ch < channels; ++ch)
+                outPtrs[ch] = outBuf[ch].data();
 
-            // Zero-fill any shortfall (can happen during latency compensation).
-            if (toRetrieve < numSamples)
-                buffer.clear(ch, toRetrieve, numSamples - toRetrieve);
+            stretcher->retrieve(outPtrs.data(), static_cast<size_t>(toRetrieve));
+
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                std::memcpy(buffer.getWritePointer(ch, samplesDone),
+                            outBuf[ch].data(),
+                            static_cast<size_t>(toRetrieve) * sizeof(float));
+
+                // Zero-fill any shortfall (can happen during latency compensation).
+                if (toRetrieve < chunk)
+                    buffer.clear(ch, samplesDone + toRetrieve, chunk - toRetrieve);
+            }
         }
+        else
+        {
+            // Initial latency fill — output silence until RubberBand has
+            // enough input to produce its first output frames.
+            for (int ch = 0; ch < channels; ++ch)
+                buffer.clear(ch, samplesDone, chunk);
+        }
+
+        samplesDone += chunk;
     }
-    else
-    {
-        // Initial latency fill — output silence until RubberBand has enough
-        // input to produce its first output frames.
-        buffer.clear();
-    }
+
+    // Device channels beyond what we pitch-shift (e.g. a >2-channel output
+    // device) don't carry processed content — silence them rather than
+    // leaving the raw pre-shift audio audible on those channels.
+    for (int ch = channels; ch < buffer.getNumChannels(); ++ch)
+        buffer.clear(ch, 0, numSamples);
 }
