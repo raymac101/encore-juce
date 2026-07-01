@@ -22,13 +22,10 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/ArchiveService.h"
 #include "../Services/ApiService.h"
-#include "../Services/AuditService.h"
-#include "../Services/GlobalProgressService.h"
 #include "EditSingerModal.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
-#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <numeric>
@@ -765,11 +762,6 @@ void MainComponent::setupUI()
         if (playStartTimeMs_ == 0)
             playStartTimeMs_ = juce::Time::currentTimeMillis();
 
-        // Fade out background music whenever karaoke playback begins,
-        // including manual play of a preloaded track.
-        if (bgPlayer_ != nullptr)
-            bgPlayer_->fadeOut (1.5f);
-
         if (videoLoaded)
             lyricWindow_->playVideo();
         else
@@ -806,10 +798,6 @@ void MainComponent::setupUI()
         }
         else if (audioEngine)
             audioEngine->stop();
-
-        // Optional: bring background music back in smoothly after a manual stop.
-        if (bgPlayer_ != nullptr)
-            bgPlayer_->fadeIn (2.0f);
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(true);
@@ -893,51 +881,6 @@ void MainComponent::setupUI()
     mainArea->setAudioEngine(audioEngine.get());
     addAndMakeVisible(mainArea.get());
 
-    if (auto* companyPage = mainArea->getCompanyAdminPage())
-    {
-        companyPage->onCompanyIdChanged = [this](const juce::String& companyId)
-        {
-            companyId_ = companyId.trim();
-
-            if (HostService::getInstance().hasCurrent())
-            {
-                auto host = HostService::getInstance().getCurrent();
-                host.companyId = companyId_.toStdString();
-                HostService::getInstance().setCurrent(host);
-
-                const auto hostUserId = juce::String(host.userId).trim();
-                if (hostUserId.isNotEmpty())
-                {
-                    showMaintenanceToast("Saving company profile...");
-
-                    const auto persistCompanyId = companyId_;
-                    juce::Component::SafePointer<MainComponent> safe (this);
-                    juce::Thread::launch([safe, hostUserId, persistCompanyId]()
-                    {
-                        auto fields = FirestoreClient::makeFields({
-                            { "companyId", FirestoreClient::stringValue(persistCompanyId) },
-                            { "lastLogin", FirestoreClient::stringValue(juce::Time::getCurrentTime().toISO8601(true)) }
-                        });
-
-                        const bool ok = FirestoreClient::getInstance().patchDocument("hosts/" + hostUserId, fields);
-                        juce::MessageManager::callAsync([safe, ok]()
-                        {
-                            if (safe == nullptr)
-                                return;
-
-                            safe->showMaintenanceToast(ok
-                                ? "Company ID saved to host profile."
-                                : "Could not save company ID to host profile.");
-                        });
-                    });
-                }
-            }
-
-            if (companyContextEnabled_)
-                refreshCompanyDashboard();
-        };
-    }
-
     // Create Ribbon menu (quick-access control surface)
     ribbonMenu = std::make_unique<RibbonMenu>();
     addAndMakeVisible(ribbonMenu.get());
@@ -1001,29 +944,8 @@ void MainComponent::setupUI()
 
     ribbonMenu->onPlayNextSinger = [this]()
     {
-        // If no song is loaded, load the next singer and play
-        if (!currentSong.isValid())
-        {
-            const bool ok = queueAndLoadNextSingerSong(true, true);
-            if (!ok)
-                showMaintenanceToast("No queued singer available.");
-            return;
-        }
-
-        // If a song is loaded but not playing, resume playback
-        if (audioEngine && !audioEngine->isPlaying())
-        {
-            audioEngine->play();
-            if (bottomBar)
-                bottomBar->setPlaying(true);
-            if (queueBar)
-                queueBar->setPlaying(true);
-            return;
-        }
-
-        // If a song is loaded and playing, load the next singer
         const bool ok = queueAndLoadNextSingerSong(true, true);
-        if (!ok)
+        if (! ok)
             showMaintenanceToast("No queued singer available.");
     };
 
@@ -1075,10 +997,6 @@ void MainComponent::setupUI()
     refreshRibbonState();
 
     wireTestingPageCallbacks();
-
-    // Re-apply identity now that NavBar and MainArea both exist, so any
-    // company-context claims become visible immediately on startup.
-    applyCurrentIdentityToUi();
 
     // Wire NavBar page selection to MainArea
     navBar->onPageSelected = [this](NavPage page) {
@@ -2354,14 +2272,6 @@ void MainComponent::setupUI()
     };
 
     // ── Song-finished → auto-advance ──────────────────────────────────────────
-    audioEngine->onAudibleEndReached = [this]()
-    {
-        // Start bringing background music up as soon as audible content ends,
-        // instead of waiting for trailing silence/file tail to finish.
-        if (bgPlayer_ != nullptr)
-            bgPlayer_->fadeIn (2.0f);
-    };
-
     audioEngine->onSongFinished = [this]()
     {
         logPlayHistoryIfNeeded(true);
@@ -3425,34 +3335,21 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         }
     }
 
-    const auto progressMessage = "Loading \"" + juce::String(song.songName) + "\"...";
-    const int progressTaskId = GlobalProgressService::getInstance().beginTask(progressMessage);
-
     if (bottomBar != nullptr)
     {
         bottomBar->setWaveformSamples({});
-        bottomBar->setWaveformStatusMessage(progressMessage);
+        bottomBar->setWaveformStatusMessage("Loading \"" + juce::String(song.songName) + "\"...");
     }
 
     // Defer the actual load work to the next message-loop tick so the loading
     // message paints in the waveform area before any file I/O starts.
     juce::Component::SafePointer<MainComponent> self(this);
-    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart,
-                                     progressTaskId, onDone = std::move(onDone)]() mutable
+    juce::MessageManager::callAsync([self, song, versionIndex, pitchSemitones, autoStart, onDone = std::move(onDone)]()
     {
-        auto taskEnded = std::make_shared<std::atomic<bool>>(false);
-        auto finish = [progressTaskId, taskEnded, onDone = std::move(onDone)](bool ok) mutable
-        {
-            if (! taskEnded->exchange(true))
-                GlobalProgressService::getInstance().endTask(progressTaskId);
-
-            if (onDone)
-                onDone(ok);
-        };
-
         if (! self || ! self->audioEngine)
         {
-            finish(false);
+            if (onDone)
+                onDone(false);
             return;
         }
 
@@ -3524,7 +3421,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->bottomBar->setWaveformStatusMessage("Load failed.");
         self->showSongLoadFailedMessage(song.songName,
                                         "No playable file path is recorded for this song.");
-        finish(false);
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -3539,7 +3437,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         resolveError.isNotEmpty() ? resolveError : "Could not read ZIP archive.",
                                         sourceFile.getFullPathName());
-        finish(false);
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -3582,7 +3481,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         "The song file was not found on this computer.",
                                         audioFile.getFullPathName());
-        finish(false);
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -3606,7 +3506,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->showSongLoadFailedMessage(song.songName,
                                             "The video file could not be opened for playback.",
                                             audioFile.getFullPathName());
-            finish(false);
+            if (onDone)
+                onDone(false);
             return;
         }
 
@@ -3658,7 +3559,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->currentRibbonCdgFile_ = juce::File();
         self->refreshRibbonState();
 
-        finish(true);
+        if (onDone)
+            onDone(true);
         return;
     }
 
@@ -3670,7 +3572,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->showSongLoadFailedMessage(song.songName,
                                         "The audio file format is unsupported or the file could not be opened.",
                                         audioFile.getFullPathName());
-        finish(false);
+        if (onDone)
+            onDone(false);
         return;
     }
 
@@ -3758,7 +3661,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             self->bgPlayer_->fadeOut (1.5f);
         self->audioEngine->play();
     }
-    finish(true);
+    if (onDone)
+        onDone(true);
     });
 }
 
@@ -4019,7 +3923,7 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 
     for (const auto& singer : singers)
     {
-        if (singer.songs.empty())
+        if (singer.isHost || singer.songs.empty())
             continue;
 
         LyricDisplayComponent::QueuePreviewEntry entry;
@@ -4081,23 +3985,11 @@ void MainComponent::refreshRibbonState()
 
     juce::String nextSingerName;
     juce::String nextSongName;
-
-    // If a song is loaded but not yet playing, show that singer in the ribbon.
-    // Once they start playing, we'll show the next person in queue.
-    if (hasLocalNowPlaying_ && audioEngine != nullptr && !audioEngine->isPlaying())
+    if (queueBar != nullptr)
     {
-        if (!localNowPlaying_.songs.empty())
-        {
-            nextSingerName = juce::String(localNowPlaying_.name).trim();
-            nextSongName = juce::String(localNowPlaying_.songs.front().songName).trim();
-        }
-    }
-    else if (queueBar != nullptr)
-    {
-        // Otherwise show the next singer in queue
         for (const auto& singer : queueBar->getSingers())
         {
-            if (singer.songs.empty())
+            if (singer.isHost || singer.songs.empty())
                 continue;
 
             nextSingerName = juce::String(singer.name).trim();
@@ -4113,7 +4005,7 @@ juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<S
 {
     for (const auto& singer : singers)
     {
-        if (singer.songs.empty())
+        if (singer.isHost || singer.songs.empty())
             continue;
 
         const auto name = juce::String(singer.name).trim();
@@ -4189,14 +4081,6 @@ void MainComponent::hideLoadingOverlay()
 
 void MainComponent::startDeferredAudioServices(const juce::String& venueId, int startupToken)
 {
-    const int progressTaskId = GlobalProgressService::getInstance().beginTask("Starting audio engine...");
-    auto taskEnded = std::make_shared<std::atomic<bool>>(false);
-    auto endProgressTask = [progressTaskId, taskEnded]()
-    {
-        if (! taskEnded->exchange(true))
-            GlobalProgressService::getInstance().endTask(progressTaskId);
-    };
-
     juce::Component::SafePointer<MainComponent> safeThis(this);
     updateLoadingOverlay("Starting audio engine...", 0.92);
     audioStartupInProgress_ = true;
@@ -4212,13 +4096,10 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
         safeThis->hideLoadingOverlay();
     });
 
-    juce::Thread::launch([safeThis, venueId, startupToken, endProgressTask]()
+    juce::Thread::launch([safeThis, venueId, startupToken]()
     {
         if (safeThis == nullptr || safeThis->audioEngine == nullptr)
-        {
-            endProgressTask();
             return;
-        }
 
         const auto startMs = juce::Time::getMillisecondCounterHiRes();
         DBG("[AudioStartup] Background audio startup begin");
@@ -4226,13 +4107,10 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             safeThis->audioEngine->initialize();
         const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
 
-        juce::MessageManager::callAsync([safeThis, venueId, startupToken, initMs, endProgressTask]()
+        juce::MessageManager::callAsync([safeThis, venueId, startupToken, initMs]()
         {
             if (safeThis == nullptr || safeThis->startupLoadToken_ != startupToken || safeThis->activeVenueId_ != venueId)
-            {
-                endProgressTask();
                 return;
-            }
 
             const auto lyricStartMs = juce::Time::getMillisecondCounterHiRes();
 
@@ -4262,7 +4140,6 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             DBG("[AudioStartup] Deferred audio init finished in " + juce::String(initMs, 1)
                 + " ms; lyric window setup in " + juce::String(lyricMs, 1) + " ms");
             safeThis->hideLoadingOverlay();
-            endProgressTask();
         });
     });
 }
@@ -4675,111 +4552,15 @@ void MainComponent::applyCurrentIdentityToUi()
 
     topBar->setUserInfo(displayName, juce::Image());
 
-    applyCompanyContextToUi();
-    applyStartupPageForCurrentIdentity();
-
     // If no venue is active yet, at least expose host-level rights.
     if (navBar != nullptr && activeVenueId_.isEmpty())
         navBar->setUserRole(hostRole);
-}
-
-void MainComponent::applyCompanyContextToUi()
-{
-    companyId_.clear();
-    companyRole_.clear();
-    companyContextEnabled_ = false;
-
-    if (HostService::getInstance().hasCurrent())
-    {
-        const auto host = HostService::getInstance().getCurrent();
-        if (host.role == UserRole::Admin || host.role == UserRole::EnterpriseAdmin)
-        {
-            companyContextEnabled_ = true;
-            companyRole_ = juce::String(AccessRightsUtil::userRoleToString(host.role));
-
-            // Company ID is a tenant identifier and must not default to the user's auth UID.
-            // Prefer explicit auth claims; otherwise fall back to saved host profile value.
-            const auto claims = FirestoreClient::getInstance().getAuthClaims();
-            companyId_ = FirestoreClient::readString(claims, "companyId").trim();
-            if (companyId_.isEmpty())
-                companyId_ = juce::String(host.companyId).trim();
-        }
-    }
-
-    if (navBar != nullptr)
-        navBar->setCompanyContext(companyContextEnabled_, companyRole_);
-
-    if (mainArea != nullptr)
-        mainArea->setCompanyContext(companyId_, companyRole_);
-
-    if (companyContextEnabled_)
-        refreshCompanyDashboard();
-}
-
-void MainComponent::applyStartupPageForCurrentIdentity()
-{
-    if (! companyContextEnabled_ || navBar == nullptr || mainArea == nullptr)
-        return;
-
-    navBar->setActivePage(NavPage::CompanyAdmin);
-    mainArea->setCurrentPage(NavPage::CompanyAdmin);
-}
-
-void MainComponent::refreshCompanyDashboard()
-{
-    if (! companyContextEnabled_ || mainArea == nullptr)
-        return;
-
-    auto* dashboard = mainArea->getCompanyAdminPage();
-    if (dashboard == nullptr)
-        return;
-
-    dashboard->setCompanyContext(companyId_, companyRole_);
-    if (companyId_.isEmpty())
-    {
-        dashboard->setSummary({});
-        dashboard->setStatusMessage("Admin mode enabled. Company data will appear when a company profile is linked.");
-        return;
-    }
-
-    dashboard->setStatusMessage("Loading company summary...");
-
-    juce::Component::SafePointer<MainComponent> safe(this);
-    const auto companyId = companyId_;
-    const auto companyRole = companyRole_;
-    juce::Thread::launch([safe, companyId, companyRole]()
-    {
-        auto& fc = FirestoreClient::getInstance();
-        CompanyAdminPage::Summary summary;
-
-        summary.venues = fc.listCollection("companies/" + companyId + "/venues", 500).size();
-        summary.hosts = fc.listCollection("companies/" + companyId + "/hosts", 500).size();
-        summary.devices = fc.listCollection("companies/" + companyId + "/devices", 500).size();
-        summary.songPackages = fc.listCollection("companies/" + companyId + "/songPackages", 500).size();
-        summary.campaigns = fc.listCollection("companies/" + companyId + "/campaigns", 500).size();
-
-        juce::MessageManager::callAsync([safe, companyId, companyRole, summary]()
-        {
-            if (safe == nullptr || safe->mainArea == nullptr || ! safe->companyContextEnabled_)
-                return;
-
-            auto* dashboard = safe->mainArea->getCompanyAdminPage();
-            if (dashboard == nullptr)
-                return;
-
-            dashboard->setCompanyContext(companyId, companyRole);
-            dashboard->setSummary(summary);
-            dashboard->setStatusMessage("Company summary loaded.");
-        });
-    });
 }
 
 void MainComponent::applyNavRoleForActiveVenue()
 {
     if (navBar == nullptr)
         return;
-
-    navBar->setCompanyContext(companyContextEnabled_, companyRole_);
 
     UserRole fallbackRole = UserRole::Host;
     if (HostService::getInstance().hasCurrent())
@@ -5514,22 +5295,4 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
         {
             if (! ok) DBG("[History] addPlayHistory failed: " << err);
         });
-
-    // Write the full audit trail — mirrors audit.service.ts addAudit().
-    // Requires the first QueueItem from the now-playing singer so we have
-    // pitch, version, profileId, deviceId, foxId.
-    if (hasLocalNowPlaying_ && ! localNowPlaying_.songs.empty())
-    {
-        const auto& firstItem = localNowPlaying_.songs.front();
-        const auto  venueName = juce::String(VenueService::getInstance().getCurrent().name);
-        const auto  kjId      = juce::String(FirestoreClient::getInstance().getUserId());
-
-        AuditService::getInstance().addAudit(
-            currentSong,
-            localNowPlaying_,
-            firstItem,
-            venueId,
-            venueName,
-            kjId);
-    }
 }
