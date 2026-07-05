@@ -18,6 +18,7 @@
 #include "Localization/LocalizationManager.h"
 #include "Services/UserPreferences.h"
 #include "Services/VenueService.h"
+#include "Services/PluginHostService.h"
 #include "BuildInfo.h"
 
 //==============================================================================
@@ -35,6 +36,23 @@ public:
     //==============================================================================
     void initialise (const juce::String& commandLine) override
     {
+        // Plugin-scan child-process mode: if this invocation was launched
+        // by PluginHostService::scanForPlugins() with --scan-plugin=/
+        // --scan-output= arguments, do ONLY that (metadata scan of a single
+        // candidate plugin file, which is the operation that can crash for
+        // a malformed plugin — isolated here in a disposable child process
+        // instead of the main running app), then quit immediately. This
+        // check must stay the absolute first thing in this function, before
+        // any login/venue/network bootstrap below, or every scanned
+        // candidate plugin would launch the full app UI first.
+        if (PluginHostService::handleScanCommandLineIfPresent())
+        {
+            quit();
+            return;
+        }
+
+        juce::ignoreUnused (commandLine);
+
         // Initialize localization: honour the user's saved choice if any,
         // otherwise fall back to the system language.
         auto savedLang = UserPreferences::getInstance().getLanguage();

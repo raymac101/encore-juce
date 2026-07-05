@@ -52,6 +52,7 @@ target_sources(EncoreJUCE
         Source/Main.cpp
         Source/Audio/AudioEngine.cpp
         Source/Audio/PitchShifter.cpp
+        Source/Audio/ChannelPluginChain.cpp
         Source/UI/MainComponent.cpp
         Source/UI/ResponsiveLayout.cpp
         Source/UI/TopBar.cpp
@@ -90,6 +91,7 @@ target_sources(EncoreJUCE
         Source/Services/AnalyticsService.cpp
         Source/Services/AuditService.cpp
         Source/Services/BackgroundMusicPlayer.cpp
+        Source/Services/PluginHostService.cpp
         Source/Services/ApiService.cpp
         Source/Services/GlobalProgressService.cpp
         Source/Auth/LoginFlowController.cpp
@@ -121,6 +123,8 @@ target_compile_definitions(EncoreJUCE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CAMERA=0
         JUCE_DISPLAY_SPLASH_SCREEN=1
+        # VST3 plugin hosting (Source/Audio/ChannelPluginChain, PluginHostService).
+        JUCE_PLUGINHOST_VST3=1
         # Dev-only: shows a "Skip Login (Dev)" button on the login page that
         # auto-signs in as raymac@shaw.ca and selects the "Karaoke Palace"
         # venue. Set to 0 (or delete this line) for production builds.

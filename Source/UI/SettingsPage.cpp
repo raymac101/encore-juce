@@ -11,6 +11,7 @@
 #include "SettingsPage.h"
 #include "MenuTheme.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/PluginHostService.h"
 
 //==============================================================================
 // Layout constants
@@ -626,6 +627,56 @@ public:
         initFieldLabel(lblMicWarning_, lm.getText("settings.lbl_mic_no_input"));
         lblMicWarning_.setColour(juce::Label::textColourId, juce::Colour(kBtnDanger));
         lblMicWarning_.setVisible(false);
+
+        // ── Section 8: VST3 Plugins ──────────────────────────────────────────
+        initSectionLabel(secPlugins_, lm.getText("settings.sec_plugins"));
+        initButton(btnRescanPlugins_, lm.getText("settings.btn_rescan_plugins"), kBtnNormal);
+        btnRescanPlugins_.onClick = [this]() { startPluginScan(); };
+        initValueLabel(lblPluginScanStatus_);
+        refreshPluginScanStatusLabel();
+    }
+
+    void startPluginScan()
+    {
+        btnRescanPlugins_.setEnabled(false);
+        lblPluginScanStatus_.setText(
+            LocalizationManager::getInstance().getText("settings.plugin_scan_in_progress"),
+            juce::dontSendNotification);
+
+        juce::Component::SafePointer<SettingsContentPanel> safe(this);
+        PluginHostService::getInstance().scanForPlugins(
+            [safe](float /*progress01*/, juce::String /*currentItem*/) {},
+            [safe](int numFound)
+            {
+                if (safe == nullptr)
+                    return;
+                safe->btnRescanPlugins_.setEnabled(true);
+                safe->refreshPluginScanStatusLabel(numFound);
+            });
+    }
+
+    void refreshPluginScanStatusLabel(int lastFoundCount = -1)
+    {
+        auto& lm = LocalizationManager::getInstance();
+        const auto lastScan = PluginHostService::getInstance().getLastScanTime();
+
+        if (lastFoundCount >= 0)
+        {
+            lblPluginScanStatus_.setText(
+                lm.getText("settings.plugin_scan_found_prefix") + juce::String(lastFoundCount),
+                juce::dontSendNotification);
+        }
+        else if (lastScan != juce::Time())
+        {
+            lblPluginScanStatus_.setText(
+                lm.getText("settings.plugin_scan_last_prefix") + lastScan.toString(true, true),
+                juce::dontSendNotification);
+        }
+        else
+        {
+            lblPluginScanStatus_.setText(
+                lm.getText("settings.plugin_scan_never"), juce::dontSendNotification);
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -882,6 +933,15 @@ public:
         comboRow(lblMic2Channel_, cbMic2Channel_);
         lblMicWarning_.setBounds(kPadX, y, w - kPadX * 2, kRowH); y += kRowH + kFieldGap;
         cardEnd(cs);
+        y += kSectionGap;
+
+        // Section 8: VST3 Plugins
+        cs = cardStart();
+        secPlugins_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
+        btnRescanPlugins_.setBounds(kPadX, y, 160, kRowH);
+        lblPluginScanStatus_.setBounds(kPadX + 168, y, w - kPadX * 2 - 168, kRowH);
+        y += kRowH;
+        cardEnd(cs);
         y += kSectionGap + 8;
 
         setSize(w, y);
@@ -959,6 +1019,10 @@ public:
         lblMic1Channel_.setText(lm.getText("settings.lbl_mic1_channel"), juce::dontSendNotification);
         lblMic2Channel_.setText(lm.getText("settings.lbl_mic2_channel"), juce::dontSendNotification);
         lblMicWarning_.setText(lm.getText("settings.lbl_mic_no_input"), juce::dontSendNotification);
+
+        secPlugins_.setText(lm.getText("settings.sec_plugins"), juce::dontSendNotification);
+        btnRescanPlugins_.setButtonText(lm.getText("settings.btn_rescan_plugins"));
+        refreshPluginScanStatusLabel();
 
         auto rebuildCombo = [](juce::ComboBox& cb,
                                std::initializer_list<std::pair<const char*, int>> items) {
@@ -1201,6 +1265,11 @@ private:
     juce::Label      lblMic1Channel_, lblMic2Channel_;
     juce::ComboBox   cbMic1Channel_, cbMic2Channel_;
     juce::Label      lblMicWarning_;
+
+    // Section 8: VST3 Plugins
+    juce::Label      secPlugins_;
+    juce::TextButton btnRescanPlugins_;
+    juce::Label      lblPluginScanStatus_;
 
     // Computed in resized() and drawn in paint() — one rect per section card.
     std::vector<juce::Rectangle<int>> cardRects_;

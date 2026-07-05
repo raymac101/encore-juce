@@ -550,3 +550,11 @@ settings.lbl_mic1_channel=Mic 1 Input Channel
 settings.lbl_mic2_channel=Mic 2 Input Channel
 settings.lbl_mic_no_input=Selected device has no input channels available.
 settings.mic_channel_none=None
+
+# VST3 Plugins
+settings.sec_plugins=VST3 Plugins
+settings.btn_rescan_plugins=Rescan Plugins
+settings.plugin_scan_in_progress=Scanning for plugins...
+settings.plugin_scan_found_prefix=Found plugins:
+settings.plugin_scan_last_prefix=Last scan:
+settings.plugin_scan_never=No scan yet — click Rescan Plugins.

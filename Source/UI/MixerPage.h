@@ -13,8 +13,11 @@
 #include <JuceHeader.h>
 #include "../Audio/AudioEngine.h"
 #include "../Services/BackgroundMusicPlayer.h"
+#include "../Services/PluginHostService.h"
+#include "../Services/UserPreferences.h"
 #include "../Localization/LocalizationManager.h"
 #include <array>
+#include <vector>
 
 class MixerPage : public juce::Component,
                   private juce::Timer
@@ -55,6 +58,10 @@ private:
         std::unique_ptr<juce::ComboBox> insertB;
         std::unique_ptr<juce::TextButton> pluginAButton;
         std::unique_ptr<juce::TextButton> pluginBButton;
+        std::unique_ptr<juce::ComboBox> pluginSlotA;
+        std::unique_ptr<juce::ComboBox> pluginSlotB;
+        std::unique_ptr<juce::TextButton> pluginSlotAEdit;
+        std::unique_ptr<juce::TextButton> pluginSlotBEdit;
         float meterLevel = 0.0f;
         float compOutputMeterLevel = 0.0f;
         float limiterReductionMeterLevel = 0.0f;
@@ -70,6 +77,13 @@ private:
     juce::Label titleLabel;
     juce::Label subtitleLabel;
 
+    std::vector<juce::PluginDescription> cachedPluginList_;
+    std::array<std::unique_ptr<juce::DialogWindow>, stripCount> editorWindowA_, editorWindowB_;
+    juce::TextButton bypassAllButton_;
+    bool restoredAudioEngineSlots_ = false;
+    bool restoredBgMusicSlots_ = false;
+    bool allPluginsBypassed_ = false;
+
     void buildStrip(int index, const juce::String& name, juce::Colour accent);
     void bindControlCallbacks();
     void pushStateFromEngine();
@@ -77,6 +91,15 @@ private:
     void refreshMasterDynamicsButtons();
     void showCompressorDialog(juce::Component& anchor);
     void showLimiterDialog(juce::Component& anchor);
+
+    ChannelPluginChain* getPluginChainForStrip(int stripIndex) const;
+    juce::String getChannelIdForStrip(int stripIndex) const;
+    void refreshPluginPickers();
+    void onPluginSlotSelected(int stripIndex, int slotIndex);
+    void onPluginEditClicked(int stripIndex, int slotIndex);
+    void persistPluginSlotState(int stripIndex, int slotIndex);
+    void restorePluginSlotsForChannel(int stripIndex);
+    void setAllPluginsBypassed(bool shouldBypass);
 
     void timerCallback() override;
 

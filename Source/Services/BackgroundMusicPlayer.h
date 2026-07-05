@@ -24,6 +24,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../Audio/ChannelPluginChain.h"
 #include <atomic>
 #include <vector>
 #include <functional>
@@ -78,6 +79,13 @@ public:
     void fadeIn  (float durationSeconds = 1.5f);
 
     //==========================================================================
+    // Phase B: this player's own VST3 plugin chain (the Mixer page's
+    // "Background Music" strip). Message thread only for load/unload/editor
+    // access; this class calls process() on it internally, from its own
+    // audio thread.
+    ChannelPluginChain& getPluginChain() noexcept { return pluginChain_; }
+
+    //==========================================================================
     // Callbacks (called on the message thread)
     std::function<void()> onTrackChanged;
     std::function<void()> onPlayStateChanged;
@@ -129,6 +137,9 @@ private:
     mutable std::mutex playlistMutex_;
     std::vector<juce::File> playlist_;
     double deviceSampleRate_ { 44100.0 };
+
+    ChannelPluginChain pluginChain_;
+    juce::MidiBuffer pluginMidi_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BackgroundMusicPlayer)
 };

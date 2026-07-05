@@ -101,6 +101,34 @@ public:
     std::vector<float> getSearchColumnFractions() const;
     void setSearchColumnFractions(const std::vector<float>& fractions);
 
+    //--- Mixer plugin slots (Phase B) -------------------------------------------
+    // One entry per (channelId, slotIndex) that currently has a plugin
+    // loaded. channelId is one of "music"/"vocal1"/"vocal2"/"fx"/"bgmusic"/
+    // "master"; slotIndex is 0 or 1. stateBase64 is the plugin's own
+    // AudioProcessor::getStateInformation() blob, base64-encoded.
+    struct PluginSlotState
+    {
+        juce::String channelId;
+        int slotIndex = 0;
+        // Full juce::PluginDescription::createXml() output, as a string —
+        // the authoritative source for restore (handles VST3 shell
+        // sub-plugins etc. correctly). pluginName is kept alongside purely
+        // for a human-readable fallback/log message if XML parsing ever
+        // fails on restore.
+        juce::String descriptionXml;
+        juce::String pluginName;
+        juce::String stateBase64;
+    };
+
+    std::vector<PluginSlotState> getPluginSlotStates() const;
+
+    /** Upserts by (channelId, slotIndex) — replaces any existing entry for
+        that slot. */
+    void setPluginSlotState(const PluginSlotState& state);
+
+    /** Removes the saved entry for a slot, e.g. when the user picks "None". */
+    void clearPluginSlotState(const juce::String& channelId, int slotIndex);
+
     //--- Low-level access ------------------------------------------------------
     /** Get the path of the preferences JSON file. */
     static juce::File getPreferencesFile();

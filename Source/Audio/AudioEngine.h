@@ -22,6 +22,7 @@
 
 #include <JuceHeader.h>
 #include "PitchShifter.h"
+#include "ChannelPluginChain.h"
 #include "../Services/UserPreferences.h"
 #include <array>
 #include <atomic>
@@ -99,6 +100,19 @@ public:
     // micIndex is 1 or 2. deviceChannelIndex of -1 means "not mapped" (silent).
     void setMicInputChannel(int micIndex, int deviceChannelIndex);
     int  getMicInputChannel(int micIndex) const;
+
+    //==========================================================================
+    // Per-channel VST3 plugin chains (Phase B). Each real channel — Music,
+    // Vocal 1, Vocal 2, Effects/SFX, Master — is rendered into its own
+    // scratch buffer and run through its own chain before being summed,
+    // so a plugin loaded on one channel never affects another. Message
+    // thread only for load/unload/editor access; AudioEngine itself calls
+    // process() on these from the audio thread.
+    ChannelPluginChain& getMusicPluginChain()  noexcept { return musicPluginChain_; }
+    ChannelPluginChain& getVocal1PluginChain() noexcept { return vocal1PluginChain_; }
+    ChannelPluginChain& getVocal2PluginChain() noexcept { return vocal2PluginChain_; }
+    ChannelPluginChain& getFxPluginChain()     noexcept { return fxPluginChain_; }
+    ChannelPluginChain& getMasterPluginChain() noexcept { return masterPluginChain_; }
 
     /** Names of the current device's available input channels, for a
         settings UI to populate a "Mic 1/2 Input Channel" picker with. Empty
@@ -386,6 +400,23 @@ private:
     std::atomic<bool> oneShotSfxActive { false };
 
     //==========================================================================
+    // Per-channel plugin chains (Phase B) and their scratch buffers. Sized
+    // once at prepare-time (prepareToPlay() / changeListenerCallback()'s
+    // device-change branch) and never resized inside the audio callback —
+    // getNextAudioBlock() only ever narrows them via
+    // AudioBuffer::setSize(..., avoidReallocating=true).
+    ChannelPluginChain musicPluginChain_;
+    ChannelPluginChain vocal1PluginChain_;
+    ChannelPluginChain vocal2PluginChain_;
+    ChannelPluginChain fxPluginChain_;
+    ChannelPluginChain masterPluginChain_;
+
+    juce::AudioBuffer<float> musicBuf_, vocal1Buf_, vocal2Buf_, sfxBuf_;
+    juce::MidiBuffer musicMidi_, vocal1Midi_, vocal2Midi_, sfxMidi_, masterMidi_;
+
+    void fillMicChannelBuffer(juce::AudioBuffer<float>& dest, int micIndex, int numSamples);
+
+    //==========================================================================
     // CDG
     bool cdgLoaded = false;
     std::function<void(double, const juce::String&)> cdgSyncCallback;
@@ -400,7 +431,6 @@ private:
     void persistActiveAudioDevice() const;
     void handleAudioDeviceError(const juce::String& message);
     bool mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
-    bool mixMicInput(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
     void applyReverb(juce::AudioBuffer<float>& buffer);
     void applyEcho(juce::AudioBuffer<float>& buffer);
     void applyMasterEq(juce::AudioBuffer<float>& buffer);

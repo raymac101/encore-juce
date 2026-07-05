@@ -264,6 +264,13 @@ MixerPage::MixerPage()
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7f8b9c));
     addAndMakeVisible(subtitleLabel);
 
+    bypassAllButton_.setButtonText("Bypass All Plugins");
+    bypassAllButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2735));
+    bypassAllButton_.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd3dce9));
+    bypassAllButton_.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd3dce9));
+    bypassAllButton_.setClickingTogglesState(false);
+    addAndMakeVisible(bypassAllButton_);
+
     buildStrip(stripMusic,  {}, juce::Colour(0xff2ea8ff));
     buildStrip(stripVocal1, {}, juce::Colour(0xffeaa700));
     buildStrip(stripVocal2, {}, juce::Colour(0xffd47f1a));
@@ -272,6 +279,7 @@ MixerPage::MixerPage()
     buildStrip(stripMaster, {}, juce::Colour(0xffff5d73));
 
     bindControlCallbacks();
+    refreshPluginPickers();
     updateAllText();
     pushStateFromEngine();
     startTimerHz(30);
@@ -281,12 +289,29 @@ void MixerPage::setAudioEngine(AudioEngine* engine)
 {
     audioEngine = engine;
     pushStateFromEngine();
+
+    if (! restoredAudioEngineSlots_)
+    {
+        restoredAudioEngineSlots_ = true;
+        for (int stripIdx : { stripMusic, stripVocal1, stripVocal2, stripFx, stripMaster })
+            restorePluginSlotsForChannel(stripIdx);
+    }
+
+    refreshPluginPickers();
 }
 
 void MixerPage::setBackgroundMusicPlayer(BackgroundMusicPlayer* player)
 {
     bgPlayer = player;
     pushStateFromEngine();
+
+    if (! restoredBgMusicSlots_)
+    {
+        restoredBgMusicSlots_ = true;
+        restorePluginSlotsForChannel(stripPlugin);
+    }
+
+    refreshPluginPickers();
 }
 
 void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour accent)
@@ -359,6 +384,31 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         addAndMakeVisible(*b);
         b->setVisible(index == stripMaster);
     }
+
+    sw.pluginSlotA = std::make_unique<juce::ComboBox>();
+    sw.pluginSlotB = std::make_unique<juce::ComboBox>();
+    for (auto* cb : { sw.pluginSlotA.get(), sw.pluginSlotB.get() })
+    {
+        cb->addItem("None", 1);
+        cb->setSelectedId(1, juce::dontSendNotification);
+        cb->setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff141a24));
+        cb->setColour(juce::ComboBox::textColourId, juce::Colour(0xffd3dce9));
+        cb->setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff2a3445));
+        cb->setColour(juce::ComboBox::arrowColourId, accent);
+        addAndMakeVisible(*cb);
+    }
+
+    sw.pluginSlotAEdit = std::make_unique<juce::TextButton>("...");
+    sw.pluginSlotBEdit = std::make_unique<juce::TextButton>("...");
+    for (auto* b : { sw.pluginSlotAEdit.get(), sw.pluginSlotBEdit.get() })
+    {
+        b->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2735));
+        b->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd3dce9));
+        b->setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd3dce9));
+        b->setClickingTogglesState(false);
+        b->setEnabled(false);
+        addAndMakeVisible(*b);
+    }
 }
 
 void MixerPage::updateAllText()
@@ -396,8 +446,10 @@ void MixerPage::updateAllText()
 
 void MixerPage::bindControlCallbacks()
 {
-    for (auto& sw : strips)
+    for (int stripIdx = 0; stripIdx < stripCount; ++stripIdx)
     {
+        auto& sw = strips[(size_t) stripIdx];
+
         sw.fader->onValueChange = [this] { pushStateToEngine(); };
         sw.eqLow->onValueChange = [this] { pushStateToEngine(); };
         sw.eqMid->onValueChange = [this] { pushStateToEngine(); };
@@ -406,7 +458,18 @@ void MixerPage::bindControlCallbacks()
         sw.insertB->onChange = [this] { pushStateToEngine(); };
         sw.mute->onClick = [this] { pushStateToEngine(); };
         sw.solo->onClick = [this] { pushStateToEngine(); };
+
+        sw.pluginSlotA->onChange = [this, stripIdx] { onPluginSlotSelected(stripIdx, 0); };
+        sw.pluginSlotB->onChange = [this, stripIdx] { onPluginSlotSelected(stripIdx, 1); };
+        sw.pluginSlotAEdit->onClick = [this, stripIdx] { onPluginEditClicked(stripIdx, 0); };
+        sw.pluginSlotBEdit->onClick = [this, stripIdx] { onPluginEditClicked(stripIdx, 1); };
     }
+
+    bypassAllButton_.onClick = [this]
+    {
+        allPluginsBypassed_ = ! allPluginsBypassed_;
+        setAllPluginsBypassed(allPluginsBypassed_);
+    };
 
     auto& master = strips[stripMaster];
     if (master.pluginAButton)
@@ -547,6 +610,263 @@ void MixerPage::showLimiterDialog(juce::Component& anchor)
                                            nullptr);
 }
 
+ChannelPluginChain* MixerPage::getPluginChainForStrip(int stripIndex) const
+{
+    switch (stripIndex)
+    {
+        case stripMusic:  return audioEngine != nullptr ? &audioEngine->getMusicPluginChain()  : nullptr;
+        case stripVocal1: return audioEngine != nullptr ? &audioEngine->getVocal1PluginChain() : nullptr;
+        case stripVocal2: return audioEngine != nullptr ? &audioEngine->getVocal2PluginChain() : nullptr;
+        case stripFx:     return audioEngine != nullptr ? &audioEngine->getFxPluginChain()     : nullptr;
+        case stripPlugin: return bgPlayer != nullptr ? &bgPlayer->getPluginChain() : nullptr;
+        case stripMaster: return audioEngine != nullptr ? &audioEngine->getMasterPluginChain() : nullptr;
+        default:          return nullptr;
+    }
+}
+
+juce::String MixerPage::getChannelIdForStrip(int stripIndex) const
+{
+    switch (stripIndex)
+    {
+        case stripMusic:  return "music";
+        case stripVocal1: return "vocal1";
+        case stripVocal2: return "vocal2";
+        case stripFx:     return "fx";
+        case stripPlugin: return "bgmusic";
+        case stripMaster: return "master";
+        default:          return {};
+    }
+}
+
+void MixerPage::refreshPluginPickers()
+{
+    cachedPluginList_.clear();
+    for (const auto& d : PluginHostService::getInstance().getAvailablePlugins())
+        cachedPluginList_.push_back(d);
+
+    for (int i = 0; i < stripCount; ++i)
+    {
+        auto& sw = strips[(size_t) i];
+        auto* chain = getPluginChainForStrip(i);
+
+        for (int slotIdx = 0; slotIdx < ChannelPluginChain::numSlots; ++slotIdx)
+        {
+            auto& combo = (slotIdx == 0 ? *sw.pluginSlotA : *sw.pluginSlotB);
+            auto& editButton = (slotIdx == 0 ? *sw.pluginSlotAEdit : *sw.pluginSlotBEdit);
+
+            combo.clear(juce::dontSendNotification);
+            combo.addItem("None", 1);
+            for (int p = 0; p < (int) cachedPluginList_.size(); ++p)
+                combo.addItem(cachedPluginList_[(size_t) p].name, p + 2);
+
+            int foundIndex = -1;
+            if (chain != nullptr && chain->hasPluginInSlot(slotIdx))
+            {
+                const auto currentId = chain->getDescriptionForSlot(slotIdx).createIdentifierString();
+                for (int p = 0; p < (int) cachedPluginList_.size(); ++p)
+                {
+                    if (cachedPluginList_[(size_t) p].createIdentifierString() == currentId)
+                    {
+                        foundIndex = p;
+                        break;
+                    }
+                }
+            }
+
+            if (foundIndex >= 0)
+            {
+                combo.setSelectedId(foundIndex + 2, juce::dontSendNotification);
+                editButton.setEnabled(true);
+            }
+            else
+            {
+                combo.setSelectedId(1, juce::dontSendNotification);
+                editButton.setEnabled(false);
+            }
+        }
+    }
+}
+
+void MixerPage::onPluginSlotSelected(int stripIndex, int slotIndex)
+{
+    auto* chain = getPluginChainForStrip(stripIndex);
+    if (chain == nullptr)
+        return;
+
+    auto& sw = strips[(size_t) stripIndex];
+    auto& combo = (slotIndex == 0 ? *sw.pluginSlotA : *sw.pluginSlotB);
+    auto& editButton = (slotIndex == 0 ? *sw.pluginSlotAEdit : *sw.pluginSlotBEdit);
+    const int selectedId = combo.getSelectedId();
+
+    if (selectedId <= 1)
+    {
+        chain->unloadPlugin(slotIndex);
+        UserPreferences::getInstance().clearPluginSlotState(getChannelIdForStrip(stripIndex), slotIndex);
+        editButton.setEnabled(false);
+        return;
+    }
+
+    const int descIndex = selectedId - 2;
+    if (descIndex < 0 || descIndex >= (int) cachedPluginList_.size())
+        return;
+
+    const auto desc = cachedPluginList_[(size_t) descIndex];
+    juce::Component::SafePointer<MixerPage> safe(this);
+
+    chain->loadPlugin(slotIndex, desc, PluginHostService::getInstance().getFormatManager(),
+        [safe, stripIndex, slotIndex, desc](bool success, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            auto& sw2 = safe->strips[(size_t) stripIndex];
+            auto& editButton2 = (slotIndex == 0 ? *sw2.pluginSlotAEdit : *sw2.pluginSlotBEdit);
+
+            if (success)
+            {
+                editButton2.setEnabled(true);
+                safe->persistPluginSlotState(stripIndex, slotIndex);
+            }
+            else
+            {
+                editButton2.setEnabled(false);
+
+                // Selection failed to load — reset the combo to "None" and tell the user.
+                auto& combo2 = (slotIndex == 0 ? *sw2.pluginSlotA : *sw2.pluginSlotB);
+                combo2.setSelectedId(1, juce::dontSendNotification);
+
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Plugin Failed to Load", error);
+            }
+        });
+}
+
+void MixerPage::onPluginEditClicked(int stripIndex, int slotIndex)
+{
+    auto* chain = getPluginChainForStrip(stripIndex);
+    if (chain == nullptr)
+        return;
+
+    auto* editor = chain->getEditorForSlot(slotIndex);
+    if (editor == nullptr)
+        return;
+
+    auto& windowSlot = (slotIndex == 0 ? editorWindowA_[(size_t) stripIndex] : editorWindowB_[(size_t) stripIndex]);
+    if (windowSlot != nullptr)
+    {
+        windowSlot->toFront(true);
+        return;
+    }
+
+    class PluginEditorWindow final : public juce::DialogWindow
+    {
+    public:
+        std::function<void()> onCloseRequested;
+
+        PluginEditorWindow(const juce::String& name, juce::Component* editorComp)
+            : DialogWindow(name, juce::Colour(0xff1a2230), true, true)
+        {
+            setUsingNativeTitleBar(true);
+            setContentNonOwned(editorComp, true);
+            setResizable(true, true);
+            centreWithSize(editorComp->getWidth(), editorComp->getHeight());
+            setVisible(true);
+        }
+
+        void closeButtonPressed() override
+        {
+            if (onCloseRequested)
+                onCloseRequested();
+        }
+    };
+
+    auto window = std::make_unique<PluginEditorWindow>(chain->getDescriptionForSlot(slotIndex).name, editor);
+    juce::Component::SafePointer<MixerPage> safe(this);
+    window->onCloseRequested = [safe, stripIndex, slotIndex]()
+    {
+        if (safe == nullptr)
+            return;
+
+        safe->persistPluginSlotState(stripIndex, slotIndex);   // commit any tweaks made via the editor
+        auto& slot = (slotIndex == 0 ? safe->editorWindowA_[(size_t) stripIndex]
+                                      : safe->editorWindowB_[(size_t) stripIndex]);
+        slot.reset();   // deletes the DialogWindow; setContentNonOwned means the plugin's editor Component itself is NOT deleted here
+    };
+
+    windowSlot = std::move(window);
+}
+
+void MixerPage::persistPluginSlotState(int stripIndex, int slotIndex)
+{
+    auto* chain = getPluginChainForStrip(stripIndex);
+    if (chain == nullptr || ! chain->hasPluginInSlot(slotIndex))
+        return;
+
+    const auto desc = chain->getDescriptionForSlot(slotIndex);
+    const auto stateBlock = chain->getStateForSlot(slotIndex);
+
+    UserPreferences::PluginSlotState s;
+    s.channelId = getChannelIdForStrip(stripIndex);
+    s.slotIndex = slotIndex;
+    if (auto xml = desc.createXml())
+        s.descriptionXml = xml->toString();
+    s.pluginName = desc.name;
+    s.stateBase64 = juce::Base64::toBase64(stateBlock.getData(), stateBlock.getSize());
+
+    UserPreferences::getInstance().setPluginSlotState(s);
+}
+
+void MixerPage::restorePluginSlotsForChannel(int stripIndex)
+{
+    auto* chain = getPluginChainForStrip(stripIndex);
+    if (chain == nullptr)
+        return;
+
+    const auto channelId = getChannelIdForStrip(stripIndex);
+
+    for (const auto& saved : UserPreferences::getInstance().getPluginSlotStates())
+    {
+        if (saved.channelId != channelId)
+            continue;
+        if (saved.slotIndex < 0 || saved.slotIndex >= ChannelPluginChain::numSlots)
+            continue;
+
+        juce::PluginDescription desc;
+        auto xml = juce::XmlDocument::parse(saved.descriptionXml);
+        if (xml == nullptr || ! desc.loadFromXml(*xml))
+            continue; // couldn't parse — skip this slot rather than guessing
+
+        juce::MemoryOutputStream decoded;
+        juce::Base64::convertFromBase64(decoded, saved.stateBase64);
+        juce::MemoryBlock stateBlock = decoded.getMemoryBlock();
+
+        const int slotIndex = saved.slotIndex;
+        juce::Component::SafePointer<MixerPage> safe(this);
+        chain->loadPlugin(slotIndex, desc, PluginHostService::getInstance().getFormatManager(),
+            [safe, stripIndex, slotIndex](bool success, juce::String /*error*/)
+            {
+                if (safe == nullptr || ! success)
+                    return;
+
+                auto& sw = safe->strips[(size_t) stripIndex];
+                auto& editButton = (slotIndex == 0 ? *sw.pluginSlotAEdit : *sw.pluginSlotBEdit);
+                editButton.setEnabled(true);
+            },
+            &stateBlock);
+    }
+}
+
+void MixerPage::setAllPluginsBypassed(bool shouldBypass)
+{
+    for (int i = 0; i < stripCount; ++i)
+        if (auto* chain = getPluginChainForStrip(i))
+            chain->setBypassed(shouldBypass);
+
+    bypassAllButton_.setButtonText(shouldBypass ? "PLUGINS BYPASSED" : "Bypass All Plugins");
+    bypassAllButton_.setColour(juce::TextButton::buttonColourId,
+                               shouldBypass ? juce::Colour(0xffb23a3a) : juce::Colour(0xff1c2735));
+}
+
 void MixerPage::paint(juce::Graphics& g)
 {
     auto area = getLocalBounds();
@@ -612,6 +932,8 @@ void MixerPage::resized()
     auto area = getLocalBounds().reduced(14);
 
     auto head = area.removeFromTop(68);
+    auto bypassArea = head.removeFromRight(180).removeFromTop(30);
+    bypassAllButton_.setBounds(bypassArea.reduced(4, 2));
     titleLabel.setBounds(head.removeFromTop(30));
     subtitleLabel.setBounds(head.removeFromTop(22));
 
@@ -629,6 +951,20 @@ void MixerPage::resized()
         auto insertsArea = body.removeFromBottom(62);
         sw.insertA->setBounds(insertsArea.removeFromTop(28));
         sw.insertB->setBounds(insertsArea.removeFromTop(28));
+
+        // Real VST3 plugin-chain slots — unconditional, shown on every strip
+        // including Master (unlike insertA/insertB and pluginAButton/B above).
+        auto pluginSlotArea = body.removeFromBottom(62);
+        auto slotRowA = pluginSlotArea.removeFromTop(28);
+        sw.pluginSlotAEdit->setBounds(slotRowA.removeFromRight(36));
+        slotRowA.removeFromRight(4);
+        sw.pluginSlotA->setBounds(slotRowA);
+
+        pluginSlotArea.removeFromTop(6);
+        auto slotRowB = pluginSlotArea.removeFromTop(28);
+        sw.pluginSlotBEdit->setBounds(slotRowB.removeFromRight(36));
+        slotRowB.removeFromRight(4);
+        sw.pluginSlotB->setBounds(slotRowB);
 
         if (i == stripMaster)
         {

@@ -667,6 +667,19 @@ void AudioEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
     masterEqState.dirty = true;
     masterDynamicsState.sampleRate = sampleRate;
     masterDynamicsState.dirty = true;
+
+    // Per-channel plugin-chain scratch buffers — sized once here so
+    // getNextAudioBlock() never allocates on the audio thread.
+    musicBuf_.setSize(2, samplesPerBlockExpected, false, false, true);
+    vocal1Buf_.setSize(2, samplesPerBlockExpected, false, false, true);
+    vocal2Buf_.setSize(2, samplesPerBlockExpected, false, false, true);
+    sfxBuf_.setSize(2, samplesPerBlockExpected, false, false, true);
+
+    musicPluginChain_.prepare(sampleRate, samplesPerBlockExpected, 2);
+    vocal1PluginChain_.prepare(sampleRate, samplesPerBlockExpected, 2);
+    vocal2PluginChain_.prepare(sampleRate, samplesPerBlockExpected, 2);
+    fxPluginChain_.prepare(sampleRate, samplesPerBlockExpected, 2);
+    masterPluginChain_.prepare(sampleRate, samplesPerBlockExpected, 2);
 }
 
 void AudioEngine::releaseResources()
@@ -680,45 +693,70 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     bufferToFill.clearActiveBufferRegion();
 
     const bool programActive = (resamplingSource != nullptr && playing.load());
+    const bool micActive     = micCaptureRegistered.load();
     juce::AudioBuffer<float>& buf = *bufferToFill.buffer;
+    const int numSamples  = bufferToFill.numSamples;
+    const int numChannels = juce::jmin(buf.getNumChannels(), 2);
+
+    // Each real channel — Music, Vocal 1, Vocal 2, Effects/SFX — is
+    // rendered into its own scratch buffer and run through its own plugin
+    // chain before being summed into the master buffer below. This is what
+    // makes per-channel plugins actually isolated (e.g. a Vocal-only reverb
+    // never touches the backing track), rather than all channels sharing
+    // one buffer. Capacity was fixed at prepare-time; setSize here with
+    // avoidReallocating=true only narrows the logical size, no allocation.
+    musicBuf_.setSize(numChannels, numSamples, false, false, true);
+    musicBuf_.clear();
 
     if (programActive)
     {
-        // 1. Pull from the source chain.
-        resamplingSource->getNextAudioBlock(bufferToFill);
+        // 1. Pull from the source chain straight into Music's scratch buffer.
+        juce::AudioSourceChannelInfo musicInfo(&musicBuf_, 0, numSamples);
+        resamplingSource->getNextAudioBlock(musicInfo);
 
         // 2. Pitch shift + time stretch via RubberBand.
-        pitchShifter.process(buf);
+        pitchShifter.process(musicBuf_);
 
-        // 3. Apply per-channel style gains (current engine has one program source,
-        // so we treat vocal volume as a trim influencing FX return feel).
-        const float gain = masterVolume.load() * musicVolume.load();
-        buf.applyGain(gain);
+        // 3. Music's own volume (Master's contribution is applied once,
+        // uniformly, when all channels are summed below).
+        musicBuf_.applyGain(musicVolume.load());
 
-        // 4. Master EQ.
-        applyMasterEq(buf);
-
-        // 5. Reverb.
-        applyReverb(buf);
-
-        // 6. Echo.
-        applyEcho(buf);
-
-        // 7. Insert saturation on the post-FX bus.
-        applyMasterInsert(buf);
+        // 4. Music's plugin chain.
+        musicMidi_.clear();
+        musicPluginChain_.process(musicBuf_, musicMidi_);
     }
 
-    const bool sfxActive = mixOneShotSfx(buf, bufferToFill.startSample, bufferToFill.numSamples);
+    // Vocal 1 / Vocal 2 — raw mic samples + each mic's own gain, no
+    // pitch-shift, each through its own plugin chain.
+    vocal1Buf_.setSize(numChannels, numSamples, false, false, true);
+    vocal1Buf_.clear();
+    vocal2Buf_.setSize(numChannels, numSamples, false, false, true);
+    vocal2Buf_.clear();
 
-    // Live mic input (Vocal 1 / Vocal 2) — mixed dry, no pitch-shift/reverb/
-    // echo, straight into the master buffer, the same way SFX mixes in.
-    mixMicInput(buf, bufferToFill.startSample, bufferToFill.numSamples);
+    if (micActive)
+    {
+        fillMicChannelBuffer(vocal1Buf_, 1, numSamples);
+        fillMicChannelBuffer(vocal2Buf_, 2, numSamples);
+    }
 
-    // Live mic monitoring must keep running through master dynamics
+    vocal1Midi_.clear();
+    vocal1PluginChain_.process(vocal1Buf_, vocal1Midi_);
+    vocal2Midi_.clear();
+    vocal2PluginChain_.process(vocal2Buf_, vocal2Midi_);
+
+    // Effects / SFX — decoded one-shot sound into its own scratch buffer
+    // (previously mixed directly into the shared program buffer).
+    sfxBuf_.setSize(numChannels, numSamples, false, false, true);
+    sfxBuf_.clear();
+    const bool sfxActive = mixOneShotSfx(sfxBuf_, 0, numSamples);
+    sfxMidi_.clear();
+    fxPluginChain_.process(sfxBuf_, sfxMidi_);
+
+    // Live mic monitoring must keep running through the master stages below
     // whenever mic capture is registered, even with no song loaded and no
     // SFX playing — a KJ needs to be able to test/use mics between songs,
     // not only while a song is playing.
-    if (! programActive && ! sfxActive && ! micCaptureRegistered.load())
+    if (! programActive && ! sfxActive && ! micActive)
     {
         currentAudioLevel = 0.0f;
         masterCompOutputMeter = 0.0f;
@@ -726,10 +764,38 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
         return;
     }
 
-    // 8. Always-on master compressor + limiter for song-to-song consistency.
+    // Sum all four channels into the master buffer. Master's own volume is
+    // applied uniformly here — this is what makes Master "the overall
+    // volume of everything combined."
+    const float master = masterVolume.load();
+    buf.clear();
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        if (programActive)
+            buf.addFrom(ch, bufferToFill.startSample, musicBuf_, ch, 0, numSamples, master);
+        buf.addFrom(ch, bufferToFill.startSample, vocal1Buf_, ch, 0, numSamples, master);
+        buf.addFrom(ch, bufferToFill.startSample, vocal2Buf_, ch, 0, numSamples, master);
+        buf.addFrom(ch, bufferToFill.startSample, sfxBuf_,    ch, 0, numSamples, master);
+    }
+
+    // Master EQ / reverb / echo / insert saturation — existing, unchanged
+    // master-bus processing, now applied to the combined signal.
+    applyMasterEq(buf);
+    applyReverb(buf);
+    applyEcho(buf);
+    applyMasterInsert(buf);
+
+    // Master's own optional plugin chain (Phase B) — deliberately placed
+    // *before* the always-on compressor/limiter below, so the safety
+    // limiter always has final say over the output regardless of what
+    // third-party plugin is loaded here.
+    masterMidi_.clear();
+    masterPluginChain_.process(buf, masterMidi_);
+
+    // Always-on master compressor + limiter for song-to-song consistency.
     applyMasterDynamics(buf);
 
-    // 9. Update position and VU level.
+    // Update position and VU level.
     if (programActive)
         updatePlaybackPosition();
 
@@ -738,7 +804,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
 
     currentAudioLevel = buf.getRMSLevel(0, bufferToFill.startSample, bufferToFill.numSamples);
 
-    // 10. CDG sync callback.
+    // CDG sync callback.
     if (programActive && cdgLoaded && cdgSyncCallback)
         cdgSyncCallback(currentPosition.load(), {});
 }
@@ -763,11 +829,10 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
     const int srcChannels = juce::jmax(1, oneShotSfxBuffer.getNumChannels());
     const int dstChannels = juce::jmin(buffer.getNumChannels(), 2);
     // Read live so the Mixer page's Effects fader/mute/solo affects a sound
-    // that's already playing, not just future triggers. Combined with
-    // masterVolume so Master acts as the overall level for every track,
-    // matching how the karaoke program buffer combines masterVolume with
-    // musicVolume above.
-    const float gain = masterVolume.load() * sfxVolume.load();
+    // that's already playing, not just future triggers. Master's own
+    // contribution is applied once, uniformly, when channels are summed in
+    // getNextAudioBlock — this is the Effects channel's own level only.
+    const float gain = sfxVolume.load();
 
     for (int ch = 0; ch < dstChannels; ++ch)
     {
@@ -790,40 +855,26 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
     return true;
 }
 
-bool AudioEngine::mixMicInput(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
+void AudioEngine::fillMicChannelBuffer(juce::AudioBuffer<float>& dest, int micIndex, int numSamples)
 {
-    if (! micCaptureRegistered.load() || numSamples <= 0)
-        return false;
-
     const int available = micCapture.getCapturedSamples();
     if (available <= 0)
-        return false;
+        return;
+
+    const float gain = (micIndex == 1 ? vocal1Gain.load() : vocal2Gain.load());
+    if (gain <= 0.0f)
+        return;
 
     const int toMix = juce::jmin(numSamples, available);
-    const int dstChannels = juce::jmin(buffer.getNumChannels(), 2);
-    const float master = masterVolume.load();
-    const float gains[2] = { master * vocal1Gain.load(), master * vocal2Gain.load() };
+    const int dstChannels = juce::jmin(dest.getNumChannels(), 2);
+    const float* src = micCapture.getChannelData(micIndex - 1);
 
-    bool mixedAny = false;
-
-    for (int mic = 0; mic < 2; ++mic)
+    for (int ch = 0; ch < dstChannels; ++ch)
     {
-        if (gains[mic] <= 0.0f)
-            continue;
-
-        const float* src = micCapture.getChannelData(mic);
-
-        for (int ch = 0; ch < dstChannels; ++ch)
-        {
-            auto* dst = buffer.getWritePointer(ch, startSample);
-            for (int i = 0; i < toMix; ++i)
-                dst[i] += src[i] * gains[mic];
-        }
-
-        mixedAny = true;
+        auto* d = dest.getWritePointer(ch);
+        for (int i = 0; i < toMix; ++i)
+            d[i] += src[i] * gain;
     }
-
-    return mixedAny;
 }
 
 //==============================================================================
@@ -1188,6 +1239,17 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
 
             masterDynamicsState.sampleRate = sr;
             masterDynamicsState.dirty = true;
+
+            musicBuf_.setSize(2, blockSize, false, false, true);
+            vocal1Buf_.setSize(2, blockSize, false, false, true);
+            vocal2Buf_.setSize(2, blockSize, false, false, true);
+            sfxBuf_.setSize(2, blockSize, false, false, true);
+
+            musicPluginChain_.prepare(sr, blockSize, 2);
+            vocal1PluginChain_.prepare(sr, blockSize, 2);
+            vocal2PluginChain_.prepare(sr, blockSize, 2);
+            fxPluginChain_.prepare(sr, blockSize, 2);
+            masterPluginChain_.prepare(sr, blockSize, 2);
 
             // Re-check mic capture capability — the device may have changed
             // (e.g. via a Settings device picker) to one with or without

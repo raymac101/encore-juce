@@ -388,3 +388,80 @@ void UserPreferences::setSearchColumnFractions(const std::vector<float>& fractio
     asObj(root_)->setProperty("searchColumnFractions", arr);
     save();
 }
+
+//==============================================================================
+std::vector<UserPreferences::PluginSlotState> UserPreferences::getPluginSlotStates() const
+{
+    const juce::ScopedLock sl(lock_);
+    std::vector<PluginSlotState> out;
+
+    auto arr = root_.getProperty("pluginSlots", juce::var());
+    if (! arr.isArray())
+        return out;
+
+    for (int i = 0; i < arr.size(); ++i)
+    {
+        auto entry = arr[i];
+        PluginSlotState s;
+        s.channelId             = entry.getProperty("channelId", "").toString();
+        s.slotIndex             = (int) entry.getProperty("slotIndex", 0);
+        s.descriptionXml        = entry.getProperty("descriptionXml", "").toString();
+        s.pluginName            = entry.getProperty("pluginName", "").toString();
+        s.stateBase64           = entry.getProperty("stateBase64", "").toString();
+
+        if (s.channelId.isNotEmpty())
+            out.push_back(std::move(s));
+    }
+
+    return out;
+}
+
+void UserPreferences::setPluginSlotState(const PluginSlotState& state)
+{
+    const juce::ScopedLock sl(lock_);
+
+    juce::Array<juce::var> arr;
+    auto existing = root_.getProperty("pluginSlots", juce::var());
+    if (existing.isArray())
+        for (int i = 0; i < existing.size(); ++i)
+        {
+            auto entry = existing[i];
+            const bool sameSlot = entry.getProperty("channelId", "").toString() == state.channelId
+                               && (int) entry.getProperty("slotIndex", 0) == state.slotIndex;
+            if (! sameSlot)
+                arr.add(entry);
+        }
+
+    juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+    obj->setProperty("channelId", state.channelId);
+    obj->setProperty("slotIndex", state.slotIndex);
+    obj->setProperty("descriptionXml", state.descriptionXml);
+    obj->setProperty("pluginName", state.pluginName);
+    obj->setProperty("stateBase64", state.stateBase64);
+    arr.add(juce::var(obj.get()));
+
+    asObj(root_)->setProperty("pluginSlots", arr);
+    save();
+}
+
+void UserPreferences::clearPluginSlotState(const juce::String& channelId, int slotIndex)
+{
+    const juce::ScopedLock sl(lock_);
+
+    auto existing = root_.getProperty("pluginSlots", juce::var());
+    if (! existing.isArray())
+        return;
+
+    juce::Array<juce::var> arr;
+    for (int i = 0; i < existing.size(); ++i)
+    {
+        auto entry = existing[i];
+        const bool sameSlot = entry.getProperty("channelId", "").toString() == channelId
+                           && (int) entry.getProperty("slotIndex", 0) == slotIndex;
+        if (! sameSlot)
+            arr.add(entry);
+    }
+
+    asObj(root_)->setProperty("pluginSlots", arr);
+    save();
+}

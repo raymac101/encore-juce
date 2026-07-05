@@ -364,6 +364,8 @@ void BackgroundMusicPlayer::prepareToPlay (int samplesPerBlockExpected, double s
     std::lock_guard<std::mutex> lock (chainMutex_);
     if (resamplingSource_)
         resamplingSource_->prepareToPlay (samplesPerBlockExpected, sampleRate);
+
+    pluginChain_.prepare (sampleRate, samplesPerBlockExpected, 2);
 }
 
 void BackgroundMusicPlayer::releaseResources()
@@ -425,6 +427,13 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
     }
 
     currentGain_ = gain;
+
+    // Phase B: this player's own plugin chain, operating on exactly the
+    // active sub-region of the shared device buffer (a non-owning view —
+    // no allocation).
+    juce::AudioBuffer<float> activeView (buf.getArrayOfWritePointers(), channels, info.startSample, numSamples);
+    pluginMidi_.clear();
+    pluginChain_.process (activeView, pluginMidi_);
 
     // Update position.
     if (transportSource_)
