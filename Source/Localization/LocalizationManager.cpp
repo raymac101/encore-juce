@@ -532,8 +532,10 @@ void LocalizationManager::loadFallbackTranslations()
     translations["mixer.subtitle"] = "Channel strips, EQ, inserts, and master bus";
     translations["mixer.channel.music"] = "MUSIC";
     translations["mixer.channel.vocal"] = "VOCAL";
-    translations["mixer.channel.fx"] = "FX BUS";
-    translations["mixer.channel.inserts"] = "INSERTS";
+    translations["mixer.channel.vocal1"] = "VOCAL 1";
+    translations["mixer.channel.vocal2"] = "VOCAL 2";
+    translations["mixer.channel.fx"] = "EFFECTS";
+    translations["mixer.channel.inserts"] = "BACKGROUND MUSIC";
     translations["mixer.channel.master"] = "MASTER";
     translations["mixer.insert.none"] = "None";
     translations["mixer.insert.compressor"] = "Compressor";

@@ -18,6 +18,7 @@
 #include <JuceHeader.h>
 #include "../Localization/LocalizationManager.h"
 #include "../Models/VenueItem.h"
+#include "../Audio/AudioEngine.h"
 
 // Forward-declared internal panel (defined in SettingsPage.cpp)
 class SettingsContentPanel;
@@ -158,6 +159,11 @@ public:
 
     /** Replace the pending invitation list displayed in User Management. */
     void setPendingInvitations(const std::vector<PendingInvitation>& invitations);
+
+    //==========================================================================
+    /** Wire the live AudioEngine so the Audio Devices section can present the
+        device selector and mic channel-mapping controls. */
+    void setAudioEngine(AudioEngine* engine);
 
 private:
     //==========================================================================

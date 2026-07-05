@@ -84,6 +84,36 @@ void AudioEngine::initialize()
     if (! setupAudioDevice())
         return;
 
+    // Only actually register mic capture if the feature is enabled AND the
+    // device that ended up open genuinely exposes at least one input
+    // channel — a mic-input request can silently succeed with fewer
+    // channels than asked for, so check the real result rather than trust
+    // the request (Risk #1/#3: never assume, always verify capability).
+    const bool wantMicInput = UserPreferences::getInstance().getLiveVocalInputEnabled();
+    bool deviceHasInput = false;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        deviceHasInput = device->getActiveInputChannels().countNumberOfSetBits() > 0;
+
+    if (wantMicInput && deviceHasInput)
+    {
+        micCapture.micChannelIndex[0] = UserPreferences::getInstance().getMicInputChannel(1);
+        micCapture.micChannelIndex[1] = UserPreferences::getInstance().getMicInputChannel(2);
+        vocal1Gain = UserPreferences::getInstance().getMicGain(1);
+        vocal2Gain = UserPreferences::getInstance().getMicGain(2);
+
+        // Registered *before* audioSourcePlayer so it captures first within
+        // the same audio-thread device callback invocation.
+        deviceManager.addAudioCallback(&micCapture);
+        micCaptureRegistered = true;
+        DBG("[AudioStartup] Live vocal input enabled and device has input channels — mic capture registered.");
+    }
+    else
+    {
+        micCaptureRegistered = false;
+        if (wantMicInput)
+            DBG("[AudioStartup] Live vocal input enabled but the current device has no input channels — mic capture disabled for this session.");
+    }
+
     audioSourcePlayer = std::make_unique<juce::AudioSourcePlayer>();
     deviceManager.addAudioCallback(audioSourcePlayer.get());
     audioSourcePlayer->setSource(this);
@@ -107,6 +137,9 @@ void AudioEngine::shutdown()
         deviceManager.removeAudioCallback(audioSourcePlayer.get());
         audioSourcePlayer.reset();
     }
+
+    if (micCaptureRegistered.exchange(false))
+        deviceManager.removeAudioCallback(&micCapture);
 
     deviceManager.closeAudioDevice();
 
@@ -142,7 +175,22 @@ bool AudioEngine::setupAudioDevice()
         DBG("[AudioStartup] No saved output device. Falling back to Windows default device.");
     }
 
-    auto error = deviceManager.initialise(0, 2, nullptr, true, {}, preferredSetupPtr);
+    // Only request input channels when live vocal input is enabled — with
+    // the feature flag off, this is byte-for-byte the original 0-input call
+    // (Risk #1: existing users see zero behaviour change).
+    const bool wantMicInput = UserPreferences::getInstance().getLiveVocalInputEnabled();
+    const int numInputChannelsRequested = wantMicInput ? 2 : 0;
+
+    auto error = deviceManager.initialise(numInputChannelsRequested, 2, nullptr, true, {}, preferredSetupPtr);
+
+    // A mic-input request failing must never take down playback itself —
+    // fall back to the plain output-only setup automatically.
+    if (error.isNotEmpty() && numInputChannelsRequested > 0)
+    {
+        DBG("[AudioStartup] Input-channel init failed (" + error + "); retrying output-only.");
+        error = deviceManager.initialise(0, 2, nullptr, true, {}, preferredSetupPtr);
+    }
+
     const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
 
     if (error.isNotEmpty())
@@ -408,8 +456,46 @@ void AudioEngine::setMasterVolume(float v) { masterVolume = juce::jlimit(0.0f, 1
 void AudioEngine::setMusicVolume(float v)  { musicVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalVolume(float v)  { vocalVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalEffectsLevel(float l) { vocalEffectsLevel = juce::jlimit(0.0f, 1.0f, l); }
+void AudioEngine::setSfxVolume(float v)    { sfxVolume    = juce::jlimit(0.0f, 1.0f, v); }
 
-bool AudioEngine::triggerOneShotSfx(const juce::File& audioFile, float gain)
+void AudioEngine::setVocal1Gain(float gain)
+{
+    vocal1Gain = juce::jlimit(0.0f, 1.0f, gain);
+    UserPreferences::getInstance().setMicGain(1, vocal1Gain.load());
+}
+
+void AudioEngine::setVocal2Gain(float gain)
+{
+    vocal2Gain = juce::jlimit(0.0f, 1.0f, gain);
+    UserPreferences::getInstance().setMicGain(2, vocal2Gain.load());
+}
+
+void AudioEngine::setMicInputChannel(int micIndex, int deviceChannelIndex)
+{
+    if (micIndex != 1 && micIndex != 2)
+        return;
+
+    micCapture.micChannelIndex[micIndex - 1] = deviceChannelIndex;
+    UserPreferences::getInstance().setMicInputChannel(micIndex, deviceChannelIndex);
+}
+
+int AudioEngine::getMicInputChannel(int micIndex) const
+{
+    if (micIndex != 1 && micIndex != 2)
+        return -1;
+
+    return micCapture.micChannelIndex[micIndex - 1].load();
+}
+
+juce::StringArray AudioEngine::getAvailableInputChannelNames() const
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        return device->getInputChannelNames();
+
+    return {};
+}
+
+bool AudioEngine::triggerOneShotSfx(const juce::File& audioFile)
 {
     if (! initialized || ! audioFile.existsAsFile())
         return false;
@@ -431,7 +517,6 @@ bool AudioEngine::triggerOneShotSfx(const juce::File& audioFile, float gain)
         const std::lock_guard<std::mutex> lock(sfxMutex);
         oneShotSfxBuffer = std::move(decoded);
         oneShotSfxReadPos = 0;
-        oneShotSfxGain = juce::jlimit(0.0f, 1.0f, gain);
         oneShotSfxActive = true;
     }
 
@@ -624,7 +709,16 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     }
 
     const bool sfxActive = mixOneShotSfx(buf, bufferToFill.startSample, bufferToFill.numSamples);
-    if (! programActive && ! sfxActive)
+
+    // Live mic input (Vocal 1 / Vocal 2) — mixed dry, no pitch-shift/reverb/
+    // echo, straight into the master buffer, the same way SFX mixes in.
+    mixMicInput(buf, bufferToFill.startSample, bufferToFill.numSamples);
+
+    // Live mic monitoring must keep running through master dynamics
+    // whenever mic capture is registered, even with no song loaded and no
+    // SFX playing — a KJ needs to be able to test/use mics between songs,
+    // not only while a song is playing.
+    if (! programActive && ! sfxActive && ! micCaptureRegistered.load())
     {
         currentAudioLevel = 0.0f;
         masterCompOutputMeter = 0.0f;
@@ -668,6 +762,12 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
     const int toMix = juce::jmin(numSamples, available);
     const int srcChannels = juce::jmax(1, oneShotSfxBuffer.getNumChannels());
     const int dstChannels = juce::jmin(buffer.getNumChannels(), 2);
+    // Read live so the Mixer page's Effects fader/mute/solo affects a sound
+    // that's already playing, not just future triggers. Combined with
+    // masterVolume so Master acts as the overall level for every track,
+    // matching how the karaoke program buffer combines masterVolume with
+    // musicVolume above.
+    const float gain = masterVolume.load() * sfxVolume.load();
 
     for (int ch = 0; ch < dstChannels; ++ch)
     {
@@ -676,7 +776,7 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
         const auto* src = oneShotSfxBuffer.getReadPointer(srcCh, oneShotSfxReadPos);
 
         for (int i = 0; i < toMix; ++i)
-            dst[i] += src[i] * oneShotSfxGain;
+            dst[i] += src[i] * gain;
     }
 
     oneShotSfxReadPos += toMix;
@@ -688,6 +788,42 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
     }
 
     return true;
+}
+
+bool AudioEngine::mixMicInput(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
+{
+    if (! micCaptureRegistered.load() || numSamples <= 0)
+        return false;
+
+    const int available = micCapture.getCapturedSamples();
+    if (available <= 0)
+        return false;
+
+    const int toMix = juce::jmin(numSamples, available);
+    const int dstChannels = juce::jmin(buffer.getNumChannels(), 2);
+    const float master = masterVolume.load();
+    const float gains[2] = { master * vocal1Gain.load(), master * vocal2Gain.load() };
+
+    bool mixedAny = false;
+
+    for (int mic = 0; mic < 2; ++mic)
+    {
+        if (gains[mic] <= 0.0f)
+            continue;
+
+        const float* src = micCapture.getChannelData(mic);
+
+        for (int ch = 0; ch < dstChannels; ++ch)
+        {
+            auto* dst = buffer.getWritePointer(ch, startSample);
+            for (int i = 0; i < toMix; ++i)
+                dst[i] += src[i] * gains[mic];
+        }
+
+        mixedAny = true;
+    }
+
+    return mixedAny;
 }
 
 //==============================================================================
@@ -1052,6 +1188,25 @@ void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster* source)
 
             masterDynamicsState.sampleRate = sr;
             masterDynamicsState.dirty = true;
+
+            // Re-check mic capture capability — the device may have changed
+            // (e.g. via a Settings device picker) to one with or without
+            // input channels since AudioEngine last checked.
+            const bool wantMicInput = UserPreferences::getInstance().getLiveVocalInputEnabled();
+            const bool deviceHasInput = dev->getActiveInputChannels().countNumberOfSetBits() > 0;
+
+            if (wantMicInput && deviceHasInput && ! micCaptureRegistered.load())
+            {
+                deviceManager.addAudioCallback(&micCapture);
+                micCaptureRegistered = true;
+                DBG("[AudioEngine] Device change gave mic capture an input-capable device — registered.");
+            }
+            else if (micCaptureRegistered.load() && (! wantMicInput || ! deviceHasInput))
+            {
+                deviceManager.removeAudioCallback(&micCapture);
+                micCaptureRegistered = false;
+                DBG("[AudioEngine] Device change removed input capability — mic capture unregistered.");
+            }
         }
     }
 }

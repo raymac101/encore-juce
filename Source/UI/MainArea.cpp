@@ -242,3 +242,9 @@ void MainArea::setAudioEngine(AudioEngine* engine)
     if (mixerPage)
         mixerPage->setAudioEngine(engine);
 }
+
+void MainArea::setBackgroundMusicPlayer(BackgroundMusicPlayer* player)
+{
+    if (mixerPage)
+        mixerPage->setBackgroundMusicPlayer(player);
+}

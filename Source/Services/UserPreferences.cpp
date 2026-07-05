@@ -247,6 +247,51 @@ void UserPreferences::setPreferredAudioOutputDevice(const juce::String& deviceNa
 }
 
 //==============================================================================
+bool UserPreferences::getLiveVocalInputEnabled() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("liveVocalInputEnabled", false);
+}
+
+void UserPreferences::setLiveVocalInputEnabled(bool enabled)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("liveVocalInputEnabled", enabled);
+    save();
+}
+
+int UserPreferences::getMicInputChannel(int micIndex) const
+{
+    const juce::ScopedLock sl(lock_);
+    const auto key = "micInputChannel" + juce::String(micIndex);
+    return (int) root_.getProperty(key, juce::var(-1));
+}
+
+void UserPreferences::setMicInputChannel(int micIndex, int deviceChannelIndex)
+{
+    const juce::ScopedLock sl(lock_);
+    const auto key = "micInputChannel" + juce::String(micIndex);
+    asObj(root_)->setProperty(key, deviceChannelIndex);
+    save();
+}
+
+float UserPreferences::getMicGain(int micIndex) const
+{
+    const juce::ScopedLock sl(lock_);
+    const auto key = "micGain" + juce::String(micIndex);
+    auto gain = (float) (double) root_.getProperty(key, juce::var(0.8));
+    return juce::jlimit(0.0f, 1.0f, gain);
+}
+
+void UserPreferences::setMicGain(int micIndex, float gain)
+{
+    const juce::ScopedLock sl(lock_);
+    const auto key = "micGain" + juce::String(micIndex);
+    asObj(root_)->setProperty(key, juce::jlimit(0.0f, 1.0f, gain));
+    save();
+}
+
+//==============================================================================
 bool UserPreferences::getSetupCompleted() const
 {
     const juce::ScopedLock sl(lock_);

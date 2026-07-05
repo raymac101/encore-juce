@@ -265,7 +265,8 @@ MixerPage::MixerPage()
     addAndMakeVisible(subtitleLabel);
 
     buildStrip(stripMusic,  {}, juce::Colour(0xff2ea8ff));
-    buildStrip(stripVocal,  {}, juce::Colour(0xffeaa700));
+    buildStrip(stripVocal1, {}, juce::Colour(0xffeaa700));
+    buildStrip(stripVocal2, {}, juce::Colour(0xffd47f1a));
     buildStrip(stripFx,     {}, juce::Colour(0xff9b7fff));
     buildStrip(stripPlugin, {}, juce::Colour(0xff4ad2a2));
     buildStrip(stripMaster, {}, juce::Colour(0xffff5d73));
@@ -279,6 +280,12 @@ MixerPage::MixerPage()
 void MixerPage::setAudioEngine(AudioEngine* engine)
 {
     audioEngine = engine;
+    pushStateFromEngine();
+}
+
+void MixerPage::setBackgroundMusicPlayer(BackgroundMusicPlayer* player)
+{
+    bgPlayer = player;
     pushStateFromEngine();
 }
 
@@ -363,7 +370,8 @@ void MixerPage::updateAllText()
 
     static const char* stripKeys[] = {
         "mixer.channel.music",
-        "mixer.channel.vocal",
+        "mixer.channel.vocal1",
+        "mixer.channel.vocal2",
         "mixer.channel.fx",
         "mixer.channel.inserts",
         "mixer.channel.master"
@@ -418,38 +426,39 @@ void MixerPage::bindControlCallbacks()
 
 void MixerPage::pushStateFromEngine()
 {
-    if (audioEngine == nullptr)
-        return;
+    if (audioEngine != nullptr)
+    {
+        strips[stripMusic].fader->setValue(audioEngine->getMusicVolume(), juce::dontSendNotification);
+        strips[stripVocal1].fader->setValue(audioEngine->getVocal1Gain(), juce::dontSendNotification);
+        strips[stripVocal2].fader->setValue(audioEngine->getVocal2Gain(), juce::dontSendNotification);
+        strips[stripFx].fader->setValue(audioEngine->getSfxVolume(), juce::dontSendNotification);
+        strips[stripMaster].fader->setValue(audioEngine->getMasterVolume(), juce::dontSendNotification);
 
-    strips[stripMusic].fader->setValue(audioEngine->getMusicVolume(), juce::dontSendNotification);
-    strips[stripVocal].fader->setValue(audioEngine->getVocalVolume(), juce::dontSendNotification);
-    strips[stripFx].fader->setValue(audioEngine->getVocalEffectsLevel(), juce::dontSendNotification);
-    strips[stripPlugin].fader->setValue(audioEngine->getMasterInsertDrive(), juce::dontSendNotification);
-    strips[stripMaster].fader->setValue(audioEngine->getMasterVolume(), juce::dontSendNotification);
+        strips[stripMaster].eqLow->setValue(audioEngine->getMasterEqLow(), juce::dontSendNotification);
+        strips[stripMaster].eqMid->setValue(audioEngine->getMasterEqMid(), juce::dontSendNotification);
+        strips[stripMaster].eqHigh->setValue(audioEngine->getMasterEqHigh(), juce::dontSendNotification);
 
-    strips[stripMaster].eqLow->setValue(audioEngine->getMasterEqLow(), juce::dontSendNotification);
-    strips[stripMaster].eqMid->setValue(audioEngine->getMasterEqMid(), juce::dontSendNotification);
-    strips[stripMaster].eqHigh->setValue(audioEngine->getMasterEqHigh(), juce::dontSendNotification);
+        // Master dynamics are always-on in AudioEngine.
+        strips[stripMaster].insertA->setSelectedId(2, juce::dontSendNotification);
+        strips[stripMaster].insertB->setSelectedId(4, juce::dontSendNotification);
+        strips[stripMaster].insertA->setEnabled(false);
+        strips[stripMaster].insertB->setEnabled(false);
 
-    // Master dynamics are always-on in AudioEngine.
-    strips[stripMaster].insertA->setSelectedId(2, juce::dontSendNotification);
-    strips[stripMaster].insertB->setSelectedId(4, juce::dontSendNotification);
-    strips[stripMaster].insertA->setEnabled(false);
-    strips[stripMaster].insertB->setEnabled(false);
+        refreshMasterDynamicsButtons();
+    }
 
-    refreshMasterDynamicsButtons();
+    if (bgPlayer != nullptr)
+        strips[stripPlugin].fader->setValue(bgPlayer->getVolume(), juce::dontSendNotification);
 }
 
 void MixerPage::pushStateToEngine()
 {
-    if (audioEngine == nullptr)
-        return;
-
     // Solo semantics: if any input strip (everything but Master) has solo
     // engaged, every non-soloed input strip is silenced regardless of its
     // own mute state — matches a standard hardware mixer.
     const bool anySolo = strips[stripMusic].solo->getToggleState()
-                       || strips[stripVocal].solo->getToggleState()
+                       || strips[stripVocal1].solo->getToggleState()
+                       || strips[stripVocal2].solo->getToggleState()
                        || strips[stripFx].solo->getToggleState()
                        || strips[stripPlugin].solo->getToggleState();
 
@@ -460,24 +469,40 @@ void MixerPage::pushStateToEngine()
         return muted ? 0.0f : rawLevel;
     };
 
-    audioEngine->setMusicVolume(effectiveLevel(strips[stripMusic], (float) strips[stripMusic].fader->getValue()));
-    audioEngine->setVocalVolume(effectiveLevel(strips[stripVocal], (float) strips[stripVocal].fader->getValue()));
-    audioEngine->setVocalEffectsLevel(effectiveLevel(strips[stripFx], (float) strips[stripFx].fader->getValue()));
-
-    const int insertA = strips[stripPlugin].insertA->getSelectedId();
-    const int insertB = strips[stripPlugin].insertB->getSelectedId();
-    const bool saturatorSelected = (insertA == 3 || insertB == 3);
-    const float rawDrive = saturatorSelected ? (float) strips[stripPlugin].fader->getValue() : 0.0f;
-    audioEngine->setMasterInsertDrive(effectiveLevel(strips[stripPlugin], rawDrive));
-
-    audioEngine->setMasterEqLow((float) strips[stripMaster].eqLow->getValue());
-    audioEngine->setMasterEqMid((float) strips[stripMaster].eqMid->getValue());
-    audioEngine->setMasterEqHigh((float) strips[stripMaster].eqHigh->getValue());
-
-    // Master isn't gated by other strips' solo — it's the summed output bus,
-    // so its own mute checkbox is the only thing that should silence it.
+    // Master isn't gated by other strips' solo — it's the combined output
+    // level for everything below, so its own mute checkbox is the only
+    // thing that should silence it.
+    const bool masterMuted = strips[stripMaster].mute->getToggleState();
     const float rawMaster = (float) strips[stripMaster].fader->getValue();
-    audioEngine->setMasterVolume(strips[stripMaster].mute->getToggleState() ? 0.0f : rawMaster);
+    const float masterLevel = masterMuted ? 0.0f : rawMaster;
+
+    if (audioEngine != nullptr)
+    {
+        // Music already combines with Master internally in AudioEngine
+        // (gain = masterVolume * musicVolume), so send raw values here.
+        audioEngine->setMusicVolume(effectiveLevel(strips[stripMusic], (float) strips[stripMusic].fader->getValue()));
+        audioEngine->setVocal1Gain(effectiveLevel(strips[stripVocal1], (float) strips[stripVocal1].fader->getValue()));
+        audioEngine->setVocal2Gain(effectiveLevel(strips[stripVocal2], (float) strips[stripVocal2].fader->getValue()));
+
+        // Sound effects are mixed in a separate stage of AudioEngine that
+        // also multiplies by its own copy of masterVolume, so send the raw
+        // Effects-strip value and let the engine combine it with Master.
+        audioEngine->setSfxVolume(effectiveLevel(strips[stripFx], (float) strips[stripFx].fader->getValue()));
+
+        audioEngine->setMasterEqLow((float) strips[stripMaster].eqLow->getValue());
+        audioEngine->setMasterEqMid((float) strips[stripMaster].eqMid->getValue());
+        audioEngine->setMasterEqHigh((float) strips[stripMaster].eqHigh->getValue());
+        audioEngine->setMasterVolume(masterLevel);
+    }
+
+    if (bgPlayer != nullptr)
+    {
+        // BackgroundMusicPlayer runs on its own audio device, entirely
+        // separate from AudioEngine, so there's no shared masterVolume to
+        // combine with automatically — apply Master's level here instead.
+        const float bgLevel = effectiveLevel(strips[stripPlugin], (float) strips[stripPlugin].fader->getValue());
+        bgPlayer->setVolume(masterLevel * bgLevel);
+    }
 }
 
 void MixerPage::refreshMasterDynamicsButtons()
@@ -616,6 +641,15 @@ void MixerPage::resized()
             sw.pluginAButton->setVisible(true);
             sw.pluginBButton->setVisible(true);
         }
+        else if (i == stripVocal1 || i == stripVocal2 || i == stripFx || i == stripPlugin)
+        {
+            // Vocal 1/2, Effects, and Background Music are volume/mute/solo-only
+            // strips now — the insert-effect picker doesn't apply to any of them.
+            sw.insertA->setVisible(false);
+            sw.insertB->setVisible(false);
+            if (sw.pluginAButton) sw.pluginAButton->setVisible(false);
+            if (sw.pluginBButton) sw.pluginBButton->setVisible(false);
+        }
         else
         {
             sw.insertA->setVisible(true);
@@ -673,9 +707,16 @@ void MixerPage::timerCallback()
     }
 
     strips[stripMusic].meterLevel = strips[stripMusic].mute->getToggleState() ? 0.0f : engineLevel;
-    strips[stripVocal].meterLevel = strips[stripVocal].mute->getToggleState() ? 0.0f : engineLevel * 0.75f;
+    strips[stripVocal1].meterLevel = strips[stripVocal1].mute->getToggleState() ? 0.0f : engineLevel * 0.8f;
+    strips[stripVocal2].meterLevel = strips[stripVocal2].mute->getToggleState() ? 0.0f : engineLevel * 0.8f;
     strips[stripFx].meterLevel = strips[stripFx].mute->getToggleState() ? 0.0f : engineLevel * 0.55f;
-    strips[stripPlugin].meterLevel = strips[stripPlugin].mute->getToggleState() ? 0.0f : engineLevel * 0.7f;
+
+    // Background Music runs on its own audio device, unrelated to the
+    // karaoke engine's level — show its own playing/volume state instead.
+    const bool bgAudible = bgPlayer != nullptr && bgPlayer->isPlaying()
+                         && ! strips[stripPlugin].mute->getToggleState();
+    strips[stripPlugin].meterLevel = bgAudible ? bgPlayer->getVolume() : 0.0f;
+
     strips[stripMaster].meterLevel = strips[stripMaster].mute->getToggleState() ? 0.0f : engineLevel;
 
     refreshMasterDynamicsButtons();

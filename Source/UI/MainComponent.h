@@ -270,7 +270,6 @@ private:
     std::unique_ptr<juce::Label> maintenanceToastLabel_;
     int maintenanceToastToken_ = 0;
     bool queueAutoStartRequested_ = false;
-    float sfxGain01_ = 0.85f;
-    
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

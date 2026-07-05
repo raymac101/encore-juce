@@ -12,6 +12,7 @@
 
 #include <JuceHeader.h>
 #include "../Audio/AudioEngine.h"
+#include "../Services/BackgroundMusicPlayer.h"
 #include "../Localization/LocalizationManager.h"
 #include <array>
 
@@ -26,13 +27,15 @@ public:
     void resized() override;
 
     void setAudioEngine(AudioEngine* engine);
+    void setBackgroundMusicPlayer(BackgroundMusicPlayer* player);
     void updateAllText();
 
 private:
     enum StripIndex
     {
         stripMusic = 0,
-        stripVocal,
+        stripVocal1,
+        stripVocal2,
         stripFx,
         stripPlugin,
         stripMaster,
@@ -62,6 +65,7 @@ private:
 
     std::array<StripWidgets, stripCount> strips;
     AudioEngine* audioEngine = nullptr;
+    BackgroundMusicPlayer* bgPlayer = nullptr;
 
     juce::Label titleLabel;
     juce::Label subtitleLabel;

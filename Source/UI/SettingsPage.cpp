@@ -240,7 +240,8 @@ private:
 //==============================================================================
 // SettingsContentPanel
 //==============================================================================
-class SettingsContentPanel : public juce::Component
+class SettingsContentPanel : public juce::Component,
+                              public juce::ChangeListener
 {
 public:
     explicit SettingsContentPanel(SettingsPage& owner)
@@ -598,6 +599,40 @@ public:
                 LocalizationManager::getInstance().getText("settings.archive_history_title"),
                 LocalizationManager::getInstance().getText("settings.archive_history_body"));
         };
+
+        // ── Section 7: Audio Devices (live mic input) ────────────────────────
+        initSectionLabel(secAudioDevices_, lm.getText("settings.sec_audio_devices"));
+        initFieldLabel(lblEnableVocalInput_, lm.getText("settings.lbl_enable_vocal_input"));
+        initToggle(tbEnableVocalInput_);
+        tbEnableVocalInput_.setToggleState(UserPreferences::getInstance().getLiveVocalInputEnabled(), juce::dontSendNotification);
+        tbEnableVocalInput_.onStateChange = [this]() {
+            UserPreferences::getInstance().setLiveVocalInputEnabled(tbEnableVocalInput_.getToggleState());
+        };
+
+        initFieldLabel(lblMic1Channel_, lm.getText("settings.lbl_mic1_channel"));
+        initCombo(cbMic1Channel_);
+        cbMic1Channel_.onChange = [this]() {
+            if (audioEngine_ != nullptr)
+                audioEngine_->setMicInputChannel(1, cbMic1Channel_.getSelectedId() - 2);
+        };
+
+        initFieldLabel(lblMic2Channel_, lm.getText("settings.lbl_mic2_channel"));
+        initCombo(cbMic2Channel_);
+        cbMic2Channel_.onChange = [this]() {
+            if (audioEngine_ != nullptr)
+                audioEngine_->setMicInputChannel(2, cbMic2Channel_.getSelectedId() - 2);
+        };
+
+        initFieldLabel(lblMicWarning_, lm.getText("settings.lbl_mic_no_input"));
+        lblMicWarning_.setColour(juce::Label::textColourId, juce::Colour(kBtnDanger));
+        lblMicWarning_.setVisible(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ~SettingsContentPanel() override
+    {
+        if (audioEngine_ != nullptr)
+            audioEngine_->getDeviceManager().removeChangeListener(this);
     }
 
     //--------------------------------------------------------------------------
@@ -831,6 +866,22 @@ public:
         btnViewArchive_.setBounds(kPadX + 416, y, 200, kRowH);
         y += kRowH;
         cardEnd(cs);
+        y += kSectionGap;
+
+        // Section 7: Audio Devices
+        cs = cardStart();
+        secAudioDevices_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
+        toggleRow(lblEnableVocalInput_, tbEnableVocalInput_);
+        if (deviceSelector_ != nullptr)
+        {
+            const int deviceSelectorHeight = 360;
+            deviceSelector_->setBounds(kPadX, y, w - kPadX * 2, deviceSelectorHeight);
+            y += deviceSelectorHeight + kFieldGap;
+        }
+        comboRow(lblMic1Channel_, cbMic1Channel_);
+        comboRow(lblMic2Channel_, cbMic2Channel_);
+        lblMicWarning_.setBounds(kPadX, y, w - kPadX * 2, kRowH); y += kRowH + kFieldGap;
+        cardEnd(cs);
         y += kSectionGap + 8;
 
         setSize(w, y);
@@ -902,6 +953,12 @@ public:
         btnClearRecent_.setButtonText(lm.getText("settings.btn_clear_recent"));
         btnEndSession_.setButtonText(lm.getText("settings.btn_end_session"));
         btnViewArchive_.setButtonText(lm.getText("settings.btn_view_archive"));
+
+        secAudioDevices_.setText(lm.getText("settings.sec_audio_devices"), juce::dontSendNotification);
+        lblEnableVocalInput_.setText(lm.getText("settings.lbl_enable_vocal_input"), juce::dontSendNotification);
+        lblMic1Channel_.setText(lm.getText("settings.lbl_mic1_channel"), juce::dontSendNotification);
+        lblMic2Channel_.setText(lm.getText("settings.lbl_mic2_channel"), juce::dontSendNotification);
+        lblMicWarning_.setText(lm.getText("settings.lbl_mic_no_input"), juce::dontSendNotification);
 
         auto rebuildCombo = [](juce::ComboBox& cb,
                                std::initializer_list<std::pair<const char*, int>> items) {
@@ -1032,6 +1089,33 @@ public:
         resized();
     }
 
+    //--------------------------------------------------------------------------
+    void setAudioEngine(AudioEngine* engine)
+    {
+        audioEngine_ = engine;
+        if (audioEngine_ != nullptr && deviceSelector_ == nullptr)
+        {
+            deviceSelector_ = std::make_unique<juce::AudioDeviceSelectorComponent>(
+                audioEngine_->getDeviceManager(),
+                0, 2,    // min/max input channels
+                2, 2,    // min/max output channels
+                false,   // showMidiInputOptions
+                false,   // showMidiOutputSelector
+                false,   // showChannelsAsStereoPairs — want individual channel numbering for the Mic 1/2 pickers below
+                true);   // hideAdvancedOptionsWithButton — keep it compact by default
+            addAndMakeVisible(*deviceSelector_);
+            audioEngine_->getDeviceManager().addChangeListener(this);
+        }
+        refreshAudioDeviceSection();
+        resized();
+    }
+
+    //--------------------------------------------------------------------------
+    void changeListenerCallback(juce::ChangeBroadcaster*) override
+    {
+        refreshAudioDeviceSection();
+    }
+
 private:
     SettingsPage& owner_;
     bool venueEditMode_ = false;
@@ -1107,6 +1191,16 @@ private:
     juce::Label      lblCleanupHour_;
     juce::ComboBox   cbCleanupHour_;
     juce::TextButton btnClearRecent_, btnEndSession_, btnViewArchive_;
+
+    // Section 7: Audio Devices
+    juce::Label      secAudioDevices_;
+    juce::Label      lblEnableVocalInput_;
+    juce::ToggleButton tbEnableVocalInput_;
+    AudioEngine*     audioEngine_ = nullptr;
+    std::unique_ptr<juce::AudioDeviceSelectorComponent> deviceSelector_;
+    juce::Label      lblMic1Channel_, lblMic2Channel_;
+    juce::ComboBox   cbMic1Channel_, cbMic2Channel_;
+    juce::Label      lblMicWarning_;
 
     // Computed in resized() and drawn in paint() — one rect per section card.
     std::vector<juce::Rectangle<int>> cardRects_;
@@ -1273,6 +1367,31 @@ private:
             }));
     }
 
+    void refreshAudioDeviceSection()
+    {
+        if (audioEngine_ == nullptr)
+            return;
+
+        const auto channelNames = audioEngine_->getAvailableInputChannelNames();
+
+        auto populate = [&](juce::ComboBox& combo, int micIndex)
+        {
+            combo.clear(juce::dontSendNotification);
+            combo.addItem(LocalizationManager::getInstance().getText("settings.mic_channel_none"), 1);
+            for (int i = 0; i < channelNames.size(); ++i)
+                combo.addItem(channelNames[i], i + 2);
+            const int mapped = audioEngine_->getMicInputChannel(micIndex);
+            combo.setSelectedId(mapped + 2, juce::dontSendNotification);
+        };
+        populate(cbMic1Channel_, 1);
+        populate(cbMic2Channel_, 2);
+
+        const bool hasInput = ! channelNames.isEmpty();
+        lblMicWarning_.setVisible(! hasInput);
+        cbMic1Channel_.setEnabled(hasInput);
+        cbMic2Channel_.setEnabled(hasInput);
+    }
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SettingsContentPanel)
 };
 
@@ -1338,6 +1457,11 @@ void SettingsPage::setUserList(const std::vector<VenueUser>& users)
 void SettingsPage::setPendingInvitations(const std::vector<PendingInvitation>& invitations)
 {
     if (panel_) panel_->updateInvitationList(invitations);
+}
+
+void SettingsPage::setAudioEngine(AudioEngine* engine)
+{
+    if (panel_) panel_->setAudioEngine(engine);
 }
 
 void SettingsPage::notifyChanged()

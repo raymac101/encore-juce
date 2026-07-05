@@ -883,6 +883,9 @@ void MainComponent::setupUI()
     // Create MainArea (central content area)
     mainArea = std::make_unique<MainArea>();
     mainArea->setAudioEngine(audioEngine.get());
+    if (auto* settingsPage = mainArea->getSettingsPage())
+        settingsPage->setAudioEngine(audioEngine.get());
+    mainArea->setBackgroundMusicPlayer(bgPlayer_.get());
     addAndMakeVisible(mainArea.get());
 
     // Create Ribbon menu (quick-access control surface)
@@ -955,10 +958,11 @@ void MainComponent::setupUI()
 
     ribbonMenu->onSfxVolumeChanged = [this](float volume01)
     {
-        sfxGain01_ = juce::jlimit(0.0f, 1.0f, volume01);
+        if (audioEngine != nullptr)
+            audioEngine->setSfxVolume(volume01);
     };
 
-    ribbonMenu->setSfxVolume(sfxGain01_);
+    ribbonMenu->setSfxVolume(audioEngine != nullptr ? audioEngine->getSfxVolume() : 0.85f);
 
     ribbonMenu->onTriggerSfx = [this](const juce::String& effectName)
     {
@@ -989,7 +993,7 @@ void MainComponent::setupUI()
             return;
         }
 
-        if (audioEngine == nullptr || ! audioEngine->triggerOneShotSfx(soundFile, sfxGain01_))
+        if (audioEngine == nullptr || ! audioEngine->triggerOneShotSfx(soundFile))
         {
             showMaintenanceToast("Unable to play sound effect: " + effectName);
             return;

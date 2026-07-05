@@ -77,12 +77,41 @@ public:
     void setMusicVolume(float volume);
     void setVocalVolume(float volume);
     void setVocalEffectsLevel(float level);
-    bool triggerOneShotSfx(const juce::File& audioFile, float gain = 0.85f);
+    void setSfxVolume(float volume);     // 0.0 – 1.0, live-adjustable (affects a currently-playing SFX too)
+    bool triggerOneShotSfx(const juce::File& audioFile);
 
     float getMasterVolume()      const noexcept { return masterVolume.load(); }
     float getMusicVolume()       const noexcept { return musicVolume.load(); }
     float getVocalVolume()       const noexcept { return vocalVolume.load(); }
     float getVocalEffectsLevel() const noexcept { return vocalEffectsLevel.load(); }
+    float getSfxVolume()         const noexcept { return sfxVolume.load(); }
+
+    //==========================================================================
+    // Live microphone input (Vocal 1 / Vocal 2) — gated behind
+    // UserPreferences::getLiveVocalInputEnabled(). When the feature is
+    // disabled, none of this opens input channels or affects the signal
+    // chain at all.
+    void  setVocal1Gain(float gain);  // 0.0 – 1.0
+    void  setVocal2Gain(float gain);
+    float getVocal1Gain() const noexcept { return vocal1Gain.load(); }
+    float getVocal2Gain() const noexcept { return vocal2Gain.load(); }
+
+    // micIndex is 1 or 2. deviceChannelIndex of -1 means "not mapped" (silent).
+    void setMicInputChannel(int micIndex, int deviceChannelIndex);
+    int  getMicInputChannel(int micIndex) const;
+
+    /** Names of the current device's available input channels, for a
+        settings UI to populate a "Mic 1/2 Input Channel" picker with. Empty
+        if no device is open or it has no input channels. */
+    juce::StringArray getAvailableInputChannelNames() const;
+
+    /** True once mic capture has actually been registered with the device
+        (feature enabled AND the device has at least one input channel). */
+    bool isLiveVocalInputActive() const noexcept { return micCaptureRegistered.load(); }
+
+    /** Exposed so a Settings page can embed a juce::AudioDeviceSelectorComponent
+        bound to the same device manager AudioEngine itself uses. */
+    juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
 
     //==========================================================================
     // Master EQ (3-band) + insert drive
@@ -177,6 +206,72 @@ public:
 
 private:
     //==========================================================================
+    // Live mic capture — a second, capture-only AudioIODeviceCallback
+    // registered on the SAME deviceManager as audioSourcePlayer, added
+    // *before* it so it captures first within the same audio-thread device
+    // callback invocation. It never touches the output buffers at all; it
+    // just copies raw input samples into a small buffer that
+    // getNextAudioBlock() (still driven entirely by the untouched
+    // AudioSourcePlayer path) reads afterwards, on the same thread, within
+    // the same callback. This deliberately avoids restructuring
+    // AudioSourcePlayer / the existing detach-reattach safety idiom used by
+    // seekToPosition/loadSong/unloadSong/initialize/shutdown.
+    class MicCaptureCallback : public juce::AudioIODeviceCallback
+    {
+    public:
+        void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
+                                              int numInputChannels,
+                                              float* const* /*outputChannelData*/,
+                                              int /*numOutputChannels*/,
+                                              int numSamples,
+                                              const juce::AudioIODeviceCallbackContext&) override
+        {
+            const int capacity = (int) channelBuffers[0].size();
+            const int toCopy = juce::jlimit(0, capacity, numSamples);
+
+            for (int mic = 0; mic < 2; ++mic)
+            {
+                const int ch = micChannelIndex[mic].load();
+                auto* dst = channelBuffers[(size_t) mic].data();
+
+                if (ch >= 0 && ch < numInputChannels && inputChannelData[ch] != nullptr)
+                    std::memcpy(dst, inputChannelData[ch], (size_t) toCopy * sizeof(float));
+                else
+                    std::fill(dst, dst + toCopy, 0.0f);
+            }
+
+            capturedSamples = toCopy;
+        }
+
+        void audioDeviceAboutToStart(juce::AudioIODevice* device) override
+        {
+            const int maxBlockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : 512;
+            for (auto& buf : channelBuffers)
+                buf.assign((size_t) juce::jmax(64, maxBlockSize), 0.0f);
+            capturedSamples = 0;
+        }
+
+        void audioDeviceStopped() override { capturedSamples = 0; }
+
+        // Read from getNextAudioBlock(), same audio-thread invocation.
+        const float* getChannelData(int micIndex) const noexcept { return channelBuffers[(size_t) micIndex].data(); }
+        int getCapturedSamples() const noexcept { return capturedSamples; }
+
+        // Mapped from the message thread (setMicInputChannel), read on the
+        // audio thread — genuinely cross-thread, hence atomic.
+        std::atomic<int> micChannelIndex[2] { { -1 }, { -1 } };
+
+    private:
+        std::array<std::vector<float>, 2> channelBuffers;
+        int capturedSamples = 0;
+    };
+
+    MicCaptureCallback micCapture;
+    std::atomic<bool>  micCaptureRegistered { false };
+    std::atomic<float> vocal1Gain { 0.8f };
+    std::atomic<float> vocal2Gain { 0.8f };
+
+    //==========================================================================
     // Audio device
     juce::AudioDeviceManager              deviceManager;
     std::unique_ptr<juce::AudioSourcePlayer> audioSourcePlayer;
@@ -224,6 +319,7 @@ private:
     std::atomic<float>  musicVolume        { 0.7f };
     std::atomic<float>  vocalVolume        { 0.8f };
     std::atomic<float>  vocalEffectsLevel  { 0.3f };
+    std::atomic<float>  sfxVolume          { 0.85f };
     std::atomic<int>    keyChangeSemitones { 0 };
     std::atomic<float>  masterEqLowDb      { 0.0f };
     std::atomic<float>  masterEqMidDb      { 0.0f };
@@ -287,7 +383,6 @@ private:
     std::mutex sfxMutex;
     juce::AudioBuffer<float> oneShotSfxBuffer;
     int oneShotSfxReadPos = 0;
-    float oneShotSfxGain = 0.85f;
     std::atomic<bool> oneShotSfxActive { false };
 
     //==========================================================================
@@ -305,6 +400,7 @@ private:
     void persistActiveAudioDevice() const;
     void handleAudioDeviceError(const juce::String& message);
     bool mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
+    bool mixMicInput(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
     void applyReverb(juce::AudioBuffer<float>& buffer);
     void applyEcho(juce::AudioBuffer<float>& buffer);
     void applyMasterEq(juce::AudioBuffer<float>& buffer);

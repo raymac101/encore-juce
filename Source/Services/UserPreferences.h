@@ -56,6 +56,21 @@ public:
     juce::String getPreferredAudioOutputDevice() const;
     void setPreferredAudioOutputDevice(const juce::String& deviceName);
 
+    //--- Live vocal input (mic) -------------------------------------------------
+    // Feature flag: disabled by default. When false, AudioEngine never opens
+    // input channels or registers mic capture — existing playback behaviour is
+    // completely unchanged.
+    bool getLiveVocalInputEnabled() const;
+    void setLiveVocalInputEnabled(bool enabled);
+
+    // micIndex is 1 or 2. Returns -1 if unset (no channel mapped yet).
+    int  getMicInputChannel(int micIndex) const;
+    void setMicInputChannel(int micIndex, int deviceChannelIndex);
+
+    // micIndex is 1 or 2. 0.0-1.0, default 0.8.
+    float getMicGain(int micIndex) const;
+    void  setMicGain(int micIndex, float gain);
+
     //--- Setup flag ------------------------------------------------------------
     bool getSetupCompleted() const;
     void setSetupCompleted(bool completed);

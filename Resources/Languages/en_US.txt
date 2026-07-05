@@ -542,3 +542,11 @@ settings.lbl_active_members=Active Members:
 settings.lbl_singers_queue=Singers in Queue:
 settings.lbl_req_songs=Requested Songs:
 settings.btn_view_archive=View Archive History
+
+# Audio Devices (live mic input)
+settings.sec_audio_devices=Audio Devices
+settings.lbl_enable_vocal_input=Enable Live Vocal Input (restart required)
+settings.lbl_mic1_channel=Mic 1 Input Channel
+settings.lbl_mic2_channel=Mic 2 Input Channel
+settings.lbl_mic_no_input=Selected device has no input channels available.
+settings.mic_channel_none=None

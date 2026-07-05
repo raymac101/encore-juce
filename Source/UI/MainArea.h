@@ -90,6 +90,9 @@ public:
     /** Provide AudioEngine to pages that need direct DSP control. */
     void setAudioEngine(AudioEngine* engine);
 
+    /** Provide the background-music service to pages that need it (Mixer). */
+    void setBackgroundMusicPlayer(BackgroundMusicPlayer* player);
+
 private:
     NavPage currentPage = NavPage::Home;
 
