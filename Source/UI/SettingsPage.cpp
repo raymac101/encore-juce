@@ -634,6 +634,19 @@ public:
         btnRescanPlugins_.onClick = [this]() { startPluginScan(); };
         initValueLabel(lblPluginScanStatus_);
         refreshPluginScanStatusLabel();
+
+        // Live scan log — shows each plugin as it's actually found (not
+        // just attempted) so a scan of a large plugin folder doesn't look
+        // like the app has frozen.
+        pluginScanLog_.setMultiLine(true, false);
+        pluginScanLog_.setReadOnly(true);
+        pluginScanLog_.setScrollbarsShown(true);
+        pluginScanLog_.setCaretVisible(false);
+        pluginScanLog_.setFont(juce::Font(juce::FontOptions().withHeight(12.f)));
+        pluginScanLog_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0d1527));
+        pluginScanLog_.setColour(juce::TextEditor::textColourId, juce::Colour(kTextSecond));
+        pluginScanLog_.setColour(juce::TextEditor::outlineColourId, juce::Colour(kAccent).withAlpha(0.4f));
+        addAndMakeVisible(pluginScanLog_);
     }
 
     void startPluginScan()
@@ -642,10 +655,29 @@ public:
         lblPluginScanStatus_.setText(
             LocalizationManager::getInstance().getText("settings.plugin_scan_in_progress"),
             juce::dontSendNotification);
+        pluginScanLog_.clear();
 
         juce::Component::SafePointer<SettingsContentPanel> safe(this);
         PluginHostService::getInstance().scanForPlugins(
-            [safe](float /*progress01*/, juce::String /*currentItem*/) {},
+            [safe](float progress01, juce::String name, bool found)
+            {
+                if (safe == nullptr)
+                    return;
+
+                // Update the status line every tick (proves the scan is
+                // still moving even while nothing new has been found yet)...
+                safe->lblPluginScanStatus_.setText(
+                    LocalizationManager::getInstance().getText("settings.plugin_scan_in_progress")
+                        + " (" + juce::String((int) (progress01 * 100.0f)) + "%)",
+                    juce::dontSendNotification);
+
+                // ...and append a line the moment a real plugin is found.
+                if (found)
+                {
+                    safe->pluginScanLog_.moveCaretToEnd();
+                    safe->pluginScanLog_.insertTextAtCaret(name + juce::newLine);
+                }
+            },
             [safe](int numFound)
             {
                 if (safe == nullptr)
@@ -940,7 +972,10 @@ public:
         secPlugins_.setBounds(0, y, w, kSectionH); y += kSectionH + kFieldGap;
         btnRescanPlugins_.setBounds(kPadX, y, 160, kRowH);
         lblPluginScanStatus_.setBounds(kPadX + 168, y, w - kPadX * 2 - 168, kRowH);
-        y += kRowH;
+        y += kRowH + kFieldGap;
+        const int scanLogHeight = 110;
+        pluginScanLog_.setBounds(kPadX, y, w - kPadX * 2, scanLogHeight);
+        y += scanLogHeight;
         cardEnd(cs);
         y += kSectionGap + 8;
 
@@ -1270,6 +1305,7 @@ private:
     juce::Label      secPlugins_;
     juce::TextButton btnRescanPlugins_;
     juce::Label      lblPluginScanStatus_;
+    juce::TextEditor pluginScanLog_;
 
     // Computed in resized() and drawn in paint() — one rect per section card.
     std::vector<juce::Rectangle<int>> cardRects_;

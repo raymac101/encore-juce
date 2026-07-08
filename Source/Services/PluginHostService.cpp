@@ -125,13 +125,8 @@ void PluginHostService::scanForPlugins(ProgressCallback onProgress, CompletionCa
         for (int i = 0; i < candidates.size(); ++i)
         {
             const auto& candidatePath = candidates[i];
-
-            if (onProgress)
-            {
-                const float progress = candidates.size() > 0 ? (float) i / (float) candidates.size() : 1.0f;
-                const auto name = juce::File(candidatePath).getFileNameWithoutExtension();
-                juce::MessageManager::callAsync([onProgress, progress, name]() { onProgress(progress, name); });
-            }
+            const auto fallbackName = juce::File(candidatePath).getFileNameWithoutExtension();
+            const float progress = candidates.size() > 0 ? (float) (i + 1) / (float) candidates.size() : 1.0f;
 
             const auto outputFile = tempDir.getChildFile("scan_" + juce::String(i) + ".xml");
             outputFile.deleteFile();
@@ -153,6 +148,12 @@ void PluginHostService::scanForPlugins(ProgressCallback onProgress, CompletionCa
                     child.kill();
             }
 
+            // Report AFTER the attempt, not before, so `found` reflects a
+            // real result — this is what lets a UI show plugins appearing
+            // live as they're actually discovered, not just attempted.
+            bool foundAny = false;
+            juce::StringArray foundNames;
+
             if (outputFile.existsAsFile())
             {
                 if (auto xml = juce::XmlDocument::parse(outputFile))
@@ -164,10 +165,19 @@ void PluginHostService::scanForPlugins(ProgressCallback onProgress, CompletionCa
                         {
                             knownPlugins_.addType(desc);
                             ++numFound;
+                            foundAny = true;
+                            foundNames.add(desc.name);
                         }
                     }
                 }
                 outputFile.deleteFile();
+            }
+
+            if (onProgress)
+            {
+                const auto reportName = foundAny ? foundNames.joinIntoString(", ") : fallbackName;
+                juce::MessageManager::callAsync([onProgress, progress, reportName, foundAny]()
+                    { onProgress(progress, reportName, foundAny); });
             }
         }
 

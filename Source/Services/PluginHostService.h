@@ -33,7 +33,12 @@ class PluginHostService
 public:
     static PluginHostService& getInstance();
 
-    using ProgressCallback   = std::function<void(float progress01, juce::String currentItem)>;
+    /** Called once per candidate file after it's been scanned (not before —
+        so `found` reflects a real result, not just an attempt). `name` is
+        the plugin's real name when found, or the candidate's filename when
+        it wasn't a valid/loadable plugin. Lets a UI show plugins appearing
+        live during a scan instead of a single static "scanning..." message. */
+    using ProgressCallback   = std::function<void(float progress01, juce::String name, bool found)>;
     using CompletionCallback = std::function<void(int numFound)>;
 
     /** Starts a background scan of the standard OS VST3 folders. No-op if a

@@ -724,6 +724,19 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
         // 4. Music's plugin chain.
         musicMidi_.clear();
         musicPluginChain_.process(musicBuf_, musicMidi_);
+
+        // 5. Master EQ / reverb / echo / insert saturation — these have
+        // always applied only to the karaoke program, never to SFX/mic, and
+        // that scope is deliberately preserved here: Echo in particular is
+        // a feedback delay line (echoLevel up to 0.95, effectively
+        // unbounded-sounding ring time at short delays) that must never be
+        // excited by a short impulsive one-shot SFX click with no ongoing
+        // program audio to mask/ground it — doing so previously caused a
+        // sustained runaway-sounding screech that only stopped on quit.
+        applyMasterEq(musicBuf_);
+        applyReverb(musicBuf_);
+        applyEcho(musicBuf_);
+        applyMasterInsert(musicBuf_);
     }
 
     // Vocal 1 / Vocal 2 — raw mic samples + each mic's own gain, no
@@ -777,13 +790,6 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
         buf.addFrom(ch, bufferToFill.startSample, vocal2Buf_, ch, 0, numSamples, master);
         buf.addFrom(ch, bufferToFill.startSample, sfxBuf_,    ch, 0, numSamples, master);
     }
-
-    // Master EQ / reverb / echo / insert saturation — existing, unchanged
-    // master-bus processing, now applied to the combined signal.
-    applyMasterEq(buf);
-    applyReverb(buf);
-    applyEcho(buf);
-    applyMasterInsert(buf);
 
     // Master's own optional plugin chain (Phase B) — deliberately placed
     // *before* the always-on compressor/limiter below, so the safety
