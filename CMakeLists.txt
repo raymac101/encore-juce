@@ -92,6 +92,7 @@ target_sources(EncoreJUCE
         Source/Services/AuditService.cpp
         Source/Services/BackgroundMusicPlayer.cpp
         Source/Services/PluginHostService.cpp
+        Source/Services/UpdateService.cpp
         Source/Services/ApiService.cpp
         Source/Services/GlobalProgressService.cpp
         Source/Auth/LoginFlowController.cpp
@@ -139,6 +140,7 @@ target_link_libraries(EncoreJUCE
         juce::juce_audio_processors
         juce::juce_audio_utils
         juce::juce_core
+        juce::juce_cryptography
         juce::juce_data_structures
         juce::juce_events
         juce::juce_graphics

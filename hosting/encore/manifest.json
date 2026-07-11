@@ -1,0 +1,8 @@
+{
+  "latestVersion": "1.0.0",
+  "releaseNotesUrl": "",
+  "platforms": {
+    "windows": { "url": "", "sha256": "" },
+    "macos": { "url": "", "sha256": "" }
+  }
+}

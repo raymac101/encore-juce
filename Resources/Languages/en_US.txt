@@ -558,3 +558,8 @@ settings.plugin_scan_in_progress=Scanning for plugins...
 settings.plugin_scan_found_prefix=Found plugins:
 settings.plugin_scan_last_prefix=Last scan:
 settings.plugin_scan_never=No scan yet — click Rescan Plugins.
+
+# Auto-update banner
+update.banner_available=Update available:
+update.btn_restart_now=Restart Now
+update.btn_later=Later

@@ -1,0 +1,14 @@
+{
+  "hosting": {
+    "public": "hosting",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/encore/manifest.json",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, max-age=0" }
+        ]
+      }
+    ]
+  }
+}

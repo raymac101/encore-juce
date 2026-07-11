@@ -19,6 +19,7 @@
 #include "Services/UserPreferences.h"
 #include "Services/VenueService.h"
 #include "Services/PluginHostService.h"
+#include "Services/UpdateService.h"
 #include "BuildInfo.h"
 
 //==============================================================================
@@ -52,6 +53,23 @@ public:
         }
 
         juce::ignoreUnused (commandLine);
+
+        // Launch-time-only update check (see UpdateService.h). Fire-and-
+        // forget: runs on a background thread, never blocks or delays
+        // showLoginWindow() below, and every failure path resolves silently
+        // to "no update" -- this is the only place a check ever happens, by
+        // design, so a live show can never be interrupted by one later.
+        // If the download finishes while the login/venue flow is still on
+        // screen, the banner simply appears once MainComponent is built
+        // (see its constructor); this callback covers the case where it
+        // finishes after that.
+        UpdateService::getInstance().checkForUpdates ([this] (juce::String version, juce::String releaseNotesUrl)
+        {
+            juce::ignoreUnused (releaseNotesUrl);
+            if (mainWindow != nullptr)
+                if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+                    content->showUpdateAvailableBanner (version);
+        });
 
         // Initialize localization: honour the user's saved choice if any,
         // otherwise fall back to the system language.

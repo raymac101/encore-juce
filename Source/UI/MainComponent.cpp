@@ -22,6 +22,7 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/ArchiveService.h"
 #include "../Services/ApiService.h"
+#include "../Services/UpdateService.h"
 #include "EditSingerModal.h"
 #include <cmath>
 #include <cstring>
@@ -374,6 +375,65 @@ private:
     juce::String message_ { "Loading song..." };
     double progress_ = -1.0;
     float phase_ = 0.0f;
+};
+
+//==============================================================================
+// Small persistent, dismissible banner ("Update available — Restart Now /
+// Later"). Deliberately not modal and not auto-dismissing like
+// showMaintenanceToast()'s transient label — an update notice needs to stay
+// visible with actionable buttons until the KJ chooses, but must never block
+// input to the rest of the app.
+class MainComponent::UpdateBanner : public juce::Component
+{
+public:
+    UpdateBanner()
+    {
+        messageLabel_.setJustificationType(juce::Justification::centredLeft);
+        messageLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
+        messageLabel_.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
+        addAndMakeVisible(messageLabel_);
+
+        restartButton_.setButtonText(LocalizationManager::getInstance().getText("update.btn_restart_now"));
+        restartButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f6fed));
+        restartButton_.onClick = [this] { if (onRestartClicked) onRestartClicked(); };
+        addAndMakeVisible(restartButton_);
+
+        laterButton_.setButtonText(LocalizationManager::getInstance().getText("update.btn_later"));
+        laterButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a3445));
+        laterButton_.onClick = [this] { if (onLaterClicked) onLaterClicked(); };
+        addAndMakeVisible(laterButton_);
+
+        setVisible(false);
+    }
+
+    void setMessage(const juce::String& msg) { messageLabel_.setText(msg, juce::dontSendNotification); }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+        g.setColour(juce::Colour(0xff1a2030));
+        g.fillRoundedRectangle(area, 8.0f);
+        g.setColour(juce::Colour(0xff30daff));
+        g.drawRoundedRectangle(area.reduced(0.5f), 8.0f, 1.2f);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(8, 4);
+        laterButton_.setBounds(area.removeFromRight(70));
+        area.removeFromRight(6);
+        restartButton_.setBounds(area.removeFromRight(120));
+        area.removeFromRight(10);
+        messageLabel_.setBounds(area);
+    }
+
+    std::function<void()> onRestartClicked;
+    std::function<void()> onLaterClicked;
+
+private:
+    juce::Label messageLabel_;
+    juce::TextButton restartButton_;
+    juce::TextButton laterButton_;
 };
 
 //==============================================================================
@@ -2431,7 +2491,23 @@ void MainComponent::setupUI()
     maintenanceToastLabel_->setBorderSize(juce::BorderSize<int>(4, 12, 4, 12));
     maintenanceToastLabel_->setVisible(false);
     addAndMakeVisible(maintenanceToastLabel_.get());
-    
+
+    updateBanner_ = std::make_unique<UpdateBanner>();
+    updateBanner_->onRestartClicked = [] { UpdateService::getInstance().restartAndInstall(); };
+    updateBanner_->onLaterClicked = [this] { if (updateBanner_) updateBanner_->setVisible(false); };
+    // addChildComponent (not addAndMakeVisible) -- the banner must stay
+    // hidden until showUpdateAvailableBanner() actually has something to
+    // show; addAndMakeVisible would force it visible immediately regardless
+    // of the UpdateBanner constructor's own setVisible(false).
+    addChildComponent(updateBanner_.get());
+
+    // Covers the case where the download (kicked off at launch, before
+    // login) already finished while the user was still on the login/venue
+    // screen — this constructor runs after that, so check directly rather
+    // than relying only on the launch-time callback firing again.
+    if (UpdateService::getInstance().isUpdateReadyToInstall())
+        showUpdateAvailableBanner (UpdateService::getInstance().getPendingVersion());
+
     DBG("setupUI completed successfully with initial bounds set");
     
     // Load default background tile
@@ -2598,6 +2674,22 @@ void MainComponent::resized()
         if (maintenanceToastLabel_->getText().trim().isEmpty())
             maintenanceToastLabel_->setVisible(false);
         maintenanceToastLabel_->toFront(false);
+    }
+
+    if (updateBanner_)
+    {
+        int topOffset = 8;
+       #if ! JUCE_MAC
+        if (menuBar_ != nullptr && menuBar_->isVisible())
+            topOffset += 24;
+       #endif
+        if (topBar != nullptr)
+            topOffset += topBar->getBarHeight();
+
+        const int bannerW = juce::jmin(460, juce::jmax(340, getWidth() - 280));
+        const int bannerH = 40;
+        updateBanner_->setBounds(getWidth() - bannerW - 16, topOffset + 10, bannerW, bannerH);
+        updateBanner_->toFront(false);
     }
 
     // The old placeholder labels are no longer laid out in the centre;
@@ -2801,6 +2893,17 @@ void MainComponent::showMaintenanceToast(const juce::String& message)
             return;
         safe->maintenanceToastLabel_->setVisible(false);
     });
+}
+
+void MainComponent::showUpdateAvailableBanner(const juce::String& version)
+{
+    if (updateBanner_ == nullptr)
+        return;
+
+    auto& lm = LocalizationManager::getInstance();
+    updateBanner_->setMessage(lm.getText("update.banner_available") + " " + version);
+    updateBanner_->setVisible(true);
+    updateBanner_->toFront(false);
 }
 
 void MainComponent::runSongbookHealthCheckIfReady()

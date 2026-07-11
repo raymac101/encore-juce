@@ -77,7 +77,15 @@ public:
         that wasn't configured on this PC — once the venue loads we switch
         to the Library page and start the initial song-load flow. */
     void setVenueId (const juce::String& venueId, bool requestInitialScan = false);
-    
+
+    /** Shows a small, dismissible, non-blocking banner ("Update available —
+        Restart Now / Later"). Called either directly from UpdateService's
+        checkForUpdates callback (if the download finishes while this
+        MainComponent already exists), or from the constructor below (if it
+        finished earlier, during the login/venue-selection flow). Never a
+        modal dialog — a live show must never be blocked by this. */
+    void showUpdateAvailableBanner (const juce::String& version);
+
     //==============================================================================
     // Accessibility
     void setHighContrastMode(bool enabled);
@@ -164,6 +172,9 @@ private:
 
     class LoadingOverlay;
     std::unique_ptr<LoadingOverlay> loadingOverlay_;
+
+    class UpdateBanner;
+    std::unique_ptr<UpdateBanner> updateBanner_;
     
     //==============================================================================
     // Background Tile

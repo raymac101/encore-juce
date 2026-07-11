@@ -1,0 +1,248 @@
+# Encore Karaoke - release build pipeline
+#
+# See distribution_plan.md for the full design and risk assessment this
+# implements. Key points that shape this file:
+#
+#   - Triggered only by a maintainer pushing a version tag -- deliberately
+#     NOT on pull_request, so fork PRs never get access to the signing
+#     secrets below (Risk #4).
+#   - Builds + signs + notarizes both platforms, uploads the installers to
+#     Firebase Hosting under a version-specific path, creates a GitHub
+#     Release, and appends an entry to releases/releases.json.
+#   - Does NOT touch hosting/encore/manifest.json's live latestVersion --
+#     that is scripts/promote-release.sh, run by hand, never from CI
+#     (Risk #1 / Risk #4: a human always decides what actually reaches a
+#     customer's app).
+#   - Hard-fails if either platform's build/sign/artifact step fails --
+#     never partially publishes one platform while silently skipping the
+#     other (Risk #6).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake --preset windows-release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # Cloud HSM signing -- avoids the hardware-token requirement modern
+      # CAs impose on traditional OV certs, and works headlessly in CI.
+      # See distribution_plan.md Prerequisites #2.
+      - name: Sign app exe (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: build\EncoreJUCE_artefacts\Release
+          files-folder-filter: exe
+
+      - name: Build installer (Inno Setup)
+        shell: cmd
+        run: |
+          iscc packaging\windows\installer.iss /DMyAppVersion=%VERSION% /DSourceExe="build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
+
+      - name: Sign installer exe (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
+
+      - name: Compute sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="dist/EncoreKaraoke-${VERSION}-win64.exe"
+          test -f "$FILE"
+          sha256sum "$FILE" | cut -d' ' -f1 > dist/windows.sha256
+          echo "Windows installer built: $FILE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/EncoreKaraoke-*-win64.exe
+            dist/windows.sha256
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # Standard GitHub Actions recipe for importing a Developer ID cert
+      # into a throwaway keychain scoped to this job only.
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_TEMP_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          echo "$CERT_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | sed 's/"//g')
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple_api_key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple_api_key.p8" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake --preset macos-release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Codesign + notarize + staple + build .dmg
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          packaging/macos/build_dmg.sh \
+            "build/EncoreJUCE_artefacts/Release/Encore Karaoke.app" \
+            "$VERSION" \
+            "${{ secrets.APPLE_DEVELOPER_ID_IDENTITY }}"
+
+      - name: Compute sha256
+        run: |
+          set -euo pipefail
+          FILE="dist/EncoreKaraoke-${VERSION}-mac.dmg"
+          test -f "$FILE"
+          shasum -a 256 "$FILE" | cut -d' ' -f1 > dist/macos.sha256
+          echo "macOS installer built: $FILE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: |
+            dist/EncoreKaraoke-*-mac.dmg
+            dist/macos.sha256
+          if-no-files-found: error
+
+  # Hard-fails (via `needs:`) if either platform job failed -- a release can
+  # never end up half-published (Risk #6).
+  publish:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-installer
+          path: dist
+
+      - name: Verify both artifacts are present
+        run: |
+          set -euo pipefail
+          test -s "dist/EncoreKaraoke-${VERSION}-win64.exe"
+          test -s "dist/EncoreKaraoke-${VERSION}-mac.dmg"
+          test -s dist/windows.sha256
+          test -s dist/macos.sha256
+
+      - name: Deploy installers to Firebase Hosting (versioned path only -- NOT the live manifest)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: default
+          channelId: live
+        env:
+          FIREBASE_CLI_PREVIEWS: hostingchannels
+
+      - name: Create GitHub Release (backup download source)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${VERSION}" \
+            "dist/EncoreKaraoke-${VERSION}-win64.exe" \
+            "dist/EncoreKaraoke-${VERSION}-mac.dmg" \
+            --title "Encore Karaoke ${VERSION}" \
+            --generate-notes
+
+      - name: Append entry to releases/releases.json
+        run: |
+          set -euo pipefail
+          WIN_SHA="$(cat dist/windows.sha256)"
+          MAC_SHA="$(cat dist/macos.sha256)"
+          WIN_URL="https://download.karaokeworld.net/encore/EncoreKaraoke-${VERSION}-win64.exe"
+          MAC_URL="https://download.karaokeworld.net/encore/EncoreKaraoke-${VERSION}-mac.dmg"
+          NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
+
+          jq --arg version "$VERSION" \
+             --arg notesUrl "$NOTES_URL" \
+             --arg winUrl "$WIN_URL" --arg winSha "$WIN_SHA" \
+             --arg macUrl "$MAC_URL" --arg macSha "$MAC_SHA" \
+             '. + [{
+                version: $version,
+                releaseNotesUrl: $notesUrl,
+                platforms: {
+                  windows: { url: $winUrl, sha256: $winSha },
+                  macos:   { url: $macUrl, sha256: $macSha }
+                }
+              }]' releases/releases.json > releases/releases.json.tmp
+          mv releases/releases.json.tmp releases/releases.json
+
+          git config user.name "encore-release-bot"
+          git config user.email "actions@github.com"
+          git add releases/releases.json
+          git commit -m "Record release v${VERSION} (staged, not yet promoted)"
+          git push origin HEAD:main
+
+      - name: Summary
+        run: |
+          echo "### Release v${VERSION} staged" >> "$GITHUB_STEP_SUMMARY"
+          echo "Installers are built, signed, and uploaded. Nothing is live yet." >> "$GITHUB_STEP_SUMMARY"
+          echo "Smoke-test the installers, then run from your own machine:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "scripts/promote-release.sh ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
