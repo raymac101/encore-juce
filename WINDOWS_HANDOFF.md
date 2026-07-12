@@ -40,13 +40,16 @@ over automatically — this file is the continuity mechanism.
   - Note found along the way: `Certificates.p12` in that folder is your
     **Apple Development** cert (Xcode local testing), *not* Developer ID
     Application — don't confuse the two if you're hunting for certs again.
-  - A local end-to-end test (build Release .app → `build_dmg.sh` → real
-    codesign → real notarization submission → staple → .dmg) was kicked
-    off with your real credentials. As of writing, Apple's notarization
-    step was still "In Progress" (can take up to ~15-30 min) — check
-    whether it finished and whether the resulting `.dmg` is valid
-    (`spctl -a -vv -t install dist/EncoreKaraoke-0.0.1-test-mac.dmg`)
-    before assuming macOS signing is fully proven end-to-end.
+  - **CONFIRMED WORKING END-TO-END** (2026-07-12): a local test run of
+    `build_dmg.sh` with your real credentials completed successfully —
+    Apple notarization `status: Accepted`, stapling succeeded ("The staple
+    and validate action worked!"), and `spctl -a -vv -t install` reports
+    `accepted / source=Notarized Developer ID`. Output:
+    `dist/EncoreKaraoke-0.0.1-test-mac.dmg` (471 MB, on the Mac's local
+    disk only — not uploaded anywhere, it was just a pipeline test). A
+    customer downloading this file today would see zero Gatekeeper
+    warnings. **macOS signing/notarization is fully proven, not just
+    scaffolded** — nothing left to verify there before a real release.
 
 ## What's left on Windows
 
