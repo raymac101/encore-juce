@@ -22,6 +22,10 @@
 #define MyAppName "Encore Karaoke"
 #define MyAppPublisher "Viracicom"
 #define MyAppExeName "Encore Karaoke.exe"
+; The build output directory (contains the exe plus its runtime DLLs,
+; Resources/Languages, and assets) -- derived from SourceExe so callers only
+; need to pass one path in, same as before.
+#define SourceDir ExtractFilePath(SourceExe)
 
 [Setup]
 AppId={{B6E1C9C0-6E6E-4A1E-9E5C-3E1E1E1E1E1E}
@@ -57,7 +61,10 @@ RestartApplications=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; Ship the whole build output directory -- the exe alone is not enough to
+; run; RubberBand/SQLite/etc. DLLs, Resources/Languages, and assets all sit
+; alongside it and are loaded relative to the exe at runtime.
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -48,6 +48,37 @@ over automatically — this file is the continuity mechanism.
     (`spctl -a -vv -t install dist/EncoreKaraoke-0.0.1-test-mac.dmg`)
     before assuming macOS signing is fully proven end-to-end.
 
+## What's done (built and verified on Windows, 2026-07-11)
+
+- **Windows installer end-to-end test, unsigned** — confirmed working:
+  fresh `cmake --build build --config Release`, then `iscc` produced
+  `dist\EncoreKaraoke-0.0.1-test-win64.exe`, silently installed to a scratch
+  dir, launched the installed exe (process came up), confirmed Start Menu +
+  Desktop shortcuts were created, then silently uninstalled and confirmed
+  the install dir, Start Menu group, and desktop shortcut were all removed.
+  Inno Setup 6.2.2 is already installed on this machine at
+  `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` (not on `PATH`).
+- **Real bug found and fixed in `packaging/windows/installer.iss`**: the
+  `[Files]` section only ever packaged the bare `.exe`
+  (`Source: "{#SourceExe}"`), never the runtime DLLs
+  (rubberband-3/samplerate/sleef/sleefdft/sqlite3.dll), `Resources/Languages`,
+  or `assets/` that sit alongside it in the build output — so every
+  installer built from the original script (including in CI, which invokes
+  it the same way) would have installed a Release build that couldn't
+  actually launch. Fixed by deriving a `SourceDir` from `SourceExe` and
+  copying the whole output directory recursively
+  (`Source: "{#SourceDir}\*"; Flags: ignoreversion recursesubdirs createallsubdirs`).
+  Note for future edits to this file: Inno Setup Preprocessor's
+  `ExtractFilePath()` does **not** return a trailing backslash (unlike the
+  Pascal Script runtime function of the same name) — the wildcard needs an
+  explicit `\` before the `*` or it silently becomes a prefix match against
+  the parent directory instead of a real directory listing, and the build
+  compiles "successfully" while packaging zero files. Cost real debugging
+  time here; don't reintroduce it.
+- If invoking `iscc` manually from Git Bash (not needed for CI, which uses
+  `cmd`): set `MSYS2_ARG_CONV_EXCL="*"` first, or Git Bash's automatic
+  POSIX-path conversion mangles the `/DMyAppVersion=...` flags.
+
 ## What's left on Windows
 
 1. **Azure Trusted Signing account** (distribution_plan.md Prerequisites
@@ -66,18 +97,9 @@ over automatically — this file is the continuity mechanism.
    ```
    (You'll need `gh auth login` on the Windows machine too — separate login
    per machine.)
-3. **Test the Windows installer script locally** (works today, unsigned,
-   no Azure account needed yet):
-   ```bat
-   cmake --preset windows-release
-   cmake --build build --config Release
-   REM install Inno Setup first: https://jrsoftware.org/isinfo.php
-   iscc packaging\windows\installer.iss /DMyAppVersion=0.0.1-test /DSourceExe="build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
-   ```
-   Output lands in `dist\EncoreKaraoke-0.0.1-test-win64.exe`. Run it, confirm
-   the install/uninstall/shortcuts work. This is a real, working, *unsigned*
-   installer — Windows SmartScreen will warn on it until Azure Trusted
-   Signing is wired in.
+3. ~~Test the Windows installer script locally~~ — done, see above. It's a
+   real, working, *unsigned* installer — Windows SmartScreen will warn on it
+   until Azure Trusted Signing is wired in.
 4. **Fill in remaining placeholders** (either machine, just needs doing
    once): `.firebaserc`'s `REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID`, and
    `Source/Services/UpdateService.cpp`'s `kManifestUrl` (currently
