@@ -34,7 +34,6 @@ enum class NavPage
     Testing,
     Ads,
     Playlist,
-    VenueManagement,
     CompanyAdmin,
     CustomerAdmin,
 

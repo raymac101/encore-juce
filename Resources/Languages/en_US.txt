@@ -48,7 +48,6 @@ nav.settings=Settings
 nav.testing=Testing
 nav.ads=Ads
 nav.playlist=Playlist
-nav.venue_management=Venue Mgmt
 nav.company_admin=Company Admin
 nav.customer_admin=Viracicom Admin
 nav.queue=Queue
@@ -85,7 +84,6 @@ page.settings=Settings
 page.testing=Testing
 page.ads=Ads
 page.playlist=Playlist
-page.venue_management=Venue Management
 page.company_admin=Company Admin
 
 # ── Customer Admin page (EnterpriseAdmin-only) ────────────────────────────────

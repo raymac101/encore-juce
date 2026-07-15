@@ -159,7 +159,6 @@ MainArea::MainArea()
     }
     addPage(NavPage::Ads,             lm.getText("page.ads"));
     addPage(NavPage::Playlist,        lm.getText("page.playlist"));
-    addPage(NavPage::VenueManagement, lm.getText("page.venue_management"));
 
     // Show Home by default
     setCurrentPage(NavPage::Home);
@@ -227,7 +226,6 @@ void MainArea::updateAllText()
         { NavPage::Testing,         "page.testing" },
         { NavPage::Ads,             "page.ads" },
         { NavPage::Playlist,        "page.playlist" },
-        { NavPage::VenueManagement, "page.venue_management" },
         { NavPage::CompanyAdmin,    "page.company_admin" },
     };
 

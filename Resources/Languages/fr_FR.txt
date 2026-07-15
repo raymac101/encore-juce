@@ -48,7 +48,6 @@ nav.settings=Paramètres
 nav.testing=Tests
 nav.ads=Publicités
 nav.playlist=Playlist
-nav.venue_management=Gestion lieu
 nav.queue=File
 nav.songs=Chansons
 nav.genres=GENRES :
@@ -79,7 +78,6 @@ page.settings=Paramètres
 page.testing=Tests
 page.ads=Publicités
 page.playlist=Playlist
-page.venue_management=Gestion du lieu
 
 # ── Page classements / analytics ────────────────────────────────────────────
 charts.title=Tableau de bord analytique
@@ -161,7 +159,6 @@ language.spanish=Español
 language.french=Français
 language.german=Deutsch
 nav.settings=Paramètres
-nav.venue_management=Gestion des lieux
 button.save=Enregistrer
 settings.language=Langue
 
