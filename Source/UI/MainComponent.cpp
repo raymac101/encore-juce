@@ -546,8 +546,57 @@ void MainComponent::setupUI()
     };
     
     topBar->onUserButtonClicked = [this]() {
-        DBG("User button clicked");
-        // TODO: Implement user menu/account access
+        auto& lm = LocalizationManager::getInstance();
+
+        juce::PopupMenu menu;
+        menu.addItem (1, lm.getText ("topbar.menu_edit_profile"));
+        menu.addItem (2, lm.getText ("topbar.menu_sign_out"));
+        menu.addSeparator();
+        menu.addItem (3, lm.getText ("topbar.menu_close_app"));
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options(), [safe] (int result)
+        {
+            if (safe == nullptr || result == 0)
+                return;
+
+            if (result == 1)
+            {
+                // "Edit Profile" -- not a sidebar nav item, only reachable
+                // here (see NavPage::Profile's declaration).
+                if (safe->mainArea != nullptr)
+                {
+                    if (auto* profilePage = safe->mainArea->getProfilePage())
+                        profilePage->loadFromCurrentHost();
+                    safe->mainArea->setCurrentPage (NavPage::Profile);
+                }
+            }
+            else if (result == 2)
+            {
+                // "Sign Out" -- stop every venue-scoped watcher and clear
+                // cached session state BEFORE handing off to Main.cpp's
+                // signOutAndReturnToLogin(), since that tears down this
+                // whole MainComponent but the underlying *Service singletons
+                // would otherwise keep running/polling for the now-signed-out
+                // session (they outlive MainComponent -- see
+                // RequestService/QueueService/VenueService, all singletons).
+                RequestService::getInstance().stop();
+                QueueService::getInstance().stopWatching();
+                VenueService::getInstance().stopWatchingPlaying();
+                VenueService::getInstance().clear();
+                HostService::getInstance().clear();
+                FirestoreClient::getInstance().signOut();
+
+                if (safe->onSignOutRequested)
+                    safe->onSignOutRequested();
+            }
+            else if (result == 3)
+            {
+                // "Close App" -- the same graceful-quit path the window's
+                // own close button uses.
+                juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            }
+        });
     };
     
     topBar->onHeightChanged = [this](int newHeight) {
@@ -947,6 +996,9 @@ void MainComponent::setupUI()
         settingsPage->setAudioEngine(audioEngine.get());
     mainArea->setBackgroundMusicPlayer(bgPlayer_.get());
     addAndMakeVisible(mainArea.get());
+
+    if (auto* profilePage = mainArea->getProfilePage())
+        profilePage->onProfileSaved = [this] { applyCurrentIdentityToUi(); };
 
     // Create Ribbon menu (quick-access control surface)
     ribbonMenu = std::make_unique<RibbonMenu>();
@@ -4554,6 +4606,7 @@ void MainComponent::applyCurrentIdentityToUi()
         return;
 
     juce::String displayName;
+    juce::Image avatarImage;
     UserRole hostRole = UserRole::Host;
 
     if (HostService::getInstance().hasCurrent())
@@ -4564,6 +4617,14 @@ void MainComponent::applyCurrentIdentityToUi()
         displayName = juce::String(host.stageName).trim();
         if (displayName.isEmpty())
             displayName = juce::String(host.fullName).trim();
+
+        const auto avatarUrl = juce::String(host.avatarUrl).trim();
+        if (avatarUrl.isNotEmpty())
+        {
+            auto avatarFile = resolveAssetFile(avatarUrl);
+            if (avatarFile.existsAsFile())
+                avatarImage = juce::ImageFileFormat::loadFrom(avatarFile);
+        }
     }
 
     if (displayName.isEmpty())
@@ -4574,11 +4635,21 @@ void MainComponent::applyCurrentIdentityToUi()
             displayName = fc.getEmail().trim();
     }
 
-    topBar->setUserInfo(displayName, juce::Image());
+    topBar->setUserInfo(displayName, avatarImage);
 
-    // If no venue is active yet, at least expose host-level rights.
-    if (navBar != nullptr && activeVenueId_.isEmpty())
-        navBar->setUserRole(hostRole);
+    if (navBar != nullptr)
+    {
+        // Gates enterpriseAdminOnly nav items (Customer Admin) on the
+        // account's real global role -- independent of the venue-scoped
+        // role applyNavRoleForActiveVenue() resolves below, so a venue
+        // association can never mask a genuine EnterpriseAdmin account.
+        navBar->setGlobalHostRole(hostRole);
+
+        // If no venue is active yet, at least expose host-level rights for
+        // everything else (the normal AccessRights-table-driven items).
+        if (activeVenueId_.isEmpty())
+            navBar->setUserRole(hostRole);
+    }
 }
 
 void MainComponent::applyNavRoleForActiveVenue()

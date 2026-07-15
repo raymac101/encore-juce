@@ -30,6 +30,7 @@ juce::String Host::toJson() const
     obj->setProperty("gender", juce::String(gender));
     obj->setProperty("signUpDate", juce::String(signUpDate));
     obj->setProperty("lastLogin", juce::String(lastLogin));
+    obj->setProperty("loginCount", loginCount);
     obj->setProperty("role", juce::String(AccessRightsUtil::userRoleToString(role)));
     obj->setProperty("accessExpirationDate", (juce::int64)accessExpirationDate);
 
@@ -63,6 +64,7 @@ Host Host::fromJsonObject(juce::DynamicObject* obj)
     h.gender               = obj->getProperty("gender").toString().toStdString();
     h.signUpDate           = obj->getProperty("signUpDate").toString().toStdString();
     h.lastLogin            = obj->getProperty("lastLogin").toString().toStdString();
+    h.loginCount           = (int) obj->getProperty("loginCount");
     h.role                 = AccessRightsUtil::stringToUserRole(obj->getProperty("role").toString().toStdString());
     h.accessExpirationDate = (int64_t)obj->getProperty("accessExpirationDate");
 

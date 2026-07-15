@@ -103,6 +103,28 @@ public:
     }
 
     //==============================================================================
+    /** "Sign Out" from the TopBar user-menu dropdown -- tears down the main
+        window and shows the login flow again, WITHOUT quitting the process
+        (unlike shutdown(), which only ever runs as part of app exit). By the
+        time this runs, MainComponent has already stopped its own watchers
+        and cleared session-scoped service state (see its dropdown handler in
+        setupUI()); this just handles the window swap, mirroring shutdown()'s
+        menu-bar cleanup exactly. */
+    void signOutAndReturnToLogin()
+    {
+       #if JUCE_MAC
+        juce::MenuBarModel::setMacMainMenu (nullptr);
+       #else
+        if (mainWindow != nullptr)
+            if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+                content->installMenuBarModel (nullptr);
+       #endif
+
+        mainWindow = nullptr;
+        showLoginWindow();
+    }
+
+    //==============================================================================
     void systemRequestedQuit() override
     {
         // Handle quit request gracefully
@@ -407,7 +429,14 @@ public:
            #endif
 
             if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+            {
                 content->setVenueId (venueId, requestInitialScan);
+                content->onSignOutRequested = []
+                {
+                    if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
+                        app->signOutAndReturnToLogin();
+                };
+            }
         }
 
         ~MainWindow() override
@@ -448,7 +477,14 @@ public:
             // Re-apply the active venue so the queue/lyric UI doesn't go blank
             // after the rebuild.
             if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+            {
                 content->setVenueId (VenueService::getInstance().getCurrentVenueId());
+                content->onSignOutRequested = []
+                {
+                    if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
+                        app->signOutAndReturnToLogin();
+                };
+            }
 
             setBounds (previousBounds);
             if (wasFullScreen)

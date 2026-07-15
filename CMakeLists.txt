@@ -71,6 +71,8 @@ target_sources(EncoreJUCE
         Source/UI/ChartsPage.cpp
         Source/UI/SettingsPage.cpp
         Source/UI/CompanyAdminPage.cpp
+        Source/UI/CustomerAdminPage.cpp
+        Source/UI/ProfilePage.cpp
         Source/UI/SongSelectionDialog.cpp
         Source/UI/SongEditDialog.cpp
         Source/UI/AddSongsDialog.cpp
@@ -93,6 +95,7 @@ target_sources(EncoreJUCE
         Source/Services/BackgroundMusicPlayer.cpp
         Source/Services/PluginHostService.cpp
         Source/Services/UpdateService.cpp
+        Source/Services/CustomerAdminService.cpp
         Source/Services/ApiService.cpp
         Source/Services/GlobalProgressService.cpp
         Source/Auth/LoginFlowController.cpp

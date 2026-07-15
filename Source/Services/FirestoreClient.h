@@ -30,6 +30,15 @@ public:
     juce::String getEmail() const           { const juce::ScopedLock l(stateLock_); return email_; }
     juce::String getDisplayName() const     { const juce::ScopedLock l(stateLock_); return displayName_; }
     juce::String getIdToken() const         { const juce::ScopedLock l(stateLock_); return idToken_; }
+
+    /** Like getIdToken(), but refreshes first if the current token is close
+        to expiry (see ensureFreshToken()). Use this instead of getIdToken()
+        whenever the token is about to be sent somewhere else that verifies
+        it server-side (e.g. as an Authorization header on a Cloud Functions
+        call) -- getIdToken() alone can hand back a token that's already
+        expired if the caller doesn't otherwise go through httpJson(). Safe
+        to call from any background thread. */
+    juce::String getFreshIdToken()          { ensureFreshToken(); return getIdToken(); }
     juce::var    getAuthClaims() const;
 
     void signOut();
@@ -55,6 +64,15 @@ public:
         not yet wired up in JUCE, so for now we surface a friendly error and
         log a TODO. Returns ok=false with errorMessage set. */
     AuthResult signInWithOAuthProvider(const juce::String& providerId);
+
+    /** Sends a Firebase "reset your password" email to the given address via
+        Identity Toolkit's accounts:sendOobCode (requestType PASSWORD_RESET).
+        This is a public endpoint keyed only by the Web API key — it works
+        for any target email without the caller needing to BE that user or
+        hold any special privilege (the same mechanism a public "forgot
+        password" link relies on). Used by the Customer Admin tool, but is
+        not itself a privileged operation. */
+    AuthResult sendPasswordResetEmail(const juce::String& email);
 
     //==============================================================================
     // Firestore: documents

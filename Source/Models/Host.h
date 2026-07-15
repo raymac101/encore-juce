@@ -35,6 +35,7 @@ struct Host
     std::string gender;
     std::string signUpDate;
     std::string lastLogin;
+    int loginCount = 0;
     UserRole role = UserRole::Basic;
     int64_t accessExpirationDate = 0;       // Epoch ms
 

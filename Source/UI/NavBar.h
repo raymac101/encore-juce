@@ -35,7 +35,14 @@ enum class NavPage
     Ads,
     Playlist,
     VenueManagement,
-    CompanyAdmin
+    CompanyAdmin,
+    CustomerAdmin,
+
+    // Not a sidebar item -- reachable only via the TopBar user-menu dropdown
+    // ("Edit Profile"), matching the old Angular app where profile editing
+    // was a menu-triggered component swap, not a persistent nav entry. See
+    // MainArea::pages / MainComponent's TopBar dropdown wiring.
+    Profile
 };
 
 //==============================================================================
@@ -66,8 +73,21 @@ public:
     void setActivePage(NavPage page);
     NavPage getActivePage() const { return activePage; }
 
-    /** Update menu visibility based on a user role. */
+    /** Update menu visibility based on a user role. Note: this role can be
+        venue-scoped (see MainComponent::applyNavRoleForActiveVenue, which
+        resolves a per-venue role from user-venue-lookup and calls this) --
+        it is NOT necessarily the same as the account's global hosts.role.
+        enterpriseAdminOnly items are deliberately NOT gated here; see
+        setGlobalHostRole(). */
     void setUserRole(UserRole role);
+
+    /** Gates enterpriseAdminOnly nav items (e.g. Customer Admin), based on
+        the account's global hosts.role -- independent of setUserRole()'s
+        venue-scoped role, so a venue association can never mask a genuine
+        platform-level EnterpriseAdmin designation. Call whenever the
+        signed-in host's own role is (re)loaded, regardless of venue
+        context. */
+    void setGlobalHostRole(UserRole role);
 
     /** Enable or disable company-mode pages. */
     void setCompanyContext(bool enabled, const juce::String& role = {});
@@ -99,6 +119,14 @@ private:
         AccessRight requiredRight;
         bool        visible = true;
         bool        companyOnly = false;
+
+        // Unlike companyOnly (which also shows for UserRole::Tester, since
+        // Tester and EnterpriseAdmin share the same AccessRights rights-set
+        // -- see AccessRightsUtil::getRightsForRole), this bypasses the
+        // rights table entirely and is visible for EnterpriseAdmin ONLY.
+        // Used for the Customer Admin page, which can delete accounts and
+        // reset passwords.
+        bool        enterpriseAdminOnly = false;
     };
 
     void buildMenuItems();
@@ -153,6 +181,7 @@ private:
     // State
     NavPage   activePage = NavPage::Home;
     UserRole  currentRole = UserRole::Host;
+    UserRole  globalHostRole_ = UserRole::Host;
     bool      companyModeEnabled = false;
     bool      companyDashboardVisible = false;
     juce::String companyRole;
