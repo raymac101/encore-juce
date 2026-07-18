@@ -25,7 +25,7 @@ Existing pieces this plan builds on directly:
 
 1. **Apple Developer Program membership** ($99/yr) → generate a **Developer ID Application** certificate (for signing the `.app`) and an **App Store Connect API key** (`.p8` + Key ID + Issuer ID) for headless notarization via `xcrun notarytool` — avoids Apple-ID/2FA prompts in CI.
 2. **Windows code signing**: sign up for **Azure Trusted Signing** (Microsoft's cloud HSM signing service — cheap, CI-friendly, avoids the hardware-token requirement modern CAs impose on traditional OV certs). Alternative if preferred: SignPath.io or SSL.com eSigner.
-3. **Firebase Hosting**: enable the Hosting product in the existing Firebase project (one console click) and optionally map a custom subdomain (e.g. `download.karaokeworld.net`) to it.
+3. **Firebase Hosting**: enable the Hosting product in the existing Firebase project (one console click) and optionally map a custom subdomain (e.g. `viracicom.com/download`) to it.
 4. Generate a **Firebase service account** (or CI token) for `firebase deploy` from GitHub Actions.
 
 Until #1/#2 are done: macOS builds will be **blocked by Gatekeeper** on a fresh customer machine (not just a warning — an unsigned/unnotarized app is refused outright, requiring a manual right-click-Open workaround), and Windows builds will show a **SmartScreen "unrecognized publisher"** warning (dismissible via "More info → Run anyway", less severe than macOS). The plan below is written to work either way, but real customer distribution should wait for at least the Apple side.
@@ -34,14 +34,14 @@ Until #1/#2 are done: macOS builds will be **blocked by Gatekeeper** on a fresh 
 
 ### 1. Update manifest (static JSON on Firebase Hosting)
 
-A single file, e.g. `https://download.karaokeworld.net/encore/manifest.json`:
+A single file, e.g. `https://viracicom.com/download/manifest.json`:
 ```json
 {
   "latestVersion": "1.1.0",
-  "releaseNotesUrl": "https://download.karaokeworld.net/encore/notes/1.1.0.html",
+  "releaseNotesUrl": "https://viracicom.com/download/notes/1.1.0.html",
   "platforms": {
-    "windows": { "url": "https://download.karaokeworld.net/encore/EncoreKaraoke-1.1.0-win64.exe", "sha256": "<hex>" },
-    "macos":   { "url": "https://download.karaokeworld.net/encore/EncoreKaraoke-1.1.0-mac.dmg",   "sha256": "<hex>" }
+    "windows": { "url": "https://viracicom.com/download/EncoreKaraoke-1.1.0-win64.exe", "sha256": "<hex>" },
+    "macos":   { "url": "https://viracicom.com/download/EncoreKaraoke-1.1.0-mac.dmg",   "sha256": "<hex>" }
   }
 }
 ```

@@ -2,10 +2,44 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-project(EncoreJUCE VERSION 1.0.0)
-
+# --- Version: 1.1.<build number> --------------------------------------------
+# The build number is the PATCH component of the app's real version, not a
+# 4th field bolted on afterward -- so ProjectInfo::versionString (which
+# UpdateService.cpp compares against the update manifest), the macOS bundle
+# version, and the Windows exe version resource all agree on one number.
+# This must happen BEFORE project(), since CMake bakes VERSION in at
+# configure time. Read the CURRENT value (already incremented by the
+# previous configure) and use it as-is for THIS build; write the next value
+# back immediately so the next configure gets a fresh one. This is
+# deliberately configure-time-only, not build-time -- a compile-time
+# constant like ProjectInfo::versionString can't change between two
+# `cmake --build` runs of the same configure anyway, and a release's
+# reported version shouldn't drift just from recompiling unchanged code.
+set(ENCORE_VERSION_MAJOR_MINOR "1.1")
 set(ENCORE_BUILD_NUMBER_FILE "${CMAKE_SOURCE_DIR}/build_number.txt")
+
+if(EXISTS "${ENCORE_BUILD_NUMBER_FILE}")
+    file(READ "${ENCORE_BUILD_NUMBER_FILE}" _encore_build_number_raw)
+    string(STRIP "${_encore_build_number_raw}" _encore_build_number_raw)
+else()
+    set(_encore_build_number_raw "1")
+endif()
+if(NOT _encore_build_number_raw MATCHES "^[0-9]+$")
+    set(_encore_build_number_raw "1")
+endif()
+set(ENCORE_BUILD_NUMBER "${_encore_build_number_raw}")
+
+math(EXPR _encore_next_build_number "${ENCORE_BUILD_NUMBER} + 1")
+file(WRITE "${ENCORE_BUILD_NUMBER_FILE}" "${_encore_next_build_number}\n")
+
+project(EncoreJUCE VERSION ${ENCORE_VERSION_MAJOR_MINOR}.${ENCORE_BUILD_NUMBER})
+
 set(ENCORE_BUILD_INFO_HEADER "${CMAKE_BINARY_DIR}/generated/BuildInfo.h")
+get_filename_component(_encore_build_info_dir "${ENCORE_BUILD_INFO_HEADER}" DIRECTORY)
+file(MAKE_DIRECTORY "${_encore_build_info_dir}")
+file(WRITE "${ENCORE_BUILD_INFO_HEADER}"
+    "#pragma once\n\n#define ENCORE_BUILD_NUMBER ${ENCORE_BUILD_NUMBER}\n#define ENCORE_VERSION_WITH_BUILD \"${PROJECT_VERSION}\"\n")
+message(STATUS "Encore version: ${PROJECT_VERSION}")
 
 # Add JUCE subdirectory (using complete JUCE framework)
 # The default paths match the standard install locations per platform.
@@ -32,16 +66,6 @@ juce_add_gui_app(EncoreJUCE
     BUNDLE_ID "com.viracicom.encore"
     ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png")
-
-add_custom_target(EncoreBuildNumber ALL
-    COMMAND ${CMAKE_COMMAND}
-        -DBUILD_NUMBER_FILE=${ENCORE_BUILD_NUMBER_FILE}
-        -DOUTPUT_HEADER=${ENCORE_BUILD_INFO_HEADER}
-        -DPROJECT_VERSION=${PROJECT_VERSION}
-        -P ${CMAKE_SOURCE_DIR}/cmake/IncrementBuildNumber.cmake
-    COMMENT "Incrementing Encore build number")
-
-add_dependencies(EncoreJUCE EncoreBuildNumber)
 
 # Generate JuceHeader.h
 juce_generate_juce_header(EncoreJUCE)

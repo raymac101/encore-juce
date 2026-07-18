@@ -214,8 +214,10 @@ jobs:
           set -euo pipefail
           WIN_SHA="$(cat dist/windows.sha256)"
           MAC_SHA="$(cat dist/macos.sha256)"
-          WIN_URL="https://download.karaokeworld.net/encore/EncoreKaraoke-${VERSION}-win64.exe"
-          MAC_URL="https://download.karaokeworld.net/encore/EncoreKaraoke-${VERSION}-mac.dmg"
+          # Firebase Storage public-download URL format (see storage.rules'
+          # public read on Installers/, and UpdateService.cpp's kManifestUrl).
+          WIN_URL="https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-${VERSION}-win64.exe?alt=media"
+          MAC_URL="https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-${VERSION}-mac.dmg?alt=media"
           NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
 
           jq --arg version "$VERSION" \

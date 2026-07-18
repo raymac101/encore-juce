@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Encore distribution: manifest.json + installer files live under
+// Installers/ so UpdateService.cpp (Source/Services/UpdateService.cpp) and
+// any customer's browser can download them WITHOUT signing in -- the
+// update check runs at launch, before login. Everything else in this
+// bucket stays fully locked down (deny-all), matching firestore.rules'
+// same deliberate deny-all catch-all.
+//
+// Writes are denied here on purpose: uploads happen via the Firebase
+// Console or CLI under the project owner's own IAM permissions, which
+// aren't governed by these client-facing Security Rules anyway. This rule
+// only ever needs to stop arbitrary internet clients from writing, not
+// stop you from managing files in the Console.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /Installers/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -16,9 +16,16 @@
 
 namespace
 {
-    // TODO: point this at the real Firebase Hosting URL once Hosting is
-    // enabled on the project (see the distribution plan's Prerequisites).
-    constexpr const char* kManifestUrl = "https://download.karaokeworld.net/encore/manifest.json";
+    // Manifest + installer files both live in Firebase Storage, under
+    // Installers/ in the same project already used for Firestore/Auth/
+    // Functions (bucket tagg-9ee2b.appspot.com -- see
+    // FirebaseConfig::storageBucket). Public read for that one path is
+    // granted by firebase/storage.rules; this download URL format
+    // (firebasestorage.googleapis.com/v0/b/<bucket>/o/<encoded-path>?alt=media)
+    // works unauthenticated as long as that rule is deployed -- confirmed
+    // working (404-not-403) against a real, not-yet-uploaded path.
+    constexpr const char* kManifestUrl =
+        "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2Fmanifest.json?alt=media";
     constexpr int kConnectionTimeoutMs = 6000;
 
     // Parses "X.Y.Z" into three non-negative ints. Returns false (and leaves
