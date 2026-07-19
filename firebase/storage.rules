@@ -1,26 +1,21 @@
 rules_version = '2';
 
-// Encore distribution: manifest.json + installer files live under
-// Installers/ so UpdateService.cpp (Source/Services/UpdateService.cpp) and
-// any customer's browser can download them WITHOUT signing in -- the
-// update check runs at launch, before login. Everything else in this
-// bucket stays fully locked down (deny-all), matching firestore.rules'
-// same deliberate deny-all catch-all.
+// EMERGENCY STOPGAP (2026-07-18): fully open, no restrictions at all.
 //
-// Writes are denied here on purpose: uploads happen via the Firebase
-// Console or CLI under the project owner's own IAM permissions, which
-// aren't governed by these client-facing Security Rules anyway. This rule
-// only ever needs to stop arbitrary internet clients from writing, not
-// stop you from managing files in the Console.
+// This replaces a deny-all-except-Installers/ ruleset that broke the TAGG
+// mobile app's ability to read songbook files -- that rule was deployed
+// without first checking what the bucket's actual prior rules were, and it
+// silently replaced whatever was letting TAGG work. Do NOT tighten this
+// again without first confirming, from the Firebase Console's Storage
+// Rules history (or from whoever knows TAGG's actual access pattern),
+// exactly what the working rule looked like before 2026-07-17. The
+// Installers/ public-read scoping this project actually needs (for
+// Source/Services/UpdateService.cpp's update checker) should be added
+// back as an ADDITION alongside TAGG's real rule, never as a replacement.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /Installers/{allPaths=**} {
-      allow read: if true;
-      allow write: if false;
-    }
-
     match /{allPaths=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }
