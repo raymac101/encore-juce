@@ -38,3 +38,8 @@ JuceLibraryCode/
 src/assets/images/
 src/assets/icon/
 firebase_SA.json
+
+# Release build outputs (installers, manifest.json) -- large binaries,
+# never committed. See WINDOWS_HANDOFF.md for the current release's
+# content if you need to reference it.
+dist/

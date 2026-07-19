@@ -48,8 +48,8 @@ nav.settings=Settings
 nav.testing=Testing
 nav.ads=Ads
 nav.playlist=Playlist
-nav.venue_management=Venue Mgmt
 nav.company_admin=Company Admin
+nav.customer_admin=Viracicom Admin
 nav.queue=Queue
 nav.songs=Songs
 nav.genres=GENRES:
@@ -62,6 +62,9 @@ topbar.offline_warning=YOUR COMPUTER IS OFFLINE - PLEASE CONNECT TO THE INTERNET
 topbar.no_cover=No Cover
 topbar.anonymous=Anonymous
 topbar.vu=VU
+topbar.menu_edit_profile=Edit Profile
+topbar.menu_sign_out=Sign Out
+topbar.menu_close_app=Close App
 
 # ── Bottom bar (transport controls) ──────────────────────────────────────────
 bottombar.pitch=PITCH
@@ -81,8 +84,43 @@ page.settings=Settings
 page.testing=Testing
 page.ads=Ads
 page.playlist=Playlist
-page.venue_management=Venue Management
 page.company_admin=Company Admin
+
+# ── Customer Admin page (EnterpriseAdmin-only) ────────────────────────────────
+page.customer_admin.title=Viracicom Admin
+page.customer_admin.subtitle=Legacy-user venue assignment and customer support tools. EnterpriseAdmin only.
+page.customer_admin.unassigned_title=Hosts with no active venue
+page.customer_admin.assign_header=Assign venue + role
+page.customer_admin.venue_search_hint=Search venues by name or city...
+page.customer_admin.no_venue_selected=(no venue selected)
+page.customer_admin.venue_role=Role
+page.customer_admin.search_hint=Search by exact email or stage-name prefix.
+page.customer_admin.search_placeholder=name@example.com or stage name...
+page.customer_admin.reset_section=Password
+page.customer_admin.new_password_hint=New password (min 6 characters)
+page.customer_admin.removal_section=Account status
+page.customer_admin.confirm_email_hint=Type the account's exact email to enable permanent delete:
+page.customer_admin.confirm_email_placeholder=Confirm email to enable delete
+page.customer_admin.delete_venue_section=Delete venue
+page.customer_admin.confirm_venue_name_hint=Type the venue's exact name to enable permanent delete:
+page.customer_admin.confirm_venue_name_placeholder=Confirm venue name to enable delete
+
+# ── Profile page (self-service, reached via the TopBar user menu) ────────────
+page.profile.title=Edit Profile
+page.profile.subtitle=Update your own display info. Role changes are handled separately by an EnterpriseAdmin.
+page.profile.full_name=Full Name
+page.profile.email=Email
+page.profile.stage_name=Stage Name
+page.profile.birthday=Birthday
+page.profile.birthday_hint=YYYY-MM-DD
+page.profile.country=Country
+page.profile.city=City
+page.profile.gender=Gender
+page.profile.gender_male=Male
+page.profile.gender_female=Female
+page.profile.gender_other=Other
+page.profile.role=Role
+page.profile.avatar_section=Choose an avatar
 
 # ── Charts page ──────────────────────────────────────────────────────────────
 charts.title=Analytics Dashboard

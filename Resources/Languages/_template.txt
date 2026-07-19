@@ -48,7 +48,6 @@ nav.settings=Settings
 nav.testing=Testing
 nav.ads=Ads
 nav.playlist=Playlist
-nav.venue_management=Venue Mgmt
 nav.queue=Queue
 nav.songs=Songs
 nav.genres=GENRES:
@@ -79,7 +78,6 @@ page.settings=Settings
 page.testing=Testing
 page.ads=Ads
 page.playlist=Playlist
-page.venue_management=Venue Management
 
 # ── Charts page ──────────────────────────────────────────────────────────────
 charts.title=Analytics Dashboard

@@ -135,6 +135,21 @@ MainArea::MainArea()
         addChildComponent(cp.get());
         pages[static_cast<int>(NavPage::CompanyAdmin)] = std::move(cp);
     }
+    // Create real Customer Admin page (EnterpriseAdmin-only)
+    {
+        auto ca = std::make_unique<CustomerAdminPage>();
+        customerAdminPage = ca.get();
+        addChildComponent(ca.get());
+        pages[static_cast<int>(NavPage::CustomerAdmin)] = std::move(ca);
+    }
+    // Create real Profile page (no sidebar entry -- reachable only via the
+    // TopBar user-menu dropdown's "Edit Profile" item)
+    {
+        auto pp = std::make_unique<ProfilePage>();
+        profilePage = pp.get();
+        addChildComponent(pp.get());
+        pages[static_cast<int>(NavPage::Profile)] = std::move(pp);
+    }
     // Create real Testing page
     {
         auto tp = std::make_unique<TestingPage>();
@@ -144,7 +159,6 @@ MainArea::MainArea()
     }
     addPage(NavPage::Ads,             lm.getText("page.ads"));
     addPage(NavPage::Playlist,        lm.getText("page.playlist"));
-    addPage(NavPage::VenueManagement, lm.getText("page.venue_management"));
 
     // Show Home by default
     setCurrentPage(NavPage::Home);
@@ -212,7 +226,6 @@ void MainArea::updateAllText()
         { NavPage::Testing,         "page.testing" },
         { NavPage::Ads,             "page.ads" },
         { NavPage::Playlist,        "page.playlist" },
-        { NavPage::VenueManagement, "page.venue_management" },
         { NavPage::CompanyAdmin,    "page.company_admin" },
     };
 
@@ -234,6 +247,8 @@ void MainArea::updateAllText()
     if (mixerPage)    mixerPage->updateAllText();
     if (settingsPage) settingsPage->updateAllText();
     if (companyAdminPage) companyAdminPage->updateAllText();
+    if (customerAdminPage) customerAdminPage->updateAllText();
+    if (profilePage) profilePage->updateAllText();
     if (testingPage)  testingPage->updateAllText();
 }
 

@@ -133,7 +133,6 @@ status.connected=Conectado
 status.offline=Desconectado
 status.error=Error
 nav.settings=Configuración
-nav.venue_management=Gestión de locales
 button.save=Guardar
 settings.language=Idioma
 

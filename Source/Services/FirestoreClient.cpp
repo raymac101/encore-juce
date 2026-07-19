@@ -256,6 +256,24 @@ FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce:
     return parseAuthError(resp);
 }
 
+FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::String& email)
+{
+    juce::URL url(FirebaseConfig::authBaseUrl
+                  + "/accounts:sendOobCode?key=" + FirebaseConfig::apiKey);
+
+    juce::DynamicObject::Ptr body = new juce::DynamicObject();
+    body->setProperty("requestType", "PASSWORD_RESET");
+    body->setProperty("email", email);
+
+    int status = 0;
+    auto resp = httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+
+    if (status >= 200 && status < 300 && resp.isObject())
+        return { true, false, {}, {} };
+
+    return parseAuthError(resp);
+}
+
 FirestoreClient::AuthResult FirestoreClient::signInWithOAuthProvider(const juce::String& providerId)
 {
     // Real desktop OAuth requires:

@@ -79,6 +79,7 @@ namespace
         h.birthday  = FC::readString(doc, "birthday").toStdString();
         h.signUpDate = FC::readString(doc, "signUpDate").toStdString();
         h.lastLogin  = FC::readString(doc, "lastLogin").toStdString();
+        h.loginCount = (int) FC::readInt(doc, "loginCount", 0);
         auto roleStr = FC::readString(doc, "role").toStdString();
         if (! roleStr.empty())
             h.role = AccessRightsUtil::stringToUserRole(roleStr);
@@ -99,7 +100,25 @@ namespace
         auto doc = FC::getInstance().getDocument(path, &status);
 
         if (status == 200 && doc.hasProperty("fields"))
-            return hostFromDoc(doc, uid);
+        {
+            Host existing = hostFromDoc(doc, uid);
+
+            // lastLogin/loginCount previously only got set once, at account
+            // creation below, and were never touched again on subsequent
+            // logins. Fire a best-effort background patch (same style as
+            // touchLastAccess()) so they actually reflect real sign-in
+            // activity going forward -- read-then-write, not atomic, but
+            // that's an accepted tradeoff for a simple incrementing field
+            // (FirestoreClient has no fieldTransform/increment support).
+            auto fields = FC::makeFields({
+                { "lastLogin",  FC::stringValue(juce::Time::getCurrentTime().toISO8601(true)) },
+                { "loginCount", FC::integerValue(existing.loginCount + 1) }
+            });
+            const auto patchPath = path + "?updateMask.fieldPaths=lastLogin&updateMask.fieldPaths=loginCount";
+            FC::getInstance().patchDocument(patchPath, fields);
+
+            return existing;
+        }
 
         // No host doc — create one. First user ever ⇒ EnterpriseAdmin.
         const bool first = isFirstHostEver();

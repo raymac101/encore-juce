@@ -22,6 +22,8 @@
 #include "ChartsPage.h"
 #include "SettingsPage.h"
 #include "CompanyAdminPage.h"
+#include "CustomerAdminPage.h"
+#include "ProfilePage.h"
 #include "MixerPage.h"
 #include "TestingPage.h"
 #include "SongSelectionDialog.h"
@@ -108,6 +110,8 @@ private:
     SettingsPage* settingsPage = nullptr;
     TestingPage*  testingPage  = nullptr;
     CompanyAdminPage* companyAdminPage = nullptr;
+    CustomerAdminPage* customerAdminPage = nullptr;
+    ProfilePage* profilePage = nullptr;
 
 public:
     /** Push a venue snapshot into the settings page (call from FirebaseManager callback). */
@@ -137,6 +141,13 @@ public:
 
     /** Direct access to the company-admin dashboard page. */
     CompanyAdminPage* getCompanyAdminPage() const noexcept { return companyAdminPage; }
+
+    /** Direct access to the EnterpriseAdmin-only customer support page. */
+    CustomerAdminPage* getCustomerAdminPage() const noexcept { return customerAdminPage; }
+
+    /** Direct access to the self-service "Edit Profile" page (reachable only
+        via the TopBar user-menu dropdown, not the sidebar). */
+    ProfilePage* getProfilePage() const noexcept { return profilePage; }
 
     /** Update company-dashboard context for company-mode users. */
     void setCompanyContext (const juce::String& companyId, const juce::String& companyRole)

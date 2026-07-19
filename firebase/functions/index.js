@@ -136,6 +136,12 @@ exports.enqueueMetadataFetch = onCall(
 exports._normalizeKeyForTests = normalizeKey;
 
 // ============================================================
+// Customer Admin: legacy-user venue assignment + support tool
+// (EnterpriseAdmin-only; see firebase/functions/adminUsers.js)
+// ============================================================
+Object.assign(exports, require("./adminUsers")(admin, db));
+
+// ============================================================
 // LEGACY FUNCTIONS (Migrated)
 // ============================================================
 

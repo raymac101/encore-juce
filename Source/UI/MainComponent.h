@@ -86,6 +86,16 @@ public:
         modal dialog — a live show must never be blocked by this. */
     void showUpdateAvailableBanner (const juce::String& version);
 
+    /** Fired when the user picks "Sign Out" from the TopBar user-menu
+        dropdown, after this component has already stopped its own watchers
+        and cleared session-scoped service state (see the dropdown handler
+        in setupUI()). Main.cpp wires this to tear down the MainWindow and
+        show the LoginWindow again -- MainComponent itself has no visibility
+        into EncoreApplication's concrete type (defined in Main.cpp), so this
+        callback is the hand-off point, the same pattern already used for
+        menu-bar reattachment via installMenuBarModel(). */
+    std::function<void()> onSignOutRequested;
+
     //==============================================================================
     // Accessibility
     void setHighContrastMode(bool enabled);

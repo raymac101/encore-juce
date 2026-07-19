@@ -493,7 +493,6 @@ void LocalizationManager::loadFallbackTranslations()
     translations["nav.ads"] = "Ads";
     translations["nav.playlist"] = "Playlist";
     translations["nav.locations"] = "Locations";
-    translations["nav.venue_management"] = "Venue Mgmt";
     translations["nav.queue"] = "Queue";
     translations["nav.songs"] = "Songs";
     translations["nav.genres"] = "GENRES:";
@@ -525,7 +524,6 @@ void LocalizationManager::loadFallbackTranslations()
     translations["page.testing"] = "Testing";
     translations["page.ads"] = "Ads";
     translations["page.playlist"] = "Playlist";
-    translations["page.venue_management"] = "Venue Management";
 
     // ── Mixer ──
     translations["mixer.title"] = "Digital Mixer";

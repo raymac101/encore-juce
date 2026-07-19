@@ -216,8 +216,9 @@ NavBar::NavBar()
             case NavPage::Testing:         iconPath = NavIcons::makeTesting();  break;
             case NavPage::Ads:             iconPath = NavIcons::makeAds();      break;
             case NavPage::Playlist:        break;
-            case NavPage::VenueManagement: iconPath = NavIcons::makeLocations(); break;
             case NavPage::CompanyAdmin:    iconPath = NavIcons::makeLocations(); break;
+            case NavPage::CustomerAdmin:   iconPath = NavIcons::makeLocations(); break;
+            case NavPage::Profile:         break; // never a sidebar item; no menuItems entry exists for it
         }
 
         auto* btn = buttons.add(new NavButton(item.label, iconPath));
@@ -270,8 +271,8 @@ void NavBar::buildMenuItems()
         { NavPage::Settings, lm.getText("nav.settings"), {}, AccessRight::Settings },
         { NavPage::Testing,  lm.getText("nav.testing"),  {}, AccessRight::Testing  },
         { NavPage::Ads,      lm.getText("nav.ads"),      {}, AccessRight::Ads      },
-        { NavPage::VenueManagement, lm.getText("nav.venue_management"), {}, AccessRight::VenueManagement },
         { NavPage::CompanyAdmin,    lm.getText("nav.company_admin"),    {}, AccessRight::VenueManagement, false, true },
+        { NavPage::CustomerAdmin,   lm.getText("nav.customer_admin"),   {}, AccessRight::VenueManagement, false, false, true },
     };
 }
 
@@ -369,6 +370,13 @@ void NavBar::setUserRole(UserRole role)
 
     for (auto& item : menuItems)
     {
+        if (item.enterpriseAdminOnly)
+        {
+            // Deliberately not gated on the (possibly venue-scoped) `role`
+            // param here -- see setGlobalHostRole().
+            continue;
+        }
+
         if (item.companyOnly)
         {
             item.visible = companyDashboardVisible || roleCanSeeCompany;
@@ -391,6 +399,18 @@ void NavBar::setUserRole(UserRole role)
 
     // Playlist/genre section visible if user has Playlist right
     genreSectionVisible = AccessRightsUtil::hasAccess(role, AccessRight::Playlist);
+
+    resized();
+    repaint();
+}
+
+void NavBar::setGlobalHostRole(UserRole role)
+{
+    globalHostRole_ = role;
+
+    for (auto& item : menuItems)
+        if (item.enterpriseAdminOnly)
+            item.visible = (globalHostRole_ == UserRole::EnterpriseAdmin);
 
     resized();
     repaint();

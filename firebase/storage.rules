@@ -1,0 +1,21 @@
+rules_version = '2';
+
+// EMERGENCY STOPGAP (2026-07-18): fully open, no restrictions at all.
+//
+// This replaces a deny-all-except-Installers/ ruleset that broke the TAGG
+// mobile app's ability to read songbook files -- that rule was deployed
+// without first checking what the bucket's actual prior rules were, and it
+// silently replaced whatever was letting TAGG work. Do NOT tighten this
+// again without first confirming, from the Firebase Console's Storage
+// Rules history (or from whoever knows TAGG's actual access pattern),
+// exactly what the working rule looked like before 2026-07-17. The
+// Installers/ public-read scoping this project actually needs (for
+// Source/Services/UpdateService.cpp's update checker) should be added
+// back as an ADDITION alongside TAGG's real rule, never as a replacement.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}
