@@ -142,6 +142,12 @@ public:
                      const juce::String& emojiId,
                      WriteCallback onDone = nullptr);
 
+    /** Bulk-delete every doc under venues/<id>/emojis. Used as a backstop
+        when a song finishes, so leftover reactions never carry over to the
+        next singer (in addition to the per-emoji delete each animated
+        reaction performs when it finishes on screen). */
+    void clearEmojis(const juce::String& venueId, WriteCallback onDone = nullptr);
+
     //==========================================================================
     // Playlists (venues/<id>/playlists/venueLists/<listName>)
     //

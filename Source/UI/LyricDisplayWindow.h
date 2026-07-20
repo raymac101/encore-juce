@@ -40,6 +40,9 @@ public:
                             const juce::String& avatarPath);
     void setForceIdleScreen (bool shouldForce);
 
+    /** Convenience passthrough — spawn a cheer emoji reaction on the display. */
+    void addEmoji (const Emoji& request);
+
     /** Loads an MP4/M4V/MOV video for full-screen playback on the lyric
         display. Audio is provided by the video itself — the AudioEngine is
         not used in this mode. When autoPlay is false, media is preloaded and

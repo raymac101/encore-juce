@@ -785,6 +785,22 @@ void VenueService::deleteEmoji(const juce::String& venueId,
     });
 }
 
+void VenueService::clearEmojis(const juce::String& venueId, WriteCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, onDone = std::move(onDone)]()
+    {
+        deleteCollectionContents("venues/" + venueId + "/emojis");
+        if (onDone)
+            juce::MessageManager::callAsync([onDone]() { onDone(true, {}); });
+    });
+}
+
 //==============================================================================
 // Playlists
 namespace

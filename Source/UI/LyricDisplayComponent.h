@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 #include "../CDG/CDGDecoder.h"
+#include "../Models/Emoji.h"
 
 class AudioEngine;
 
@@ -130,6 +131,12 @@ public:
         invalid image to revert to the bundled Encore logo. */
     void setVenueLogo (const juce::Image& logo);
 
+    /** Spawn a cheer emoji reaction (from the TAGG mobile app) to animate
+        rising up the left side of the screen. Silently ignored while the
+        idle/ad screen is showing (no active song) or once the concurrent
+        on-screen cap is reached. */
+    void addEmoji (const Emoji& request);
+
     //==============================================================================
     void paint  (juce::Graphics&) override;
     void resized() override;
@@ -141,6 +148,9 @@ private:
     void paintCdg     (juce::Graphics& g, juce::Rectangle<int> area);
     void paintAdPanel (juce::Graphics& g, juce::Rectangle<int> area, bool addFrame);
     void paintOverlay (juce::Graphics& g, juce::Rectangle<int> area);
+    void updateEmojis (double dtSeconds);
+    void paintEmojis  (juce::Graphics& g, juce::Rectangle<int> area);
+    juce::Image getOrLoadEmojiSheet (const juce::String& emojiName, int& outTotalFrames);
     void layoutVideoBounds();
     void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
     void updateAdPanelAnimation (bool idleMode);
@@ -196,6 +206,14 @@ private:
 
     std::unique_ptr<juce::VideoComponent> idleAdVideoComponent_;
     bool forceIdleScreen_ = false;
+
+    // Emoji cheer reactions (venues/<id>/emojis, via EmojiService).
+    std::vector<Emoji> activeEmojis_;
+    std::unordered_map<std::string, juce::Image> emojiSheetCache_;
+    std::unordered_map<std::string, int> emojiFrameCountCache_;
+    double lastEmojiTickMs_ = 0.0;
+    static constexpr int kMaxConcurrentEmojis = 40;
+    static constexpr int kEmojiFrameSize = 480;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayComponent)
 };

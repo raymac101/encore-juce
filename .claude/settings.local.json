@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build build --config Debug)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(mdfind -name cmake)",
+      "Bash(grep -i \"bin/cmake$\")",
+      "Bash(/Users/ray/Library/Python/3.9/bin/cmake --build build --config Debug)",
+      "Bash(brew list *)",
+      "Bash(brew --prefix rubberband)",
+      "Read(//opt/**)",
+      "Bash(xargs -I{} sh -c 'echo {}; grep -l \"Main.cpp\" {} 2>/dev/null')",
+      "Bash(PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags rubberband)",
+      "Read(//usr/local/lib/**)",
+      "Bash(/Users/ray/Library/Python/3.9/bin/cmake -S . -B build)",
+      "Bash(/Users/ray/Library/Python/3.9/bin/cmake -S . -B build --trace-expand --trace-redirect=/tmp/trace.log)",
+      "Read(//tmp/**)",
+      "Bash(ls -la /opt/homebrew/bin/brew 2>/dev/null; ls -la /usr/local/bin/brew 2>/dev/null; ls -la /usr/local/Homebrew 2>/dev/null | head -2; echo \"---profile---\"; cat ~/.zprofile 2>/dev/null | grep -i brew; cat ~/.zshrc 2>/dev/null | grep -i brew)",
+      "Read(//usr/local/**)",
+      "Read(//Users/ray/**)",
+      "Bash(printf '#include <rubberband/RubberBandStretcher.h>\\\\nint main\\(\\){return 0;}\\\\n')",
+      "Bash(/usr/bin/c++ -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -c /tmp/rbtest.cpp -o /tmp/rbtest.o)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(/usr/bin/c++ -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -I/usr/local/include -c /tmp/rbtest.cpp -o /tmp/rbtest.o)",
+      "Bash(/Users/ray/Library/Python/3.9/bin/cmake --version)",
+      "Bash(CPATH=/usr/local/include /usr/bin/c++ -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -c /tmp/rbtest.cpp -o /tmp/rbtest.o)",
+      "Bash(CPATH=/usr/local/include /Users/ray/Library/Python/3.9/bin/cmake --build build --config Debug)",
+      "Bash(grep -v -- '-sheet.png$\\\\|\\\\.gif$')",
+      "Bash(grep -c -- '-sheet.png$')",
+      "Bash(grep -c '\\\\.gif$')",
+      "Bash(grep -c '\\\\.json$')",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore/src/assets/emojis/alien-sheet.png\")",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore/src/assets/emojis/heart-sheet.png\")",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore/src/assets/emojis/HandHeart-sheet.png\")",
+      "Bash(sed -E 's/\\(-sheet\\)?\\\\.\\(png|gif\\)$//')",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/alien-sheet.png\")",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/alien.png\")",
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/HandHeart-sheet.png\")"
+    ]
+  }
+}

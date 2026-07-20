@@ -138,6 +138,12 @@ void LyricDisplayWindow::setForceIdleScreen (bool shouldForce)
         display_->setForceIdleScreen (shouldForce);
 }
 
+void LyricDisplayWindow::addEmoji (const Emoji& request)
+{
+    if (display_ != nullptr)
+        display_->addEmoji (request);
+}
+
 bool LyricDisplayWindow::loadVideo (const juce::File& videoFile, bool autoPlay)
 {
     return display_ != nullptr && display_->loadVideo (videoFile, autoPlay);

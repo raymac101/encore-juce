@@ -12,6 +12,7 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/ImageCache.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/VenueService.h"
 
 #include <algorithm>
 #include <cmath>
@@ -428,6 +429,19 @@ void LyricDisplayComponent::setNextSinger (const juce::String& singerName,
 //==============================================================================
 void LyricDisplayComponent::timerCallback()
 {
+    // Advance emoji reactions every tick regardless of idle/CDG/video mode,
+    // so any already in flight when the idle screen kicks in keep quietly
+    // progressing to natural completion in the background (they just won't
+    // be painted — see paint()) rather than being frozen mid-animation.
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = (lastEmojiTickMs_ > 0.0)
+                             ? juce::jlimit (0.0, 0.25, (nowMs - lastEmojiTickMs_) / 1000.0)
+                             : (1.0 / 30.0);
+        lastEmojiTickMs_ = nowMs;
+        updateEmojis (dt);
+    }
+
     if (forceIdleScreen_)
     {
         // The next song may be preloaded while transport is stopped. Keep the
@@ -562,6 +576,11 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
 
     // Keep lower-third overlays full-width in all modes.
     paintOverlay (g, area);
+
+    // Emoji cheer reactions only ever show over an active karaoke song —
+    // never on the idle/ad screen between singers.
+    if (! idleMode)
+        paintEmojis (g, area);
 }
 
 void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> area)
@@ -903,6 +922,134 @@ void LyricDisplayComponent::setVenueLogo (const juce::Image& logo)
 {
     logoImage_ = logo;
     repaint();
+}
+
+//==============================================================================
+// Emoji cheer reactions
+juce::Image LyricDisplayComponent::getOrLoadEmojiSheet (const juce::String& emojiName, int& outTotalFrames)
+{
+    const auto key = emojiName.toStdString();
+
+    auto cachedImage = emojiSheetCache_.find (key);
+    if (cachedImage != emojiSheetCache_.end())
+    {
+        outTotalFrames = emojiFrameCountCache_[key];
+        return cachedImage->second;
+    }
+
+    const auto appDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                            .getParentDirectory();
+    const auto file = appDir.getChildFile ("assets/emojis/" + emojiName + "-sheet.png");
+
+    juce::Image image;
+    int frames = 0;
+    if (file.existsAsFile())
+    {
+        image = juce::ImageFileFormat::loadFrom (file);
+        if (image.isValid())
+            frames = juce::jmax (1, image.getWidth() / kEmojiFrameSize);
+    }
+    else
+    {
+        DBG ("LyricDisplay: emoji sprite sheet not found: " + file.getFullPathName());
+    }
+
+    emojiSheetCache_[key] = image;
+    emojiFrameCountCache_[key] = frames;
+    outTotalFrames = frames;
+    return image;
+}
+
+void LyricDisplayComponent::addEmoji (const Emoji& request)
+{
+    // Never display cheer reactions over the idle/ad screen — only during
+    // an active karaoke song.
+    const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
+    if (idleMode)
+        return;
+
+    if ((int) activeEmojis_.size() >= kMaxConcurrentEmojis)
+        return;  // spam guard — extra reactions are silently dropped
+
+    const juce::String name = juce::String (request.emojiName).trim();
+    if (name.isEmpty())
+        return;
+
+    int totalFrames = 0;
+    auto sheet = getOrLoadEmojiSheet (name, totalFrames);
+    if (! sheet.isValid() || totalFrames <= 0)
+        return;
+
+    Emoji e = request;
+    e.img = sheet;
+    e.totalFrames = totalFrames;
+    e.width = kEmojiFrameSize;
+    e.height = kEmojiFrameSize;
+    e.current = 0;
+    e.alpha = 1.0f;
+    e.isDeleting = false;
+    e.isLoading = false;
+    e.frameAccumulatorSeconds = 0.0f;
+
+    // Random spawn: left-hand column, near the bottom, random rise speed —
+    // mirrors the legacy Angular lyric-display cheer animation. Sizes and
+    // thresholds scale with the window so the effect looks right whether
+    // this is a small preview or a full external display.
+    auto bounds = getLocalBounds();
+    juce::Random& rng = juce::Random::getSystemRandom();
+
+    const float leftBand = juce::jmax (60.0f, (float) bounds.getWidth() * 0.08f);
+    e.xPos = rng.nextFloat() * leftBand;
+    e.yPos = (float) bounds.getHeight() - 20.0f;
+    e.speed = 40.0f + rng.nextFloat() * 90.0f;              // px/second
+    e.fadeStartYPos = (float) bounds.getHeight() * 0.2f;
+    e.drawSize = juce::jmax (60.0f, (float) bounds.getHeight() * 0.09f);
+
+    activeEmojis_.push_back (std::move (e));
+}
+
+void LyricDisplayComponent::updateEmojis (double dtSeconds)
+{
+    if (activeEmojis_.empty())
+        return;
+
+    for (auto& e : activeEmojis_)
+        e.update (dtSeconds);
+
+    for (auto it = activeEmojis_.begin(); it != activeEmojis_.end(); )
+    {
+        if (it->isFinished())
+        {
+            if (venueId_.isNotEmpty() && ! it->id.empty())
+                VenueService::getInstance().deleteEmoji (venueId_, juce::String (it->id));
+            it = activeEmojis_.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+void LyricDisplayComponent::paintEmojis (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    for (const auto& e : activeEmojis_)
+    {
+        if (! e.img.isValid())
+            continue;
+
+        const int srcX = e.current * kEmojiFrameSize;
+        const int destSize = (int) e.drawSize;
+        const int destX = area.getX() + (int) e.xPos;
+        const int destY = area.getY() + (int) e.yPos;
+
+        g.setOpacity (juce::jlimit (0.0f, 1.0f, e.alpha));
+        g.drawImage (e.img,
+                     destX, destY, destSize, destSize,
+                     srcX, 0, kEmojiFrameSize, kEmojiFrameSize);
+    }
+
+    g.setOpacity (1.0f);
 }
 
 void LyricDisplayComponent::layoutIdleAdVideoBounds (juce::Rectangle<int> area)

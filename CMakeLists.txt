@@ -113,6 +113,7 @@ target_sources(EncoreJUCE
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
         Source/Services/RequestService.cpp
+        Source/Services/EmojiService.cpp
         Source/Services/ArchiveService.cpp
         Source/Services/AnalyticsService.cpp
         Source/Services/AuditService.cpp

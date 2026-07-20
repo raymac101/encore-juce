@@ -16,6 +16,7 @@
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
 #include "../Services/RequestService.h"
+#include "../Services/EmojiService.h"
 #include "../Services/HostService.h"
 #include "../Services/SongDatabase.h"
 #include "../Services/ImageCache.h"
@@ -582,6 +583,7 @@ void MainComponent::setupUI()
                 // RequestService/QueueService/VenueService, all singletons).
                 RequestService::getInstance().stop();
                 QueueService::getInstance().stopWatching();
+                EmojiService::getInstance().stop();
                 VenueService::getInstance().stopWatchingPlaying();
                 VenueService::getInstance().clear();
                 HostService::getInstance().clear();
@@ -796,6 +798,10 @@ void MainComponent::setupUI()
 
     auto clearLoadedPlaybackState = [this]()
     {
+        // The song is being abandoned (skipped / returned to queue), not
+        // paused — remove its now-playing doc so it doesn't linger.
+        clearPlayingDoc();
+
         currentSong = {};
         currentSongImageUrl.clear();
         currentSongDuration = 0.0;
@@ -880,6 +886,12 @@ void MainComponent::setupUI()
         else
             audioEngine->play();
 
+        // Fresh play on an already-loaded song (e.g. Play pressed after a
+        // preload-without-autostart), or resuming from pause — resuming is
+        // a no-op here since writePlayingDocIfNeeded() only ever writes once
+        // per loaded song (the doc is left untouched across pause/resume).
+        writePlayingDocIfNeeded();
+
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(false);
 
@@ -914,6 +926,10 @@ void MainComponent::setupUI()
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(true);
+
+        // Manual stop is a distinct event from pause — remove the
+        // now-playing doc (pause deliberately leaves it in place).
+        clearPlayingDoc();
 
         bottomBar->setProgress(0.0f);
         bottomBar->setPlaying(false);
@@ -2394,88 +2410,12 @@ void MainComponent::setupUI()
     };
 
     // ── Song-finished → auto-advance ──────────────────────────────────────────
+    // Shared by AudioEngine's onSongFinished (audio/CDG) and the video
+    // natural-end check in timerCallback() (MP4/M4V/MOV, which bypasses
+    // AudioEngine entirely) — see MainComponent::handleSongFinished().
     audioEngine->onSongFinished = [this]()
     {
-        logPlayHistoryIfNeeded(true);
-
-        // Karaoke song ended — fade background music back in to fill the silence.
-        if (bgPlayer_ != nullptr)
-            bgPlayer_->fadeIn (2.0f);
-
-        if (lyricWindow_ != nullptr)
-            lyricWindow_->setForceIdleScreen (true);
-
-        if (queueBar == nullptr) return;
-        const auto venueId = activeVenueId_;
-
-        // Remove the finished song from the singer's queue item now that it
-        // has actually completed, then move the singer to the end of the
-        // round with any remaining songs.
-        if (hasLocalNowPlaying_ && !localNowPlaying_.songs.empty())
-        {
-            auto singers = queueBar->getSingers();
-            int singerIndex = -1;
-            for (int i = 0; i < (int) singers.size(); ++i)
-            {
-                if (juce::String(singers[(size_t) i].id).trim() == juce::String(localNowPlaying_.id).trim()
-                    || juce::String(singers[(size_t) i].name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
-                {
-                    singerIndex = i;
-                    break;
-                }
-            }
-
-            if (singerIndex >= 0)
-            {
-                auto finishedSinger = singers[(size_t) singerIndex];
-                if (! finishedSinger.songs.empty())
-                {
-                    QueueItem finishedItem;
-                    finishedItem.id          = currentSong.id;
-                    finishedItem.songId      = currentSong.id;
-                    finishedItem.songName    = currentSong.songName;
-                    finishedItem.songArtist  = currentSong.artistName;
-                    finishedItem.singerName  = finishedSinger.name;
-                    finishedItem.singerAvatar= finishedSinger.avatar;
-
-                    finishedSinger.songs.erase(finishedSinger.songs.begin());
-                    finishedSinger.songsPerformed += 1;
-
-                    if (! venueId.isEmpty())
-                        QueueService::getInstance().removeSong(venueId, finishedItem, nullptr);
-                }
-
-                singers.erase(singers.begin() + singerIndex);
-                singers.push_back(finishedSinger);
-                reindexQueueWithHostRoundAnchor(singers);
-                queueBar->setSingers(singers);
-
-                if (queueBar->onReorder)
-                    queueBar->onReorder(singerIndex, (int) singers.size() - 1);
-            }
-        }
-
-        if (bottomBar != nullptr)
-            bottomBar->setPlaying(false);
-        queueBar->setPlaying(false);
-
-        // Always advance the round when a song ends so the next singer/song
-        // is ready. Auto Play controls whether it starts automatically.
-        if (! queueBar->isAutoPlayEnabled())
-        {
-            queueBar->stopCountdown();
-            queueAndLoadNextSingerSong(false);
-            return;
-        }
-
-        if (queueBar->isAutoPlayEnabled())
-        {
-            int delay = queueBar->getDelaySec();
-            if (delay > 0)
-                queueBar->startCountdown(delay);
-            else if (queueBar->onCountdownFinished)
-                queueBar->onCountdownFinished();
-        }
+        handleSongFinished();
     };
 
     queueBar->onCountdownFinished = [this]()
@@ -2880,6 +2820,25 @@ void MainComponent::timerCallback()
         }
         bottomBar->setPlaying (videoActive ? true : audioEngine->isPlaying());
         bottomBar->setVolume (juce::roundToInt(audioEngine->getMasterVolume() * 10.0f));
+    }
+
+    // Video (MP4/M4V/MOV) bypasses AudioEngine entirely, so it has no
+    // equivalent of AudioEngine::onSongFinished. Detect natural end here by
+    // polling position vs. duration. Guarded so it only fires once per
+    // loaded video, and only while position is actively advancing (not
+    // merely sitting near the end while paused).
+    if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive() && ! videoFinishedFired_)
+    {
+        const double total = lyricWindow_->getVideoDuration();
+        const double pos   = lyricWindow_->getVideoPosition();
+
+        if (total > 0.25 && pos >= total - 0.15 && pos > lastVideoPositionSec_)
+        {
+            videoFinishedFired_ = true;
+            handleSongFinished();
+        }
+
+        lastVideoPositionSec_ = pos;
     }
 
     refreshRibbonState();
@@ -3595,12 +3554,17 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->currentSong         = song;
         self->currentSongImageUrl = juce::String (song.imageUrl);
         self->currentSongDuration = self->lyricWindow_->getVideoDuration();
+        self->playingDocWritten_  = false;
+        self->videoFinishedFired_ = false;
+        self->lastVideoPositionSec_ = -1.0;
+        self->currentPitchSemitones_ = (float) pitchSemitones;
+        self->currentSongVersion_ = (versionIndex >= 0 && versionIndex < (int) song.version.size())
+                                        ? juce::String (song.version[(size_t) versionIndex])
+                                        : juce::String();
 
         if (self->topBar)
         {
-            juce::String version;
-            if (versionIndex >= 0 && versionIndex < (int) song.version.size())
-                version = juce::String (song.version[(size_t) versionIndex]);
+            juce::String version = self->currentSongVersion_;
 
             self->topBar->setTrackInfo (juce::String (song.songName),
                                         juce::String (song.artistName),
@@ -3640,6 +3604,12 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         self->currentRibbonCdgFile_ = juce::File();
         self->refreshRibbonState();
 
+        if (autoStart)
+        {
+            self->playStartTimeMs_ = juce::Time::currentTimeMillis();
+            self->writePlayingDocIfNeeded();
+        }
+
         if (onDone)
             onDone(true);
         return;
@@ -3674,17 +3644,20 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
     self->currentSongImageUrl  = juce::String(song.imageUrl);
     self->currentSongDuration  = self->audioEngine->getTotalLength();
     self->playStartTimeMs_     = 0;
+    self->playingDocWritten_   = false;
+    self->currentSongVersion_  = (versionIndex >= 0 && versionIndex < (int) song.version.size())
+                                    ? juce::String (song.version[(size_t) versionIndex])
+                                    : juce::String();
     self->refreshRibbonState();
 
     // Apply pitch (the dialog's semitone adjustment)
     self->audioEngine->setPitchShift((float) pitchSemitones);
+    self->currentPitchSemitones_ = (float) pitchSemitones;
 
     // TopBar — song info
     if (self->topBar)
     {
-        juce::String version;
-        if (versionIndex >= 0 && versionIndex < (int) song.version.size())
-            version = juce::String(song.version[(size_t) versionIndex]);
+        juce::String version = self->currentSongVersion_;
 
         self->topBar->setTrackInfo(juce::String(song.songName),
                              juce::String(song.artistName),
@@ -3742,6 +3715,7 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         if (self->bgPlayer_ != nullptr)
             self->bgPlayer_->fadeOut (1.5f);
         self->audioEngine->play();
+        self->writePlayingDocIfNeeded();
     }
     if (onDone)
         onDone(true);
@@ -4417,6 +4391,11 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     d->setVenueCode (code);
             }
 
+            // Defensive cleanup: wipe any stale now-playing doc left behind
+            // by a previous session that crashed/closed mid-song, so it
+            // doesn't confuse the mobile app on this fresh load.
+            safe->clearPlayingDoc();
+
             // Push the full venue snapshot into the Settings page so the admin
             // can edit any field. Saves are routed through MainArea's
             // onVenueSettingsChanged callback wired in the constructor.
@@ -5014,6 +4993,18 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
             safe->queueBar->setSingers (composed);
             safe->syncLyricIdlePreview (composed);
         });
+
+    // Watch /emojis for cheer reactions sent by the TAGG mobile app while a
+    // singer is performing, and animate each one on the lyric display.
+    auto& es = EmojiService::getInstance();
+    es.onNewEmoji = [safe] (const std::vector<Emoji>& newEmojis)
+    {
+        if (safe == nullptr || safe->lyricWindow_ == nullptr)
+            return;
+        for (const auto& e : newEmojis)
+            safe->lyricWindow_->addEmoji (e);
+    };
+    es.start (venueId);
 }
 
 void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
@@ -5390,4 +5381,160 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
         {
             if (! ok) DBG("[History] addPlayHistory failed: " << err);
         });
+}
+
+//==============================================================================
+// venues/<id>/playing — "now playing" doc
+Playing MainComponent::buildPlayingFromCurrentState() const
+{
+    Playing p;
+    p.artists      = currentSong.artistName;
+    p.durationMS   = (int) std::round (currentSongDuration * 1000.0);
+    p.genres       = currentSong.genres;
+    p.imageUrl     = currentSongImageUrl.toStdString();
+    p.keySignature = currentSong.keySignature;
+    p.songName     = currentSong.songName;
+    p.songId       = currentSong.id;
+    p.songVersion  = currentSongVersion_.toStdString();
+    p.pitch        = currentPitchSemitones_;
+    p.releaseDate  = currentSong.releaseDate;
+    p.tempo        = currentSong.tempo;
+    p.type         = "karaoke"; // No singalong mode in this app (matches AuditService).
+
+    p.singerName   = hasLocalNowPlaying_ ? localNowPlaying_.name : std::string();
+    p.avatar       = hasLocalNowPlaying_ ? localNowPlaying_.avatar : std::string();
+    p.profileId    = hasLocalNowPlaying_ ? localNowPlaying_.id : std::string();
+    p.deviceId     = hasLocalNowPlaying_ ? localNowPlaying_.deviceId : std::string();
+
+    if (HostService::getInstance().hasCurrent())
+        p.kdId = HostService::getInstance().getCurrent().userId;
+
+    return p;
+}
+
+void MainComponent::writePlayingDocIfNeeded()
+{
+    if (playingDocWritten_ || activeVenueId_.isEmpty())
+        return;
+
+    playingDocWritten_ = true;
+    VenueService::getInstance().addCurrentSongPlaying (buildPlayingFromCurrentState(),
+        [](bool ok, juce::String err)
+        {
+            if (! ok) DBG ("[Playing] addCurrentSongPlaying failed: " << err);
+        });
+}
+
+void MainComponent::clearPlayingDoc()
+{
+    playingDocWritten_ = false;
+    if (activeVenueId_.isEmpty())
+        return;
+
+    VenueService::getInstance().removeAllCurrentSongPlaying(
+        [](bool ok, juce::String err)
+        {
+            if (! ok) DBG ("[Playing] removeAllCurrentSongPlaying failed: " << err);
+        });
+}
+
+//==============================================================================
+// Shared "a song has ended" handler — see the header comment on
+// handleSongFinished() for why this is a named method rather than staying
+// inline inside AudioEngine::onSongFinished.
+void MainComponent::handleSongFinished()
+{
+    logPlayHistoryIfNeeded(true);
+
+    // Karaoke song ended — fade background music back in to fill the silence.
+    if (bgPlayer_ != nullptr)
+        bgPlayer_->fadeIn (2.0f);
+
+    if (lyricWindow_ != nullptr)
+        lyricWindow_->setForceIdleScreen (true);
+
+    // Soft-clear emoji reactions: the idle screen (just forced above)
+    // never paints them and LyricDisplayComponent stops accepting new
+    // spawns while idle, so nothing new appears; whatever was already
+    // mid-animation keeps quietly finishing in the background and
+    // deletes its own doc. This bulk clear is just a backstop so
+    // nothing carries over to the next singer.
+    if (activeVenueId_.isNotEmpty())
+        VenueService::getInstance().clearEmojis (activeVenueId_);
+
+    // Song has genuinely ended — remove the now-playing doc (unlike pause,
+    // which deliberately leaves it in place).
+    clearPlayingDoc();
+
+    if (queueBar == nullptr) return;
+    const auto venueId = activeVenueId_;
+
+    // Remove the finished song from the singer's queue item now that it
+    // has actually completed, then move the singer to the end of the
+    // round with any remaining songs.
+    if (hasLocalNowPlaying_ && !localNowPlaying_.songs.empty())
+    {
+        auto singers = queueBar->getSingers();
+        int singerIndex = -1;
+        for (int i = 0; i < (int) singers.size(); ++i)
+        {
+            if (juce::String(singers[(size_t) i].id).trim() == juce::String(localNowPlaying_.id).trim()
+                || juce::String(singers[(size_t) i].name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
+            {
+                singerIndex = i;
+                break;
+            }
+        }
+
+        if (singerIndex >= 0)
+        {
+            auto finishedSinger = singers[(size_t) singerIndex];
+            if (! finishedSinger.songs.empty())
+            {
+                QueueItem finishedItem;
+                finishedItem.id          = currentSong.id;
+                finishedItem.songId      = currentSong.id;
+                finishedItem.songName    = currentSong.songName;
+                finishedItem.songArtist  = currentSong.artistName;
+                finishedItem.singerName  = finishedSinger.name;
+                finishedItem.singerAvatar= finishedSinger.avatar;
+
+                finishedSinger.songs.erase(finishedSinger.songs.begin());
+                finishedSinger.songsPerformed += 1;
+
+                if (! venueId.isEmpty())
+                    QueueService::getInstance().removeSong(venueId, finishedItem, nullptr);
+            }
+
+            singers.erase(singers.begin() + singerIndex);
+            singers.push_back(finishedSinger);
+            reindexQueueWithHostRoundAnchor(singers);
+            queueBar->setSingers(singers);
+
+            if (queueBar->onReorder)
+                queueBar->onReorder(singerIndex, (int) singers.size() - 1);
+        }
+    }
+
+    if (bottomBar != nullptr)
+        bottomBar->setPlaying(false);
+    queueBar->setPlaying(false);
+
+    // Always advance the round when a song ends so the next singer/song
+    // is ready. Auto Play controls whether it starts automatically.
+    if (! queueBar->isAutoPlayEnabled())
+    {
+        queueBar->stopCountdown();
+        queueAndLoadNextSingerSong(false);
+        return;
+    }
+
+    if (queueBar->isAutoPlayEnabled())
+    {
+        int delay = queueBar->getDelaySec();
+        if (delay > 0)
+            queueBar->startCountdown(delay);
+        else if (queueBar->onCountdownFinished)
+            queueBar->onCountdownFinished();
+    }
 }

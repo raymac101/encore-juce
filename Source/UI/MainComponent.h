@@ -21,6 +21,7 @@
 #include "../Models/CdgSong.h"
 #include "../Models/QueueItem.h"
 #include "../Models/Singers.h"
+#include "../Models/Playing.h"
 #include "TopBar.h"
 #include "NavBar.h"
 #include "MainArea.h"
@@ -132,6 +133,8 @@ private:
     std::unique_ptr<BackgroundMusicPlayer> bgPlayer_;
     CdgSong      currentSong;
     juce::String currentSongImageUrl;
+    juce::String currentSongVersion_;
+    float        currentPitchSemitones_ = 0.0f;
     double       currentSongDuration = 0.0;
     juce::File   currentRibbonCdgFile_;
 
@@ -242,6 +245,25 @@ private:
 
     // Play-history tracking — set when a song starts, read by logPlayHistoryIfNeeded.
     juce::int64  playStartTimeMs_ = 0;
+
+    //==============================================================================
+    // venues/<id>/playing — "now playing" doc for the mobile app / other
+    // clients. Written once per song start (including the first Play press
+    // after a preload), left untouched across pause, and removed on manual
+    // Stop, natural finish, or the KJ skipping/returning the singer to the
+    // queue. Resuming from pause does NOT rewrite the doc.
+    Playing buildPlayingFromCurrentState() const;
+    void    writePlayingDocIfNeeded();
+    void    clearPlayingDoc();
+    bool    playingDocWritten_ = false;
+
+    /** Shared "a song has ended" handler — the natural conclusion of both
+        AudioEngine::onSongFinished (audio/CDG) and the video natural-end
+        check driven from timerCallback() (MP4/M4V/MOV, which bypasses
+        AudioEngine entirely). */
+    void handleSongFinished();
+    bool videoFinishedFired_ = false;
+    double lastVideoPositionSec_ = -1.0;
 
     // Local "now singing" override. We mirror the Angular behaviour where
     // the now-playing card is purely UI state on the host machine — there
