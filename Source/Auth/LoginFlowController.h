@@ -36,17 +36,21 @@ public:
         VenueLoaded,        // Single resolved venue. `venueId` is set.
         PickVenue,          // associations.size() > 1, ask the user to pick.
         AwaitInvitation,    // No associations. Show invitations list / block.
-        RequestAccess       // Stored venueId is not in user's associations.
+        RequestAccess,      // Stored venueId is not in user's associations.
+        VenueLicenseInvalid // Resolved venue exists but its license is invalid/expired.
     };
 
     struct Result
     {
         Outcome                              outcome = Outcome::AwaitInvitation;
-        juce::String                         venueId;        // For VenueLoaded / RequestAccess
+        juce::String                         venueId;        // For VenueLoaded / RequestAccess / VenueLicenseInvalid
+        juce::String                         venueName;      // For VenueLicenseInvalid's message
+        juce::String                         licenseMessage; // For VenueLicenseInvalid
         juce::String                         configuredVenueId; // Stored on this PC (for "Configured on this PC" badge)
         std::vector<UserVenueAssociation>    associations;   // For PickVenue
         std::vector<VenueInvitation>         invitations;    // For AwaitInvitation
-        bool                                 canCreateVenue = false; // admin/enterprise
+        bool                                 canCreateVenue = false; // admin/enterprise (gates the legacy privileged-admin path)
+        bool                                 offerSelfServeSetup = false; // Zero associations AND zero invitations — offer the onboarding wizard regardless of role.
         bool                                 hasCompanyContext = false;
         juce::String                         companyId;
         juce::String                         companyRole;
@@ -61,10 +65,13 @@ public:
     static void runPostAuthFlow(ResultCallback onResult,
                                 ErrorCallback onError);
 
-    /** Persist the user's chosen venue, update last-access, and remember it
-        in user-preferences.json. Runs on a background thread. */
+    /** Check the chosen venue's license, then (if valid) persist it, update
+        last-access, and remember it in user-preferences.json. Runs on a
+        background thread. `ok` is false (with `licenseMessage` set) if the
+        venue's license is invalid/expired — in that case nothing is
+        persisted. */
     static void selectVenue(const juce::String& venueId,
-                            std::function<void()> onDone);
+                            std::function<void(bool ok, juce::String licenseMessage)> onDone);
 
     /** Send a venue join request (Scenario 5). Runs on a background thread. */
     static void requestVenueAccess(const juce::String& venueId,

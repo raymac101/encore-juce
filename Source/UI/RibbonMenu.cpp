@@ -113,7 +113,15 @@ std::unique_ptr<juce::Drawable> loadSvgDrawable (const juce::File& svgFile)
     };
 
     tintSvgTree (*xml);
-    return juce::Drawable::createFromSVG (*xml);
+
+    // This JUCE version dropped Drawable::createFromSVG(XmlElement) in
+    // favour of file-based loading only — round-trip through a temp file.
+    auto tempFile = juce::File::createTempFile (".svg");
+    if (! xml->writeTo (tempFile))
+        return {};
+    auto drawable = juce::Drawable::createFromSVGFile (tempFile);
+    tempFile.deleteFile();
+    return drawable;
 }
 
 void setSfxButtonIcon (juce::DrawableButton& button, const juce::String& iconRelativePath)
@@ -180,7 +188,15 @@ std::unique_ptr<juce::Drawable> createSpriteIcon (const juce::String& symbolId, 
             "</svg>";
 
         if (auto xml = juce::XmlDocument::parse(inlineSvg))
-            return juce::Drawable::createFromSVG(*xml);
+        {
+            auto tempFile = juce::File::createTempFile(".svg");
+            if (xml->writeTo(tempFile))
+            {
+                auto drawable = juce::Drawable::createFromSVGFile(tempFile);
+                tempFile.deleteFile();
+                return drawable;
+            }
+        }
 
         return {};
     };
@@ -269,7 +285,12 @@ std::unique_ptr<juce::Drawable> createSpriteIcon (const juce::String& symbolId, 
 
     tintElements(iconSvg);
 
-    return juce::Drawable::createFromSVG(iconSvg);
+    auto tempFile = juce::File::createTempFile(".svg");
+    if (! iconSvg.writeTo(tempFile))
+        return {};
+    auto drawable = juce::Drawable::createFromSVGFile(tempFile);
+    tempFile.deleteFile();
+    return drawable;
 }
 
 void setSpriteButtonIcon (juce::DrawableButton& button, const juce::String& symbolId)

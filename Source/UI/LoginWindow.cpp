@@ -20,6 +20,7 @@
 #include "../Models/UserVenueAssociation.h"
 #include "../Models/AccessRights.h"
 #include "BuildInfo.h"
+#include "Onboarding/OnboardingWizard.h"
 
 //==============================================================================
 // Brand-matched look-and-feel for the login screen. Mirrors the Angular
@@ -228,6 +229,7 @@ public:
         addChildComponent(switchModeButton_);
         addChildComponent(googleButton_);
         addChildComponent(appleButton_);
+        addChildComponent(getStartedButton_);
 
         styleEditor(emailEditor_, "E-Mail");
         styleEditor(passwordEditor_, "Password");
@@ -237,6 +239,7 @@ public:
         switchModeButton_.setButtonText("Switch to Sign Up");
         googleButton_.setButtonText("Sign in with Google");
         appleButton_.setButtonText("Sign in with Apple");
+        getStartedButton_.setButtonText("New to Encore? Get Started");
 
         // Tag ghost (secondary) buttons so the L&F draws them differently.
         switchModeButton_.getProperties().set("ghost", true);
@@ -245,11 +248,13 @@ public:
         refreshButton_.getProperties().set("ghost", true);
         signOutButton_.getProperties().set("ghost", true);
         useDifferentVenueButton_.getProperties().set("ghost", true);
+        getStartedButton_.getProperties().set("ghost", true);
 
         loginButton_.onClick      = [this] { handleEmailSubmit(); };
         switchModeButton_.onClick = [this] { isLoginMode_ = !isLoginMode_; refreshLoginPage(); };
         googleButton_.onClick     = [this] { handleOAuth("google.com"); };
         appleButton_.onClick      = [this] { handleOAuth("apple.com");  };
+        getStartedButton_.onClick = [this] { launchOnboardingWizard(OnboardingWizard::StartStep::CreateAccount); };
 
        #if ENCORE_DEV_SKIP_LOGIN
         addChildComponent(skipButton_);
@@ -323,7 +328,10 @@ public:
 
         createVenueButton_.onClick = [this]
         {
-            if (onComplete_) onComplete_({}, false);
+            // Already signed in with a Host doc (this button only shows
+            // post-auth) — skip straight to the account-type chooser rather
+            // than re-collecting name/stage/avatar.
+            launchOnboardingWizard(OnboardingWizard::StartStep::AccountType);
         };
 
         requestAccessButton_.onClick = [this] { handleRequestAccess(); };
@@ -341,18 +349,23 @@ public:
 
             auto proceed = [this, venueId](bool initialScan)
             {
-                // Transition immediately; do not hold the login screen while
-                // venue preference / audit writes finish on slow networks.
                 setBusy(true, "Opening venue...");
 
-                if (rememberVenueToggle_.getToggleState() || initialScan)
-                    UserPreferences::getInstance().setVenueId(venueId);
-
-                if (onComplete_)
-                    onComplete_(venueId, initialScan);
-
-                // Fire-and-forget bookkeeping.
-                LoginFlowController::selectVenue(venueId, []() {});
+                // selectVenue() checks the license before persisting/opening —
+                // must resolve before we ever hand off to onComplete_, or an
+                // invalid license could be bypassed.
+                LoginFlowController::selectVenue(venueId, [this, venueId, initialScan](bool ok, juce::String licenseMessage)
+                {
+                    setBusy(false, {});
+                    if (ok)
+                    {
+                        if (onComplete_) onComplete_(venueId, initialScan);
+                    }
+                    else
+                    {
+                        showLicenseInvalidAndSignOut(licenseMessage);
+                    }
+                });
             };
 
             if (isSwitch)
@@ -570,6 +583,9 @@ private:
         area.removeFromTop(10);
         appleButton_.setBounds(area.removeFromTop(44).withSizeKeepingCentre(300, 44));
 
+        area.removeFromTop(16);
+        getStartedButton_.setBounds(area.removeFromTop(40).withSizeKeepingCentre(280, 40));
+
        #if ENCORE_DEV_SKIP_LOGIN
         area.removeFromTop(18);
         skipButton_.setBounds(area.removeFromTop(36).withSizeKeepingCentre(220, 36));
@@ -642,6 +658,7 @@ private:
         switchModeButton_.setVisible(login);
         googleButton_.setVisible(login);
         appleButton_.setVisible(login);
+        getStartedButton_.setVisible(login);
        #if ENCORE_DEV_SKIP_LOGIN
         skipButton_.setVisible(login);
        #endif
@@ -651,7 +668,8 @@ private:
         venuesViewport_.setVisible(sel);
         invitationsListBox_.setVisible(await_);
         refreshButton_.setVisible(await_);
-        createVenueButton_.setVisible(await_ && flowResult_.canCreateVenue);
+        createVenueButton_.setVisible(await_ && (flowResult_.canCreateVenue || flowResult_.offerSelfServeSetup));
+        createVenueButton_.setButtonText(flowResult_.offerSelfServeSetup ? "Get Started" : "Create New Venue");
         signOutButton_.setVisible(sel || await_ || req);
         messageEditor_.setVisible(req);
         requestAccessButton_.setVisible(req);
@@ -744,6 +762,7 @@ private:
         switchModeButton_.setEnabled(!busy);
         googleButton_.setEnabled(!busy);
         appleButton_.setEnabled(!busy);
+        getStartedButton_.setEnabled(!busy);
         refreshButton_.setEnabled(!busy);
         signOutButton_.setEnabled(!busy);
         createVenueButton_.setEnabled(!busy);
@@ -874,11 +893,17 @@ private:
                     if (pickId.isNotEmpty())
                     {
                         setBusy(true, "Loading venue...");
-                        UserPreferences::getInstance().setVenueId(pickId);
-                        LoginFlowController::selectVenue(pickId, [this, pickId]
+                        LoginFlowController::selectVenue(pickId, [this, pickId](bool ok, juce::String licenseMessage)
                         {
                             setBusy(false, {});
-                            if (onComplete_) onComplete_(pickId, false);
+                            if (ok)
+                            {
+                                if (onComplete_) onComplete_(pickId, false);
+                            }
+                            else
+                            {
+                                showLicenseInvalidAndSignOut(licenseMessage);
+                            }
                         });
                         return;
                     }
@@ -900,6 +925,9 @@ private:
                     case O::RequestAccess:
                         page_ = Page::RequestAccess;
                         break;
+                    case O::VenueLicenseInvalid:
+                        showLicenseInvalidAndSignOut(flowResult_.licenseMessage);
+                        return;
                 }
                 applyPage();
             },
@@ -908,6 +936,39 @@ private:
                 setBusy(false, {});
                 statusLabel_.setText("Error: " + error, juce::dontSendNotification);
             });
+    }
+
+    // Blocks entry to a venue whose license is invalid/expired — no bypass,
+    // signs the account out and returns to the login page so nothing (not
+    // even a cached local venueId) can quietly slip past the check.
+    void showLicenseInvalidAndSignOut(const juce::String& message)
+    {
+        setBusy(false, {});
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Venue Unavailable",
+            message.isNotEmpty() ? message
+                                 : "This venue's license is not active. Contact your account owner.");
+
+        FirestoreClient::getInstance().signOut();
+        page_ = Page::Login;
+        applyPage();
+    }
+
+    // Launches the first-run onboarding wizard. `CreateAccount` is the
+    // pre-auth entry (brand-new user, no Firebase account yet — the wizard's
+    // own first step performs the sign-up); `AccountType` is the post-auth
+    // entry (already signed in via the form above, zero venues/invitations —
+    // skips straight to picking single-venue / multi-venue / company tier).
+    // On completion the wizard has already created everything it needs in
+    // Firestore, so re-running runFlow() naturally resolves straight into
+    // the new venue via the normal single-association VenueLoaded path.
+    void launchOnboardingWizard(OnboardingWizard::StartStep startStep)
+    {
+        OnboardingWizard::launch(this, startStep, [this]()
+        {
+            runFlow();
+        });
     }
 
     void handleRequestAccess()
@@ -1161,6 +1222,7 @@ private:
     juce::TextEditor passwordEditor_;
     juce::TextButton loginButton_;
     juce::TextButton switchModeButton_;
+    juce::TextButton getStartedButton_;
     juce::TextButton googleButton_;
     juce::TextButton appleButton_;
    #if ENCORE_DEV_SKIP_LOGIN

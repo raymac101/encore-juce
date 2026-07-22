@@ -136,7 +136,12 @@ static std::unique_ptr<juce::Drawable> loadSpriteSymbolDrawable(const juce::Stri
     forEachXmlChildElement(*symbol, child)
         svg.addChildElement(new juce::XmlElement(*child));
 
-    return juce::Drawable::createFromSVG(svg);
+    auto tempFile = juce::File::createTempFile(".svg");
+    if (! svg.writeTo(tempFile))
+        return {};
+    auto drawable = juce::Drawable::createFromSVGFile(tempFile);
+    tempFile.deleteFile();
+    return drawable;
 }
 
 static juce::Drawable* getStrikeDrawable()

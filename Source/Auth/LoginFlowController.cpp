@@ -9,6 +9,8 @@
 #include "LoginFlowController.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/HostService.h"
+#include "../Services/InvitationService.h"
+#include "../Services/LicenseService.h"
 
 namespace
 {
@@ -158,27 +160,7 @@ namespace
         return h;
     }
 
-    //--- Associations / invitations -------------------------------------------
-    VenueInvitation invitationFromDoc(const juce::var& doc)
-    {
-        VenueInvitation inv;
-        auto name = doc.getProperty("name", "").toString();
-        inv.id = name.fromLastOccurrenceOf("/", false, false);
-        inv.venueId          = FC::readString(doc, "venueId");
-        inv.venueName        = FC::readString(doc, "venueName");
-        inv.invitedUserEmail = FC::readString(doc, "invitedUserEmail");
-        inv.invitedByEmail   = FC::readString(doc, "invitedByEmail");
-        inv.invitedByName    = FC::readString(doc, "invitedByName");
-        inv.role = AccessRightsUtil::stringToUserRole(FC::readString(doc, "role").toStdString());
-        inv.invitationDate   = FC::readTime(doc, "invitationDate");
-        inv.expirationDate   = FC::readTime(doc, "expirationDate");
-        inv.acceptedDate     = FC::readTime(doc, "acceptedDate");
-        inv.isAccepted       = FC::readBool(doc, "isAccepted", false);
-        inv.isExpired        = FC::readBool(doc, "isExpired", false);
-        inv.notes = FC::readString(doc, "notes");
-        return inv;
-    }
-
+    //--- Associations -----------------------------------------------------------
     std::vector<UserVenueAssociation> queryAssociations(const juce::String& uid)
     {
         // Mirrors VenueService.getVenuesForUser() in the Angular app:
@@ -207,20 +189,6 @@ namespace
         return out;
     }
 
-    std::vector<VenueInvitation> queryPendingInvitations(const juce::String& email)
-    {
-        juce::Array<juce::var> filters;
-        filters.add(stringFilter("invitedUserEmail", "EQUAL", FC::stringValue(email.toLowerCase())));
-        filters.add(stringFilter("isAccepted",       "EQUAL", FC::booleanValue(false)));
-        filters.add(stringFilter("isExpired",        "EQUAL", FC::booleanValue(false)));
-        auto query = buildQuery("venueInvitations", compositeAnd(filters));
-
-        std::vector<VenueInvitation> out;
-        for (auto& d : FC::getInstance().runQuery({}, query))
-            out.push_back(invitationFromDoc(d));
-        return out;
-    }
-
     void touchLastAccess(const juce::String& venueId, const juce::String& uid)
     {
         // user-venue-lookup uses a deterministic doc id of `${uid}_${venueId}`.
@@ -231,6 +199,32 @@ namespace
         const auto path = "user-venue-lookup/" + docId
                         + "?updateMask.fieldPaths=lastActive";
         FC::getInstance().patchDocument(path, fields);
+    }
+
+    //--- License gate -----------------------------------------------------------
+    // Every path that would otherwise resolve to Outcome::VenueLoaded must
+    // go through here first, so an invalid/expired license can't be
+    // bypassed via whichever branch forgets the check.
+    void tryResolveVenueLoaded(const juce::String& venueId,
+                               const juce::String& venueName,
+                               LoginFlowController::Result& result)
+    {
+        bool valid = true;
+        juce::String reason;
+        LicenseService::checkVenueLicenseSync(venueId, valid, reason);
+
+        if (valid)
+        {
+            result.outcome = LoginFlowController::Outcome::VenueLoaded;
+            result.venueId = venueId;
+        }
+        else
+        {
+            result.outcome        = LoginFlowController::Outcome::VenueLicenseInvalid;
+            result.venueId        = venueId;
+            result.venueName      = venueName;
+            result.licenseMessage = reason;
+        }
     }
 
     //--- Result dispatch -------------------------------------------------------
@@ -269,7 +263,7 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             // 3) Associations + pending invitations
             auto associations = queryAssociations(uid);
-            auto invitations  = queryPendingInvitations(email);
+            auto invitations  = InvitationService::queryPendingInvitationsSync(email);
 
             const bool canCreate = (host.role == UserRole::Admin
                                   || host.role == UserRole::EnterpriseAdmin
@@ -307,14 +301,16 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             }
             else if (associations.size() == 1)
             {
-                UserPreferences::getInstance().setVenueId(associations[0].venueId);
-                // Do not block startup on a slow network write.
-                juce::Thread::launch([vid = associations[0].venueId, uid]()
+                tryResolveVenueLoaded(associations[0].venueId, associations[0].venueName, result);
+                if (result.outcome == Outcome::VenueLoaded)
                 {
-                    touchLastAccess(vid, uid);
-                });
-                result.outcome = Outcome::VenueLoaded;
-                result.venueId = associations[0].venueId;
+                    UserPreferences::getInstance().setVenueId(associations[0].venueId);
+                    // Do not block startup on a slow network write.
+                    juce::Thread::launch([vid = associations[0].venueId, uid]()
+                    {
+                        touchLastAccess(vid, uid);
+                    });
+                }
             }
             else if (storedVenueId.isNotEmpty())
             {
@@ -323,13 +319,15 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
                 if (adminOverride)
                 {
-                    // Do not block startup on a slow network write.
-                    juce::Thread::launch([vid = storedVenueId, uid]()
+                    tryResolveVenueLoaded(storedVenueId, {}, result);
+                    if (result.outcome == Outcome::VenueLoaded)
                     {
-                        touchLastAccess(vid, uid);
-                    });
-                    result.outcome = Outcome::VenueLoaded;
-                    result.venueId = storedVenueId;
+                        // Do not block startup on a slow network write.
+                        juce::Thread::launch([vid = storedVenueId, uid]()
+                        {
+                            touchLastAccess(vid, uid);
+                        });
+                    }
                 }
                 else
                 {
@@ -339,8 +337,9 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             }
             else
             {
-                result.outcome     = Outcome::AwaitInvitation;
-                result.invitations = std::move(invitations);
+                result.outcome             = Outcome::AwaitInvitation;
+                result.offerSelfServeSetup = invitations.empty();
+                result.invitations         = std::move(invitations);
             }
 
             postOnMessageThread([onResult, result = std::move(result)]() mutable
@@ -361,14 +360,25 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 }
 
 void LoginFlowController::selectVenue(const juce::String& venueId,
-                                      std::function<void()> onDone)
+                                      std::function<void(bool ok, juce::String licenseMessage)> onDone)
 {
     juce::Thread::launch([venueId, onDone = std::move(onDone)]()
     {
+        bool valid = true;
+        juce::String reason;
+        LicenseService::checkVenueLicenseSync(venueId, valid, reason);
+
+        if (! valid)
+        {
+            if (onDone)
+                postOnMessageThread([onDone, reason]() { onDone(false, reason); });
+            return;
+        }
+
         UserPreferences::getInstance().setVenueId(venueId);
 
         if (onDone)
-            postOnMessageThread(onDone);
+            postOnMessageThread([onDone]() { onDone(true, {}); });
 
         // Fire-and-forget update; never hold up UI transition.
         const auto uid = FirestoreClient::getInstance().getUserId();

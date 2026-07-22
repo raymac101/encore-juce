@@ -103,6 +103,7 @@ target_sources(EncoreJUCE
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
         Source/UI/LoginWindow.cpp
+        Source/UI/Onboarding/OnboardingWizard.cpp
         Source/CDG/CDGDecoder.cpp
         Source/Services/LibraryScanner.cpp
         Source/Services/SongDatabase.cpp
@@ -123,6 +124,9 @@ target_sources(EncoreJUCE
         Source/Services/CustomerAdminService.cpp
         Source/Services/ApiService.cpp
         Source/Services/GlobalProgressService.cpp
+        Source/Services/CompanyService.cpp
+        Source/Services/LicenseService.cpp
+        Source/Services/InvitationService.cpp
         Source/Auth/LoginFlowController.cpp
         Source/Localization/LocalizationManager.cpp
         Source/Models/VenueItem.cpp
@@ -132,6 +136,7 @@ target_sources(EncoreJUCE
         Source/Models/CdgSong.cpp
         Source/Models/CdgGroup.cpp
         Source/Models/Host.cpp
+        Source/Models/Company.cpp
         Source/Models/User.cpp
         Source/Models/Playing.cpp
         Source/Models/Lyric.cpp

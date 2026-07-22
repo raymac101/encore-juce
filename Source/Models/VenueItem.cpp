@@ -26,6 +26,7 @@ juce::String VenueItem::toJson() const
     obj->setProperty("adminEmail",      juce::String(adminEmail));
     obj->setProperty("password",        juce::String(password));
     obj->setProperty("registrationKey", juce::String(registrationKey));
+    obj->setProperty("companyId",       juce::String(companyId));
 
     // Venue codes
     obj->setProperty("code",     juce::String(code));
@@ -114,6 +115,7 @@ VenueItem VenueItem::fromJson(const juce::String& json)
     venue.country         = strProp("country");
     venue.adminEmail      = strProp("adminEmail");
     venue.password        = strProp("password");
+    venue.companyId       = strProp("companyId");
     venue.registrationKey = strProp("registrationKey");
 
     // Codes

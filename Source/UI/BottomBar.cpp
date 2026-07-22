@@ -720,7 +720,18 @@ std::unique_ptr<juce::Drawable> BottomBar::createSpriteIcon(const juce::String& 
             "</svg>";
 
         if (auto xml = juce::XmlDocument::parse(inlineSvg))
-            return juce::Drawable::createFromSVG(*xml);
+        {
+            // This JUCE version dropped Drawable::createFromSVG(XmlElement) in
+            // favour of file-based loading only — round-trip through a temp
+            // file to keep the same "parse SVG string, get a Drawable" call shape.
+            auto tempFile = juce::File::createTempFile(".svg");
+            if (xml->writeTo(tempFile))
+            {
+                auto drawable = juce::Drawable::createFromSVGFile(tempFile);
+                tempFile.deleteFile();
+                return drawable;
+            }
+        }
 
         return {};
     };
@@ -795,8 +806,16 @@ std::unique_ptr<juce::Drawable> BottomBar::createSpriteIcon(const juce::String& 
         iconSvg.addChildElement(copied);
     }
 
-    if (auto drawable = juce::Drawable::createFromSVG(iconSvg))
-        return drawable;
+    {
+        auto tempFile = juce::File::createTempFile(".svg");
+        if (iconSvg.writeTo(tempFile))
+        {
+            auto drawable = juce::Drawable::createFromSVGFile(tempFile);
+            tempFile.deleteFile();
+            if (drawable)
+                return drawable;
+        }
+    }
 
     return createInlineIcon();
 }

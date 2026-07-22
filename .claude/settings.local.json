@@ -36,7 +36,15 @@
       "Bash(sed -E 's/\\(-sheet\\)?\\\\.\\(png|gif\\)$//')",
       "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/alien-sheet.png\")",
       "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/alien.png\")",
-      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/HandHeart-sheet.png\")"
+      "Bash(sips -g pixelWidth -g pixelHeight \"/Users/ray/Projects/Code Projects/encore-juce/assets/emojis/HandHeart-sheet.png\")",
+      "Bash(find \"/Users/ray/Projects/Code Projects/encore/src/app\" -type d | sort)",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/**)",
+      "Bash(find \"/Users/ray/Projects/Code Projects/encore/src/app\" -type f \\\\\\( -iname \"*register*\" -o -iname \"*signup*\" -o -iname \"*sign-up*\" -o -iname \"*onboard*\" -o -iname \"*setup*\" -o -iname \"*wizard*\" -o -iname \"*welcome*\" -o -iname \"*getting-started*\" \\\\\\))",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/auth/**)",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/start/**)",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/create-venue-modal/**)",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/venue-users/**)",
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/**)"
     ]
   }
 }

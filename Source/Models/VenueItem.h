@@ -31,6 +31,7 @@ struct VenueItem
     std::string adminEmail;                 // Admin email
     std::string password;                   // Password for venue access
     std::string registrationKey;            // License / registration key
+    std::string companyId;                  // Owning company (empty = independent venue)
 
     // ── Venue codes ─────────────────────────────────────────────────────────
     std::string code;                       // Primary code for Tagg app

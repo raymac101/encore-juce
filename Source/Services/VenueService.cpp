@@ -233,10 +233,11 @@ namespace
     juce::var fieldsFromVenue(const VenueItem& v)
     {
         return FC::makeFields({
-            { "name",     FC::stringValue(juce::String(v.name)) },
-            { "address",  FC::stringValue(juce::String(v.address)) },
-            { "city",     FC::stringValue(juce::String(v.city)) },
-            { "country",  FC::stringValue(juce::String(v.country)) },
+            { "name",      FC::stringValue(juce::String(v.name)) },
+            { "address",   FC::stringValue(juce::String(v.address)) },
+            { "city",      FC::stringValue(juce::String(v.city)) },
+            { "country",   FC::stringValue(juce::String(v.country)) },
+            { "companyId", FC::stringValue(juce::String(v.companyId)) },
             { "code",     FC::stringValue(juce::String(v.code)) },
             { "codePlus", FC::stringValue(juce::String(v.codePlus)) },
             { "numSongs",   FC::stringValue(juce::String(v.numSongs)) },

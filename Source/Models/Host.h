@@ -28,6 +28,8 @@ struct Host
     std::string profileId;
     std::string avatarUrl;
     std::string stageName;
+    std::string firstName;
+    std::string lastName;
     std::string fullName;
     std::string birthday;
     std::string country;
