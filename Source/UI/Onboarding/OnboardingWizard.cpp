@@ -7,6 +7,7 @@
 */
 
 #include "OnboardingWizard.h"
+#include "../LoginTheme.h"
 #include "../../Services/FirestoreClient.h"
 #include "../../Services/VenueService.h"
 #include "../../Services/CompanyService.h"
@@ -26,21 +27,32 @@ namespace
 {
     using FC = FirestoreClient;
 
-    constexpr int kWindowW = 760;
-    constexpr int kWindowH = 620;
+    // Extra transparent margin reserved around the visible card so its
+    // rounded corners, white border, and drop shadow have room to render
+    // without being clipped by the (otherwise rectangular) OS window edge.
+    constexpr int kShadowMargin = 24;
+    constexpr int kCardCornerRadius = 16;
+
+    constexpr int kWindowW = 760 + 2 * kShadowMargin;
+    constexpr int kWindowH = 620 + 2 * kShadowMargin;
 
     void styleEditor(juce::TextEditor& te, const juce::String& placeholder)
     {
         te.setIndents(12, 10);
+        te.setBorder(juce::BorderSize<int>(0));
         te.setFont(juce::Font(juce::FontOptions(15.0f)));
-        te.setTextToShowWhenEmpty(placeholder, juce::Colour(0xff9ca3af));
+        te.setColour(juce::TextEditor::backgroundColourId,     juce::Colour(LoginTheme::kInputFill));
+        te.setColour(juce::TextEditor::outlineColourId,        juce::Colour(LoginTheme::kInputBorder));
+        te.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(LoginTheme::kInputBorderFocus));
+        te.setColour(juce::TextEditor::textColourId,           juce::Colours::white);
+        te.setTextToShowWhenEmpty(placeholder, juce::Colour(LoginTheme::kPlaceholder));
     }
 
     void styleHeading(juce::Label& l, const juce::String& text)
     {
         l.setText(text, juce::dontSendNotification);
         l.setFont(juce::Font(juce::FontOptions(22.0f, juce::Font::bold)));
-        l.setColour(juce::Label::textColourId, juce::Colour(0xff1f2937));
+        l.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
         l.setJustificationType(juce::Justification::centredLeft);
     }
 
@@ -48,7 +60,7 @@ namespace
     {
         l.setText(text, juce::dontSendNotification);
         l.setFont(juce::Font(juce::FontOptions(14.0f)));
-        l.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+        l.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
         l.setJustificationType(juce::Justification::centredLeft);
     }
 
@@ -56,13 +68,13 @@ namespace
     {
         l.setText(text, juce::dontSendNotification);
         l.setFont(juce::Font(juce::FontOptions(13.0f)));
-        l.setColour(juce::Label::textColourId, juce::Colour(0xff374151));
+        l.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
     }
 
     void styleStatus(juce::Label& l)
     {
         l.setFont(juce::Font(juce::FontOptions(13.0f)));
-        l.setColour(juce::Label::textColourId, juce::Colour(0xffb91c1c));
+        l.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
         l.setJustificationType(juce::Justification::centred);
     }
 
@@ -109,6 +121,10 @@ public:
         paintIcon(g, iconArea.withSizeKeepingCentre(48.0f, 48.0f));
 
         area.removeFromTop(12.0f);
+        // This card keeps its own light background (matches the SelectVenue
+        // page's "white card on gradient" pattern), so its text stays dark
+        // -- unlike the rest of the wizard, which sits directly on the dark
+        // page gradient and needs light text.
         g.setColour(juce::Colour(0xff1f2937));
         g.setFont(juce::Font(juce::FontOptions(17.0f, juce::Font::bold)));
         auto titleArea = area.removeFromTop(24.0f);
@@ -174,13 +190,60 @@ public:
         CompanyInfo, VenueInfo, HostInvite, LibraryScan
     };
 
-    Content(StartStep startStep, std::function<void()> onFinished)
+    Content(StartStep startStep, std::function<void(bool completed)> onFinished)
         : onFinished_(std::move(onFinished))
     {
-        setOpaque(true);
+        // Not opaque: the area outside the rounded card (kShadowMargin) must
+        // stay genuinely transparent so the OS-composited window shows the
+        // login screen behind it there, per the semi-transparent peer style
+        // flag set in OnboardingWizard::launch().
+        setOpaque(false);
+        setLookAndFeel(&lnf_);
         addAndMakeVisible(cancelButton_);
         cancelButton_.setButtonText("Cancel");
-        cancelButton_.onClick = [this] { if (onFinished_) onFinished_(); };
+        cancelButton_.getProperties().set("ghost", true);
+        // Cancel must NOT be treated as a successful completion -- callers
+        // (e.g. LoginWindow's runFlow()) assume "completed" means the wizard
+        // already created an account/venue in Firestore. Calling that path
+        // on a bare Cancel (nothing created yet) surfaced as a spurious
+        // "Error: Not signed in" on the login screen.
+        cancelButton_.onClick = [this]
+        {
+            if (! accountCreatedThisSession_)
+            {
+                if (onFinished_) onFinished_(false);
+                return;
+            }
+
+            // The account created earlier in this session must be torn
+            // down, or retrying with the same email later fails with
+            // "email already exists". Self-delete (via the account's own
+            // idToken, still signed in from CreateAccountStep) needs no
+            // admin privilege -- a user can always delete their own account.
+            cancelButton_.setEnabled(false);
+            const auto uidToDelete = uid_;
+            juce::Component::SafePointer<Content> safe(this);
+            juce::Thread::launch([safe, uidToDelete]()
+            {
+                auto& fc = FC::getInstance();
+                if (uidToDelete.isNotEmpty())
+                    fc.deleteDocument("hosts/" + uidToDelete);
+                fc.deleteCurrentAccount();
+                fc.signOut();
+
+                juce::MessageManager::callAsync([safe]()
+                {
+                    if (safe == nullptr) return;
+                    if (safe->onFinished_) safe->onFinished_(false);
+                });
+            });
+        };
+
+        const auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                                .getParentDirectory();
+        const auto logoFile = appDir.getChildFile("assets/images/encore-logo-white.png");
+        if (logoFile.existsAsFile())
+            logoImage_ = juce::ImageFileFormat::loadFrom(logoFile);
 
         if (startStep == StartStep::AccountType)
         {
@@ -198,15 +261,46 @@ public:
         }
     }
 
+    ~Content() override
+    {
+        setLookAndFeel(nullptr);
+    }
+
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xfff3f4f6));
+        const auto cardBounds = getLocalBounds().reduced(kShadowMargin);
+        juce::Path cardPath;
+        cardPath.addRoundedRectangle(cardBounds.toFloat(), (float) kCardCornerRadius);
+
+        juce::DropShadow shadow(juce::Colours::black.withAlpha(0.45f), 28, juce::Point<int>(0, 8));
+        shadow.drawForPath(g, cardPath);
+
+        auto b = cardBounds.toFloat();
+        juce::ColourGradient grad(juce::Colour(LoginTheme::kAccentBlue), b.getCentreX(), b.getY(),
+                                   juce::Colours::black,                 b.getCentreX(), b.getBottom(),
+                                   false);
+        g.setGradientFill(grad);
+        g.fillPath(cardPath);
+
+        g.setColour(juce::Colours::white);
+        g.strokePath(cardPath, juce::PathStrokeType(4.0f));
+
+        if (logoImage_.isValid() && ! logoBounds_.isEmpty())
+            g.drawImageWithin(logoImage_,
+                              logoBounds_.getX(), logoBounds_.getY(),
+                              logoBounds_.getWidth(), logoBounds_.getHeight(),
+                              juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid
+                                | juce::RectanglePlacement::onlyReduceInSize);
     }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced(24);
-        auto top = area.removeFromTop(32);
+        auto area = getLocalBounds().reduced(kShadowMargin).reduced(24);
+        auto top = area.removeFromTop(36);
+        // Smaller than the login screen's centrepiece logo, but still
+        // clearly readable -- same "top of the screen" spot on every step,
+        // opposite Cancel.
+        logoBounds_ = top.removeFromLeft(150);
         cancelButton_.setBounds(top.removeFromRight(90));
         area.removeFromTop(8);
         if (stepComponent_ != nullptr)
@@ -239,6 +333,9 @@ private:
 
             styleFieldLabel(avatarLabel_, "Choose an Avatar");
             addAndMakeVisible(avatarLabel_);
+            addAndMakeVisible(avatarViewport_);
+            avatarViewport_.setViewedComponent(&avatarGridContainer_, false);
+            avatarViewport_.setScrollBarsShown(true, false);
             buildAvatarGrid();
 
             addAndMakeVisible(statusLabel_);
@@ -282,8 +379,18 @@ private:
             area.removeFromTop(14);
 
             avatarLabel_.setBounds(area.removeFromTop(20));
-            auto gridArea = area.removeFromTop(140);
-            layoutAvatarGrid(gridArea);
+
+            // Fixed at exactly kAvatarRowsVisible rows -- there are more
+            // avatar icons than fit in the wizard's fixed-size window, so
+            // the grid scrolls internally instead of overflowing into
+            // whatever's laid out below it (this used to overlap the
+            // Create Account button once enough avatar files existed).
+            const int viewportW = area.getWidth();
+            const int scrollbarW = avatarViewport_.getScrollBarThickness();
+            const int cell = juce::jmax(1, (viewportW - scrollbarW) / kAvatarCols);
+            auto gridArea = area.removeFromTop(kAvatarRowsVisible * cell + 4);
+            avatarViewport_.setBounds(gridArea);
+            layoutAvatarGrid(viewportW - scrollbarW);
 
             area.removeFromTop(10);
             statusLabel_.setBounds(area.removeFromTop(20));
@@ -333,7 +440,7 @@ private:
                 btn->setRadioGroupId(groupId);
                 const auto relPath = juce::String("assets/icon/") + f.getFileName();
                 btn->getProperties().set("avatarPath", relPath);
-                addAndMakeVisible(*btn);
+                avatarGridContainer_.addAndMakeVisible(*btn);
                 avatarButtons_.push_back(std::move(btn));
             }
 
@@ -341,22 +448,27 @@ private:
                 avatarButtons_.front()->setToggleState(true, juce::dontSendNotification);
         }
 
-        void layoutAvatarGrid(juce::Rectangle<int> area)
+        // Lays out every avatar into avatarGridContainer_ (all rows, not
+        // just the visible ones) and grows the container to match, so
+        // avatarViewport_ can scroll to whatever doesn't fit in its fixed
+        // kAvatarRowsVisible-tall viewing area.
+        void layoutAvatarGrid(int containerWidth)
         {
-            const int cols = 9;
-            const int cell = area.getWidth() / cols;
-            int x = area.getX(), y = area.getY();
-            int col = 0;
+            const int cell = juce::jmax(1, containerWidth / kAvatarCols);
+            int col = 0, row = 0;
             for (auto& btn : avatarButtons_)
             {
-                btn->setBounds(x + col * cell, y, cell - 6, cell - 6);
+                btn->setBounds(col * cell, row * cell, cell - 6, cell - 6);
                 ++col;
-                if (col >= cols)
+                if (col >= kAvatarCols)
                 {
                     col = 0;
-                    y += cell;
+                    ++row;
                 }
             }
+            const int totalRows = avatarButtons_.empty() ? 1
+                : (int) ((avatarButtons_.size() + kAvatarCols - 1) / (size_t) kAvatarCols);
+            avatarGridContainer_.setSize(containerWidth, totalRows * cell);
         }
 
         juce::String selectedAvatarPath() const
@@ -398,7 +510,7 @@ private:
             }
 
             submitButton_.setEnabled(false);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
             statusLabel_.setText("Creating your account...", juce::dontSendNotification);
 
             const auto stageName = stage.isNotEmpty() ? stage : (first + " " + last);
@@ -418,7 +530,7 @@ private:
                     {
                         if (safe == nullptr) return;
                         safe->submitButton_.setEnabled(true);
-                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffb91c1c));
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
                         safe->statusLabel_.setText(msg.isNotEmpty() ? msg : "Could not create account.",
                                                    juce::dontSendNotification);
                     });
@@ -476,11 +588,16 @@ private:
                            std::vector<VenueInvitation> invitations)> onAccountCreated;
 
     private:
+        static constexpr int kAvatarCols = 9;
+        static constexpr int kAvatarRowsVisible = 2;
+
         juce::Label heading_, sub_;
         juce::Label firstNameLabel_, lastNameLabel_, stageNameLabel_, emailLabel_, passLabel_, confirmLabel_;
         juce::TextEditor firstNameEd_, lastNameEd_, stageNameEd_, emailEd_, passEd_, confirmEd_;
         juce::Label avatarLabel_, statusLabel_;
         juce::TextButton submitButton_;
+        juce::Viewport avatarViewport_;
+        juce::Component avatarGridContainer_;
         std::vector<std::unique_ptr<juce::ImageButton>> avatarButtons_;
     };
 
@@ -505,7 +622,7 @@ private:
                                  juce::dontSendNotification);
             detailLabel_.setFont(juce::Font(juce::FontOptions(15.0f)));
             detailLabel_.setJustificationType(juce::Justification::topLeft);
-            detailLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff1f2937));
+            detailLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
 
             addAndMakeVisible(statusLabel_);
             styleStatus(statusLabel_);
@@ -539,7 +656,7 @@ private:
         {
             acceptButton_.setEnabled(false);
             declineButton_.setEnabled(false);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
             statusLabel_.setText("Joining venue...", juce::dontSendNotification);
 
             juce::Component::SafePointer<JoinInvitedVenueStep> safe(this);
@@ -555,7 +672,7 @@ private:
                     {
                         safe->acceptButton_.setEnabled(true);
                         safe->declineButton_.setEnabled(true);
-                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffb91c1c));
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
                         safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not join venue.",
                                                    juce::dontSendNotification);
                     }
@@ -687,7 +804,7 @@ private:
             }
 
             nextButton_.setEnabled(false);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
             statusLabel_.setText("Creating company...", juce::dontSendNotification);
 
             Company c;
@@ -705,7 +822,7 @@ private:
                     if (! ok)
                     {
                         safe->nextButton_.setEnabled(true);
-                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffb91c1c));
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
                         safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not create company.",
                                                    juce::dontSendNotification);
                         return;
@@ -737,8 +854,7 @@ private:
             : tier_(tier), companyId_(std::move(companyId)), createdVenues_(createdVenues), onDone_(std::move(onDone))
         {
             styleHeading(heading_, tier_ == 3 ? "Add Your Venues" : "Tell Us About Your Venue");
-            styleSubheading(sub_, "Same details as Settings → Venue Information. "
-                                  "You'll get a Venue ID and license automatically.");
+            styleSubheading(sub_, "Provide information about your venue so your customers can find you.");
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
             setupField(nameLabel_, nameEd_, "Venue Name", "The Blue Note Lounge");
@@ -748,7 +864,7 @@ private:
 
             addAndMakeVisible(createdListLabel_);
             createdListLabel_.setFont(juce::Font(juce::FontOptions(13.0f)));
-            createdListLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff059669));
+            createdListLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSuccessText));
             createdListLabel_.setJustificationType(juce::Justification::topLeft);
             refreshCreatedList();
 
@@ -846,7 +962,7 @@ private:
             }
 
             addButton_.setEnabled(false);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
             statusLabel_.setText("Creating venue...", juce::dontSendNotification);
 
             VenueItem v;
@@ -866,7 +982,7 @@ private:
                     if (! ok || venueId.isEmpty())
                     {
                         safe->addButton_.setEnabled(true);
-                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffb91c1c));
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
                         safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not create venue.",
                                                    juce::dontSendNotification);
                         return;
@@ -902,7 +1018,7 @@ private:
                     {
                         safe->addButton_.setEnabled(true);
                         safe->continueButton_.setEnabled(true);
-                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff059669));
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSuccessText));
                         safe->statusLabel_.setText("Venue added! Add another or continue.", juce::dontSendNotification);
                         safe->nameEd_.clear(); safe->addressEd_.clear();
                         safe->cityEd_.clear(); safe->countryEd_.clear();
@@ -952,7 +1068,7 @@ private:
 
             addAndMakeVisible(pendingListLabel_);
             pendingListLabel_.setFont(juce::Font(juce::FontOptions(13.0f)));
-            pendingListLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff374151));
+            pendingListLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
             pendingListLabel_.setJustificationType(juce::Justification::topLeft);
 
             addAndMakeVisible(statusLabel_);
@@ -1030,7 +1146,7 @@ private:
 
             sendButton_.setEnabled(false);
             skipButton_.setEnabled(false);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
             statusLabel_.setText("Sending invites...", juce::dontSendNotification);
 
             const auto inviterEmail = FC::getInstance().getEmail();
@@ -1092,7 +1208,7 @@ private:
 
             addAndMakeVisible(statusLabel_);
             statusLabel_.setFont(juce::Font(juce::FontOptions(14.0f)));
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff374151));
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
             statusLabel_.setJustificationType(juce::Justification::centred);
             statusLabel_.setText("No folder scanned yet.", juce::dontSendNotification);
 
@@ -1200,11 +1316,15 @@ private:
     };
 
     //==============================================================================
-    std::function<void()> onFinished_;
+    LoginLookAndFeel lnf_;
+    juce::Image logoImage_;
+    juce::Rectangle<int> logoBounds_;
+    std::function<void(bool completed)> onFinished_;
     juce::TextButton cancelButton_;
     std::unique_ptr<juce::Component> stepComponent_;
 
     // Wizard-wide state, accumulated as steps complete.
+    bool accountCreatedThisSession_ = false;
     juce::String uid_, email_;
     Host host_;
     juce::String companyId_;
@@ -1227,6 +1347,11 @@ void OnboardingWizard::Content::showStep(Step step)
                                          std::vector<VenueInvitation> invitations)
             {
                 uid_ = uid; email_ = email; host_ = host;
+                // From here on, Cancel must undo this account rather than
+                // just closing the wizard -- otherwise the user can't
+                // retry with the same email (accounts:signUp rejects an
+                // already-registered address).
+                accountCreatedThisSession_ = true;
                 if (! invitations.empty())
                 {
                     pendingInvitationForNextStep_ = invitations.front();
@@ -1247,7 +1372,7 @@ void OnboardingWizard::Content::showStep(Step step)
                 {
                     if (joined)
                     {
-                        if (onFinished_) onFinished_();
+                        if (onFinished_) onFinished_(true);
                     }
                     else
                     {
@@ -1305,7 +1430,7 @@ void OnboardingWizard::Content::showStep(Step step)
         {
             auto s = std::make_unique<LibraryScanStep>([this]()
             {
-                if (onFinished_) onFinished_();
+                if (onFinished_) onFinished_(true);
             });
             stepComponent_ = std::move(s);
             break;
@@ -1318,7 +1443,7 @@ void OnboardingWizard::Content::showStep(Step step)
 
 //==============================================================================
 OnboardingWizard::OnboardingWizard(StartStep startStep, std::function<void()> onFinished)
-    : juce::DocumentWindow("Welcome to Encore", juce::Colour(0xfff3f4f6), 0),
+    : juce::DocumentWindow("Welcome to Encore", juce::Colours::black, 0),
       onFinished_(std::move(onFinished))
 {
     setUsingNativeTitleBar(false);
@@ -1326,10 +1451,10 @@ OnboardingWizard::OnboardingWizard(StartStep startStep, std::function<void()> on
     setResizable(false, false);
     setAlwaysOnTop(true);
 
-    setContentOwned(new Content(startStep, [this]()
+    setContentOwned(new Content(startStep, [this](bool completed)
     {
-        if (onFinished_) onFinished_();
-        delete this;
+        if (completed && onFinished_) onFinished_();
+        exitModalState(0);
     }), false);
     setSize(kWindowW, kWindowH);
 }
@@ -1338,8 +1463,10 @@ OnboardingWizard::~OnboardingWizard() = default;
 
 void OnboardingWizard::closeButtonPressed()
 {
-    if (onFinished_) onFinished_();
-    delete this;
+    // Native close (currently unreachable -- setTitleBarHeight(0) hides the
+    // title bar entirely) is a cancel, not a completion; never fires the
+    // caller's onFinished_.
+    exitModalState(0);
 }
 
 void OnboardingWizard::launch(juce::Component* parentForCentering,
@@ -1347,11 +1474,21 @@ void OnboardingWizard::launch(juce::Component* parentForCentering,
                               std::function<void()> onFinished)
 {
     auto* wizard = new OnboardingWizard(startStep, std::move(onFinished));
-    wizard->addToDesktop();
+    // Semi-transparent peer so the margin around the rounded card (drawn in
+    // Content::paint()) is genuinely see-through rather than an opaque
+    // rectangle -- otherwise the card's rounded corners would show square
+    // against a solid backing colour instead of the login screen behind it.
+    wizard->setOpaque(false);
+    wizard->addToDesktop(juce::ComponentPeer::windowIsSemiTransparent);
     if (parentForCentering != nullptr)
         wizard->centreAroundComponent(parentForCentering, kWindowW, kWindowH);
     else
         wizard->centreWithSize(kWindowW, kWindowH);
     wizard->setVisible(true);
-    wizard->enterModalState(true, nullptr, false);
+    // exitModalState() (called from the wizard's own child buttons, e.g. Cancel)
+    // must not delete the wizard synchronously -- that would free the Button
+    // that's still executing its own onClick on the call stack. JUCE runs this
+    // ModalCallbackFunction asynchronously after exitModalState(), so the delete
+    // is deferred until the click handler has fully unwound.
+    wizard->enterModalState(true, juce::ModalCallbackFunction::create([wizard](int) { delete wizard; }), false);
 }

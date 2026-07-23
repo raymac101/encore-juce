@@ -2711,8 +2711,8 @@ void MainComponent::showLanguageSelector()
     if (languages.isEmpty())
     {
         languageMenu.addItem(1, "English (English)", true, lm.getCurrentLanguage() == "en_US");
-        languageMenu.addItem(2, "Español (Spanish)", true, lm.getCurrentLanguage() == "es_ES");  
-        languageMenu.addItem(3, "Français (French)", true, lm.getCurrentLanguage() == "fr_FR");
+        languageMenu.addItem(2, juce::String(juce::CharPointer_UTF8("Español (Spanish)")), true, lm.getCurrentLanguage() == "es_ES");
+        languageMenu.addItem(3, juce::String(juce::CharPointer_UTF8("Français (French)")), true, lm.getCurrentLanguage() == "fr_FR");
         languageMenu.addItem(4, "Deutsch (German)", true, lm.getCurrentLanguage() == "de_DE");
     }
     else

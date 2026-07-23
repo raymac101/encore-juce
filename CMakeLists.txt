@@ -146,7 +146,6 @@ target_sources(EncoreJUCE
         Source/Models/Audit.cpp
         Source/Models/Ad.cpp
         Source/Models/Preset.cpp
-        Source/Models/VenueUser.cpp
         Source/Models/Location.cpp)
 
 # Set compile definitions

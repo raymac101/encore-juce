@@ -56,14 +56,16 @@ void LocalizationManager::initializeSupportedLanguages()
 {
     supportedLanguages["en_US"] = "English (United States)";
     supportedLanguages["en_GB"] = "English (United Kingdom)";
-    supportedLanguages["es_ES"] = "Español (España)";
-    supportedLanguages["es_MX"] = "Español (México)";
-    supportedLanguages["fr_FR"] = "Français (France)";
+    // Non-ASCII display names must go through CharPointer_UTF8 -- juce::String's
+    // raw const char* constructor asserts the input is pure ASCII.
+    supportedLanguages["es_ES"] = juce::String(juce::CharPointer_UTF8("Español (España)"));
+    supportedLanguages["es_MX"] = juce::String(juce::CharPointer_UTF8("Español (México)"));
+    supportedLanguages["fr_FR"] = juce::String(juce::CharPointer_UTF8("Français (France)"));
     supportedLanguages["de_DE"] = "Deutsch (Deutschland)";
-    supportedLanguages["pt_BR"] = "Português (Brasil)";
-    supportedLanguages["ja_JP"] = "日本語 (日本)";
-    supportedLanguages["ko_KR"] = "한국어 (대한민국)";
-    supportedLanguages["zh_CN"] = "中文 (简体)";
+    supportedLanguages["pt_BR"] = juce::String(juce::CharPointer_UTF8("Português (Brasil)"));
+    supportedLanguages["ja_JP"] = juce::String(juce::CharPointer_UTF8("日本語 (日本)"));
+    supportedLanguages["ko_KR"] = juce::String(juce::CharPointer_UTF8("한국어 (대한민국)"));
+    supportedLanguages["zh_CN"] = juce::String(juce::CharPointer_UTF8("中文 (简体)"));
 }
 
 //==============================================================================
@@ -565,8 +567,8 @@ void LocalizationManager::loadFallbackTranslations()
 
     // ── Languages ──
     translations["language.english"] = "English";
-    translations["language.spanish"] = "Español";
-    translations["language.french"] = "Français";
+    translations["language.spanish"] = juce::String(juce::CharPointer_UTF8("Español"));
+    translations["language.french"] = juce::String(juce::CharPointer_UTF8("Français"));
     translations["language.german"] = "Deutsch";
 
     // ── QueueBar ──

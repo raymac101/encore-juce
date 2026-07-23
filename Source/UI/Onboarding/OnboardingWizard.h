@@ -43,6 +43,14 @@ public:
 
     void closeButtonPressed() override;
 
+    // Deliberately does nothing: ResizableWindow::paint() would otherwise
+    // opaquely fill the entire window (including the transparent margin
+    // reserved for Content's drop shadow/rounded corners) with the
+    // background colour, defeating the semi-transparent peer set in
+    // launch(). Content (which covers the full window) draws everything
+    // that's actually visible.
+    void paint(juce::Graphics&) override {}
+
 private:
     class Content;
 

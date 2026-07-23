@@ -11,6 +11,7 @@
 */
 
 #include "LoginWindow.h"
+#include "LoginTheme.h"
 #include "../Auth/LoginFlowController.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/UserPreferences.h"
@@ -21,165 +22,6 @@
 #include "../Models/AccessRights.h"
 #include "BuildInfo.h"
 #include "Onboarding/OnboardingWizard.h"
-
-//==============================================================================
-// Brand-matched look-and-feel for the login screen. Mirrors the Angular
-// auth.component.scss: translucent inputs with white border, primary button
-// in the blue gradient, secondary button as a ghost outline.
-namespace LoginTheme
-{
-    static constexpr uint32_t kAccentBlue       = 0xff4272b8;
-    static constexpr uint32_t kAccentBlueLight  = 0xff5a8fd8;
-    static constexpr uint32_t kInputFill        = 0x1affffff; // rgba(255,255,255,0.10)
-    static constexpr uint32_t kInputFillFocus   = 0x26ffffff; // rgba(255,255,255,0.15)
-    static constexpr uint32_t kInputBorder      = 0x33ffffff; // rgba(255,255,255,0.20)
-    static constexpr uint32_t kInputBorderFocus = 0x66ffffff; // rgba(255,255,255,0.40)
-    static constexpr uint32_t kCardFill         = 0x1affffff;
-    static constexpr uint32_t kCardBorder       = 0x33ffffff;
-    static constexpr uint32_t kPlaceholder      = 0x99ffffff; // rgba(255,255,255,0.60)
-    static constexpr uint32_t kBodyText         = 0xffffffff;
-    static constexpr uint32_t kSubtleText       = 0xe6ffffff; // rgba(255,255,255,0.90)
-    static constexpr uint32_t kDividerText      = 0x80ffffff;
-}
-
-class LoginLookAndFeel : public juce::LookAndFeel_V4
-{
-public:
-    LoginLookAndFeel()
-    {
-        setColour(juce::TextEditor::backgroundColourId,    juce::Colour(LoginTheme::kInputFill));
-        setColour(juce::TextEditor::textColourId,          juce::Colour(LoginTheme::kBodyText));
-        setColour(juce::TextEditor::highlightColourId,     juce::Colour(LoginTheme::kAccentBlue).withAlpha(0.5f));
-        setColour(juce::TextEditor::highlightedTextColourId, juce::Colours::white);
-        setColour(juce::TextEditor::outlineColourId,       juce::Colour(LoginTheme::kInputBorder));
-        setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(LoginTheme::kInputBorderFocus));
-        setColour(juce::CaretComponent::caretColourId,     juce::Colours::white);
-
-        setColour(juce::Label::textColourId,               juce::Colour(LoginTheme::kBodyText));
-
-        setColour(juce::TextButton::buttonColourId,        juce::Colour(LoginTheme::kAccentBlue));
-        setColour(juce::TextButton::buttonOnColourId,      juce::Colour(LoginTheme::kAccentBlueLight));
-        setColour(juce::TextButton::textColourOffId,       juce::Colours::white);
-        setColour(juce::TextButton::textColourOnId,        juce::Colours::white);
-    }
-
-    juce::Font getTextButtonFont(juce::TextButton&, int /*height*/) override
-    {
-        return juce::Font(juce::FontOptions(14.0f)).withStyle(juce::Font::plain);
-    }
-
-    juce::Font getLabelFont(juce::Label& l) override
-    {
-        return l.getFont();
-    }
-
-    // Translucent rounded-rect inputs to match `.form_input`.
-    void fillTextEditorBackground(juce::Graphics& g, int width, int height,
-                                  juce::TextEditor& e) override
-    {
-        const float r = 10.0f;
-        g.setColour(e.findColour(juce::TextEditor::backgroundColourId));
-        g.fillRoundedRectangle(0.0f, 0.0f, (float) width, (float) height, r);
-    }
-
-    void drawTextEditorOutline(juce::Graphics& g, int width, int height,
-                               juce::TextEditor& e) override
-    {
-        const float r = 10.0f;
-        const auto colour = e.hasKeyboardFocus(true)
-                                ? e.findColour(juce::TextEditor::focusedOutlineColourId)
-                                : e.findColour(juce::TextEditor::outlineColourId);
-        g.setColour(colour);
-        g.drawRoundedRectangle(1.0f, 1.0f,
-                               (float) width  - 2.0f,
-                               (float) height - 2.0f,
-                               r, 2.0f);
-    }
-
-    // Pill-shaped buttons. Primary buttons (button-primary) get the blue
-    // gradient; ghost buttons (button-secondary) are translucent white with a
-    // subtle border.
-    void drawButtonBackground(juce::Graphics& g, juce::Button& button,
-                              const juce::Colour& /*backgroundColour*/,
-                              bool shouldDrawButtonAsHighlighted,
-                              bool shouldDrawButtonAsDown) override
-    {
-        const auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
-        const float r = juce::jmin(12.0f, bounds.getHeight() * 0.5f);
-        const bool ghost = button.getProperties().getWithDefault("ghost", false);
-        const bool greenSelect = button.getProperties().getWithDefault("greenSelect", false);
-        const bool enabled = button.isEnabled();
-
-        if (! enabled)
-        {
-            g.setColour(juce::Colour(0x33ffffff));
-            g.fillRoundedRectangle(bounds, r);
-            return;
-        }
-
-        if (greenSelect)
-        {
-            // Solid green pill (matches the SELECT button in the mock-up).
-            const auto base = juce::Colour(0xff10b981);
-            g.setColour(shouldDrawButtonAsHighlighted ? base.brighter(0.10f) : base);
-            g.fillRoundedRectangle(bounds, r);
-            if (shouldDrawButtonAsDown)
-            {
-                g.setColour(juce::Colours::black.withAlpha(0.10f));
-                g.fillRoundedRectangle(bounds, r);
-            }
-            return;
-        }
-
-        if (ghost)
-        {
-            const float a = shouldDrawButtonAsHighlighted ? 0.20f : 0.10f;
-            g.setColour(juce::Colours::white.withAlpha(a));
-            g.fillRoundedRectangle(bounds, r);
-
-            g.setColour(juce::Colour(LoginTheme::kInputBorder));
-            g.drawRoundedRectangle(bounds, r, 1.5f);
-            return;
-        }
-
-        // Primary: vertical blue gradient.
-        const auto top    = juce::Colour(LoginTheme::kAccentBlueLight);
-        const auto bottom = juce::Colour(LoginTheme::kAccentBlue);
-
-        juce::ColourGradient grad(
-            shouldDrawButtonAsHighlighted ? top.brighter(0.05f) : top,
-            bounds.getCentreX(), bounds.getY(),
-            shouldDrawButtonAsHighlighted ? bottom.brighter(0.05f) : bottom,
-            bounds.getCentreX(), bounds.getBottom(),
-            false);
-        g.setGradientFill(grad);
-        g.fillRoundedRectangle(bounds, r);
-
-        if (shouldDrawButtonAsDown)
-        {
-            g.setColour(juce::Colours::black.withAlpha(0.10f));
-            g.fillRoundedRectangle(bounds, r);
-        }
-    }
-
-    juce::Font getTextButtonFontForButton(juce::TextButton& b)
-    {
-        const bool greenSelect = b.getProperties().getWithDefault("greenSelect", false);
-        return juce::Font(juce::FontOptions(greenSelect ? 13.0f : 14.0f))
-                  .withStyle(greenSelect ? juce::Font::bold : juce::Font::plain);
-    }
-
-    void drawButtonText(juce::Graphics& g, juce::TextButton& button,
-                        bool /*shouldDrawButtonAsHighlighted*/,
-                        bool /*shouldDrawButtonAsDown*/) override
-    {
-        g.setFont(getTextButtonFontForButton(button));
-        g.setColour(juce::Colours::white);
-        g.drawFittedText(button.getButtonText(),
-                         button.getLocalBounds().reduced(2),
-                         juce::Justification::centred, 1);
-    }
-};
 
 //==============================================================================
 class LoginWindow::LoginContent : public juce::Component
@@ -239,7 +81,7 @@ public:
         switchModeButton_.setButtonText("Switch to Sign Up");
         googleButton_.setButtonText("Sign in with Google");
         appleButton_.setButtonText("Sign in with Apple");
-        getStartedButton_.setButtonText("New to Encore? Get Started");
+        getStartedButton_.setButtonText("New to Encore?  Start here");
 
         // Tag ghost (secondary) buttons so the L&F draws them differently.
         switchModeButton_.getProperties().set("ghost", true);
@@ -520,6 +362,19 @@ public:
         headingLabel_.setJustificationType(juce::Justification::centredLeft);
         headingLabel_.setFont(juce::Font(juce::FontOptions(28.0f)).withStyle(juce::Font::plain));
 
+       #if ENCORE_DEV_SKIP_LOGIN
+        // Dev-only shortcut sits beside the "Login" heading rather than
+        // stacked at the bottom of the form, where it used to overlap
+        // "New to Encore? Get Started" once the form grew past the card's
+        // fixed height.
+        if (page_ == Page::Login)
+        {
+            auto headingArea = headingLabel_.getBounds();
+            skipButton_.setBounds(headingArea.removeFromRight(170).reduced(0, 4));
+            headingLabel_.setBounds(headingArea);
+        }
+       #endif
+
         inner.removeFromTop(8);
         statusLabel_.setBounds(inner.removeFromTop(28));
         statusLabel_.setJustificationType(juce::Justification::centred);
@@ -585,11 +440,6 @@ private:
 
         area.removeFromTop(16);
         getStartedButton_.setBounds(area.removeFromTop(40).withSizeKeepingCentre(280, 40));
-
-       #if ENCORE_DEV_SKIP_LOGIN
-        area.removeFromTop(18);
-        skipButton_.setBounds(area.removeFromTop(36).withSizeKeepingCentre(220, 36));
-       #endif
     }
 
     void layoutSelectVenuePage(juce::Rectangle<int> area)

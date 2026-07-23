@@ -74,6 +74,14 @@ public:
         not itself a privileged operation. */
     AuthResult sendPasswordResetEmail(const juce::String& email);
 
+    /** Deletes the CURRENTLY SIGNED-IN Firebase Auth account via Identity
+        Toolkit's self-service accounts:delete, authenticated with the
+        current idToken -- no admin privilege needed, since a user can
+        always delete their own account. Does not itself call signOut() or
+        touch any Firestore documents; callers are responsible for both.
+        Returns true on success, or if no one was signed in to begin with. */
+    bool deleteCurrentAccount();
+
     //==============================================================================
     // Firestore: documents
     /** GET projects/.../documents/<path>. Returns the raw response var, or

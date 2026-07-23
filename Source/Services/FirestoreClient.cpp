@@ -274,6 +274,22 @@ FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::
     return parseAuthError(resp);
 }
 
+bool FirestoreClient::deleteCurrentAccount()
+{
+    const juce::String token = getFreshIdToken();
+    if (token.isEmpty())
+        return true; // nothing signed in to delete
+
+    juce::URL url(FirebaseConfig::authBaseUrl + "/accounts:delete?key=" + FirebaseConfig::apiKey);
+
+    juce::DynamicObject::Ptr body = new juce::DynamicObject();
+    body->setProperty("idToken", token);
+
+    int status = 0;
+    httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    return status >= 200 && status < 300;
+}
+
 FirestoreClient::AuthResult FirestoreClient::signInWithOAuthProvider(const juce::String& providerId)
 {
     // Real desktop OAuth requires:

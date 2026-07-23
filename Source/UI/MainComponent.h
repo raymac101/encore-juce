@@ -112,6 +112,14 @@ protected:
 
 private:
     //==============================================================================
+    // Audio playback -- declared before the UI components below so it is
+    // constructed first and destroyed last. SettingsContentPanel (owned,
+    // deeply nested, by mainArea) holds a raw AudioEngine* and unregisters
+    // itself from its device manager in its own destructor; if audioEngine
+    // were destroyed first, that would be a use-after-free during shutdown.
+    std::unique_ptr<AudioEngine> audioEngine;
+    std::unique_ptr<BackgroundMusicPlayer> bgPlayer_;
+
     // UI Components
     std::unique_ptr<TopBar> topBar;
     std::unique_ptr<BottomBar> bottomBar;
@@ -123,14 +131,11 @@ private:
     std::unique_ptr<juce::TextButton> languageButton;
     std::unique_ptr<juce::Label> statusLabel;
     std::unique_ptr<juce::Label> debugLabel;
-    
+
     // Language selector popup
     std::unique_ptr<juce::PopupMenu> languageMenu;
 
     //==============================================================================
-    // Audio playback
-    std::unique_ptr<AudioEngine> audioEngine;
-    std::unique_ptr<BackgroundMusicPlayer> bgPlayer_;
     CdgSong      currentSong;
     juce::String currentSongImageUrl;
     juce::String currentSongVersion_;
