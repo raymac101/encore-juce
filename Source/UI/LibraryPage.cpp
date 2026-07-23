@@ -14,6 +14,7 @@
 #include "../Services/ApiService.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/GlobalProgressService.h"
+#include "../Services/SongbookStorageService.h"
 #include "../Localization/LocalizationManager.h"
 
 #include <unordered_set>
@@ -43,8 +44,12 @@ static bool needsRemoteMetadata(const CdgSong& song)
 //==============================================================================
 LibraryPage::LibraryPage()
     : juce::Timer()
+    , contentHolder_ (std::make_unique<ContentHolder>())
 {
     setOpaque(true);
+    addAndMakeVisible(viewport_);
+    viewport_.setViewedComponent(contentHolder_.get(), false);
+    viewport_.setScrollBarsShown(true, false);
 
     auto& lm = LocalizationManager::getInstance();
 
@@ -55,7 +60,7 @@ LibraryPage::LibraryPage()
     titleLabel_->setFont(juce::Font(juce::FontOptions().withHeight(22.f)).boldened());
     titleLabel_->setColour(juce::Label::textColourId, juce::Colours::white);
     titleLabel_->setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(*titleLabel_);
+    contentHolder_->addAndMakeVisible(*titleLabel_);
 
     //--------------------------------------------------------------------------
     // Path section
@@ -63,7 +68,7 @@ LibraryPage::LibraryPage()
     pathLabel_->setText(lm.getText("library.path_label"), juce::dontSendNotification);
     pathLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
     pathLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
-    addAndMakeVisible(*pathLabel_);
+    contentHolder_->addAndMakeVisible(*pathLabel_);
 
     pathEditor_ = std::make_unique<juce::TextEditor>();
     pathEditor_->setMultiLine(false);
@@ -72,13 +77,13 @@ LibraryPage::LibraryPage()
     pathEditor_->setColour(juce::TextEditor::textColourId, juce::Colour(kTextPrimary));
     pathEditor_->setColour(juce::TextEditor::outlineColourId, juce::Colour(kAccent).withAlpha(0.4f));
     pathEditor_->setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(kAccent));
-    addAndMakeVisible(*pathEditor_);
+    contentHolder_->addAndMakeVisible(*pathEditor_);
 
     browseBtn_ = std::make_unique<juce::TextButton>("...");
     browseBtn_->setColour(juce::TextButton::buttonColourId, juce::Colour(kBtnNormal));
     browseBtn_->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
     browseBtn_->onClick = [this]() { onInitialSongLoad(); };
-    addAndMakeVisible(*browseBtn_);
+    contentHolder_->addAndMakeVisible(*browseBtn_);
 
     //--------------------------------------------------------------------------
     // Progress section (hidden until a scan starts)
@@ -87,19 +92,19 @@ LibraryPage::LibraryPage()
     progressLabel_->setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
     progressLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
     progressLabel_->setVisible(false);
-    addAndMakeVisible(*progressLabel_);
+    contentHolder_->addAndMakeVisible(*progressLabel_);
 
     progressBar_ = std::make_unique<juce::ProgressBar>(progressValue_);
     progressBar_->setColour(juce::ProgressBar::backgroundColourId, juce::Colour(0xff0d1527));
     progressBar_->setColour(juce::ProgressBar::foregroundColourId, juce::Colour(kAccent));
     progressBar_->setVisible(false);
-    addAndMakeVisible(*progressBar_);
+    contentHolder_->addAndMakeVisible(*progressBar_);
 
     currentSongLabel_ = std::make_unique<juce::Label>();
     currentSongLabel_->setFont(juce::Font(juce::FontOptions().withHeight(11.f)));
     currentSongLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
     currentSongLabel_->setVisible(false);
-    addAndMakeVisible(*currentSongLabel_);
+    contentHolder_->addAndMakeVisible(*currentSongLabel_);
 
     //--------------------------------------------------------------------------
     // Status message label
@@ -107,7 +112,7 @@ LibraryPage::LibraryPage()
     messageLabel_->setFont(juce::Font(juce::FontOptions().withHeight(12.f)));
     messageLabel_->setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
     messageLabel_->setVisible(false);
-    addAndMakeVisible(*messageLabel_);
+    contentHolder_->addAndMakeVisible(*messageLabel_);
 
     //--------------------------------------------------------------------------
     // Buttons
@@ -119,7 +124,7 @@ LibraryPage::LibraryPage()
         btn->setColour(juce::TextButton::buttonColourId,  juce::Colour(kBtnNormal));
         btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
         btn->onClick = std::move(action);
-        addAndMakeVisible(*btn);
+        contentHolder_->addAndMakeVisible(*btn);
     };
 
     makeBtn(lm.getText("library.btn_initial_load"), initialSongLoadBtn_,
@@ -137,7 +142,7 @@ LibraryPage::LibraryPage()
     {
         lbl = std::make_unique<juce::Label>();
         styleStatLabel(lbl.get(), kTextPrimary);
-        addAndMakeVisible(*lbl);
+        contentHolder_->addAndMakeVisible(*lbl);
     };
 
     makeStatLabel(statsTotalLabel_);
@@ -173,8 +178,8 @@ LibraryPage::LibraryPage()
         songs_ = std::move(scannedSongs);
         stats_ = scannedStats;
 
-        // Persist to disk
-        scanner_.saveSongbook(songs_);
+        // Persist to disk + Storage
+        persistSongbook();
 
         // Persist the selected library root so startup can restore it and
         // avoid prompting again once the user has fixed a path mismatch.
@@ -207,8 +212,44 @@ LibraryPage::LibraryPage()
     };
 
     //--------------------------------------------------------------------------
+    // Decorative header panels -- drawn against contentHolder_'s own bounds
+    // (not LibraryPage's) so they scroll along with the form instead of
+    // staying fixed while the text/buttons scroll past them.
+    contentHolder_->onPaint = [this](juce::Graphics& g)
+    {
+        auto bounds = contentHolder_->getLocalBounds();
+        auto header = bounds.reduced(12).removeFromTop(128);
+        MenuTheme::drawHeaderPanel(g, header);
+
+        int panelY = titleLabel_->getBottom() + 8
+                   + pathLabel_->getHeight() + 4
+                   + pathEditor_->getHeight() + 8
+                   + (progressBar_->isVisible() ? progressBar_->getHeight() + 32 : 0)
+                   + 8   // message label
+                   + initialSongLoadBtn_->getHeight() + 12;
+
+        int panelH = bounds.getHeight() - panelY - 12;
+        if (panelH > 0)
+            MenuTheme::drawHeaderPanel(g, juce::Rectangle<int>(12, panelY, bounds.getWidth() - 24, panelH));
+    };
+
+    //--------------------------------------------------------------------------
     // Load existing songbook from disk without blocking first paint.
     loadSongbookAsync();
+}
+
+//==============================================================================
+void LibraryPage::persistSongbook()
+{
+    scanner_.saveSongbook(songs_);
+
+    if (activeVenueId_.isNotEmpty())
+        SongbookStorageService::getInstance().uploadLocalSongbook(activeVenueId_,
+            [](bool ok, juce::String error)
+            {
+                if (! ok)
+                    DBG ("[Songbook] Storage upload failed: " << error);
+            });
 }
 
 //==============================================================================
@@ -365,7 +406,7 @@ bool LibraryPage::upsertSong(const CdgSong& song)
     }
 
     // Persist to songbook.json + SQLite index.
-    scanner_.saveSongbook(songs_);
+    persistSongbook();
     if (songDb_.isOpen())
         songDb_.insertOrReplace(merged);
 
@@ -382,7 +423,7 @@ bool LibraryPage::deleteSong(const CdgSong& song)
     auto removedId = songs_[(size_t) idx].id;
     songs_.erase(songs_.begin() + idx);
 
-    scanner_.saveSongbook(songs_);
+    persistSongbook();
     if (songDb_.isOpen() && ! removedId.empty())
         songDb_.remove(juce::String(removedId));
 
@@ -434,26 +475,31 @@ void LibraryPage::timerCallback()
 void LibraryPage::paint(juce::Graphics& g)
 {
     MenuTheme::drawPageBackground(g, getLocalBounds());
-
-    auto header = getLocalBounds().reduced(12).removeFromTop(128);
-    MenuTheme::drawHeaderPanel(g, header);
-
-    auto bounds = getLocalBounds();
-    int panelY = titleLabel_->getBottom() + 8
-               + pathLabel_->getHeight() + 4
-               + pathEditor_->getHeight() + 8
-               + (progressBar_->isVisible() ? progressBar_->getHeight() + 32 : 0)
-               + 8   // message label
-               + initialSongLoadBtn_->getHeight() + 12;
-
-    int panelH = bounds.getHeight() - panelY - 12;
-    if (panelH > 0)
-        MenuTheme::drawHeaderPanel(g, juce::Rectangle<int>(12, panelY, bounds.getWidth() - 24, panelH));
 }
 
 void LibraryPage::resized()
 {
-    auto area   = getLocalBounds().reduced(16, 12);
+    viewport_.setBounds(getLocalBounds());
+
+    const int startingWidth  = juce::jmax(600, viewport_.getWidth() - viewport_.getScrollBarThickness());
+    const int startingHeight = juce::jmax(contentHolder_->getHeight(), 500);
+    contentHolder_->setSize(startingWidth, startingHeight);
+    layoutContent();
+
+    // Grow to fit the last stats row -- lets the viewport's scrollbar reach
+    // it on any window size. layoutContent() only depends on width, so a
+    // second pass at the corrected height reproduces the same positions.
+    const int neededHeight = statsGroupsLabel_->getBottom() + 16;
+    if (neededHeight != contentHolder_->getHeight())
+    {
+        contentHolder_->setSize(startingWidth, neededHeight);
+        layoutContent();
+    }
+}
+
+void LibraryPage::layoutContent()
+{
+    auto area   = contentHolder_->getLocalBounds().reduced(16, 12);
     int  w      = area.getWidth();
     int  lineH  = 24;
     int  btnH   = 32;
@@ -475,7 +521,6 @@ void LibraryPage::resized()
     y += lineH + gap;
 
     // Progress section
-    int progressSectionH = 0;
     if (progressBar_->isVisible())
     {
         progressLabel_->setBounds(area.getX(), y, 100, lineH);
@@ -483,7 +528,6 @@ void LibraryPage::resized()
         y += lineH + 2;
         currentSongLabel_->setBounds(area.getX(), y, w, lineH - 4);
         y += lineH + gap;
-        progressSectionH = 2 * lineH + gap + 2;
     }
 
     // Message label
@@ -547,7 +591,7 @@ void LibraryPage::onAddSongs()
             if (songDb_.isOpen())
                 for (auto& s : songs_)
                     songDb_.insertOrReplace(s);
-            scanner_.saveSongbook(songs_);
+            persistSongbook();
             refreshStats();
             if (onSongbookChanged) onSongbookChanged(songs_);
 
@@ -593,7 +637,7 @@ void LibraryPage::onAddSongs()
 
     if (targets.empty())
     {
-        scanner_.saveSongbook(songs_);
+        persistSongbook();
         stats_ = LibraryScanner::computeStats(songs_);
         refreshStats();
         setScanningState(false);
@@ -606,7 +650,7 @@ void LibraryPage::onAddSongs()
 
     if (! allowOnlineLookup)
     {
-        scanner_.saveSongbook(songs_);
+        persistSongbook();
         stats_ = LibraryScanner::computeStats(songs_);
         refreshStats();
         setScanningState(false);
@@ -733,7 +777,7 @@ void LibraryPage::onAddSongs()
 
         persistRunReport((int) state->queuedSongIndices.size());
 
-        owner->scanner_.saveSongbook(owner->songs_);
+        owner->persistSongbook();
         owner->stats_ = LibraryScanner::computeStats(owner->songs_);
         owner->refreshStats();
         owner->setScanningState(false);
@@ -1030,7 +1074,7 @@ void LibraryPage::onGetMetaData()
     juce::Thread::launch([this]() {
         int matched = scanner_.applyLocalMetadata(songs_);
         stats_ = LibraryScanner::computeStats(songs_);
-        scanner_.saveSongbook(songs_);
+        persistSongbook();
 
         juce::MessageManager::callAsync([this, matched]() {
             stats_.numMeta = matched;

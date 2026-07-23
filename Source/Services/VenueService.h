@@ -89,6 +89,17 @@ public:
         Angular addCode() helper. */
     void addCode(const juce::String& venueId, WriteCallback onDone);
 
+    /** Uploads `logoFile` to Firebase Storage under
+        "venues/<venueId>/artwork/logo-<timestamp><ext>" and, on success,
+        PATCHes the resulting download URL onto the venue's `logoUrl` field
+        (the same field the lyric display already reads via
+        ArtworkCache::getOrFetch). */
+    using UploadLogoCallback = std::function<void(bool ok, juce::String logoUrl, juce::String error)>;
+    void uploadLogo(const juce::String& venueId, const juce::File& logoFile, UploadLogoCallback onDone);
+
+    /** Clears the venue's `logoUrl` field, reverting to the default logo. */
+    void resetLogo(const juce::String& venueId, WriteCallback onDone);
+
     /** Bump the `updateSongs` timestamp on the active venue (signal to
         clients that the songbook has been refreshed). */
     void setLastSongUpdateDate(WriteCallback onDone = nullptr);

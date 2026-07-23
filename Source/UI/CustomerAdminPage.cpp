@@ -49,7 +49,7 @@ namespace
     juce::String formatHostLine (const CustomerAdminService::HostSummary& h)
     {
         juce::String line = h.email;
-        if (h.stageName.isNotEmpty()) line += "  \xe2\x80\x94  " + h.stageName;
+        if (h.stageName.isNotEmpty()) line += juce::String(juce::CharPointer_UTF8("  \xe2\x80\x94  ")) + h.stageName;
         if (h.authOnly) line += "  [Auth only, no hosts doc]";
         return line;
     }
@@ -89,7 +89,7 @@ void CustomerAdminPage::VenueListModel::paintListBoxItem (int rowNumber, juce::G
 
     const auto& v = rows[(size_t) rowNumber];
     juce::String line = v.name.isNotEmpty() ? v.name : v.id;
-    if (v.city.isNotEmpty()) line += "  \xe2\x80\x94  " + v.city;
+    if (v.city.isNotEmpty()) line += juce::String(juce::CharPointer_UTF8("  \xe2\x80\x94  ")) + v.city;
 
     g.setColour (kText);
     g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
@@ -99,45 +99,50 @@ void CustomerAdminPage::VenueListModel::paintListBoxItem (int rowNumber, juce::G
 
 //==============================================================================
 CustomerAdminPage::CustomerAdminPage()
+    : contentHolder_ (std::make_unique<ContentHolder>())
 {
     setOpaque (true);
+    addAndMakeVisible (viewport_);
+    viewport_.setViewedComponent (contentHolder_.get(), false);
+    viewport_.setScrollBarsShown (true, false);
+
     auto& lm = LocalizationManager::getInstance();
 
     styleLabel (title_, 28.0f, true, kText);
     title_.setText (lm.getText ("page.customer_admin.title"), juce::dontSendNotification);
-    addAndMakeVisible (title_);
+    contentHolder_->addAndMakeVisible (title_);
 
     styleLabel (subtitle_, 13.0f, false, kMuted);
     subtitle_.setText (lm.getText ("page.customer_admin.subtitle"), juce::dontSendNotification);
-    addAndMakeVisible (subtitle_);
+    contentHolder_->addAndMakeVisible (subtitle_);
 
     styleLabel (statusLabel_, 12.0f, false, kMuted);
-    addAndMakeVisible (statusLabel_);
+    contentHolder_->addAndMakeVisible (statusLabel_);
 
     styleButton (tabUnassignedButton_, kAccent);
     tabUnassignedButton_.onClick = [this] { showUnassignedTab(); };
-    addAndMakeVisible (tabUnassignedButton_);
+    contentHolder_->addAndMakeVisible (tabUnassignedButton_);
 
     styleButton (tabSearchButton_, kPanel);
     tabSearchButton_.onClick = [this] { showSearchTab(); };
-    addAndMakeVisible (tabSearchButton_);
+    contentHolder_->addAndMakeVisible (tabSearchButton_);
 
     //--- Unassigned Users tab ------------------------------------------------
     styleLabel (unassignedTitle_, 15.0f, true, kText);
     unassignedTitle_.setText (lm.getText ("page.customer_admin.unassigned_title"), juce::dontSendNotification);
-    addAndMakeVisible (unassignedTitle_);
+    contentHolder_->addAndMakeVisible (unassignedTitle_);
 
     styleButton (refreshUnassignedButton_, kPanel);
     refreshUnassignedButton_.onClick = [this] { refreshUnassigned (true); };
-    addAndMakeVisible (refreshUnassignedButton_);
+    contentHolder_->addAndMakeVisible (refreshUnassignedButton_);
 
     styleButton (unassignedMoreButton_, kPanel);
     unassignedMoreButton_.onClick = [this] { refreshUnassigned (false); };
-    addAndMakeVisible (unassignedMoreButton_);
+    contentHolder_->addAndMakeVisible (unassignedMoreButton_);
 
     unassignedList_.setColour (juce::ListBox::backgroundColourId, kPanel);
     unassignedList_.setColour (juce::ListBox::outlineColourId, kBorder);
-    addAndMakeVisible (unassignedList_);
+    contentHolder_->addAndMakeVisible (unassignedList_);
 
     unassignedModel_.onRowClicked = [this] (int row)
     {
@@ -156,24 +161,24 @@ CustomerAdminPage::CustomerAdminPage()
 
     styleLabel (assignHeaderLabel_, 14.0f, true, kText);
     assignHeaderLabel_.setText (lm.getText ("page.customer_admin.assign_header"), juce::dontSendNotification);
-    addAndMakeVisible (assignHeaderLabel_);
+    contentHolder_->addAndMakeVisible (assignHeaderLabel_);
 
     styleEditor (venueSearchEditor_, lm.getText ("page.customer_admin.venue_search_hint"));
     venueSearchEditor_.onTextChange = [this] { filterVenueList(); };
-    addAndMakeVisible (venueSearchEditor_);
+    contentHolder_->addAndMakeVisible (venueSearchEditor_);
 
     venueListBox_.setColour (juce::ListBox::backgroundColourId, kPanel);
     venueListBox_.setColour (juce::ListBox::outlineColourId, kBorder);
-    addAndMakeVisible (venueListBox_);
+    contentHolder_->addAndMakeVisible (venueListBox_);
     venueListModel_.onRowClicked = [this] (int row) { selectVenue (row); };
 
     styleLabel (selectedVenueLabel_, 12.0f, true, kMuted);
     selectedVenueLabel_.setText (lm.getText ("page.customer_admin.no_venue_selected"), juce::dontSendNotification);
-    addAndMakeVisible (selectedVenueLabel_);
+    contentHolder_->addAndMakeVisible (selectedVenueLabel_);
 
     styleLabel (assignRoleLabel_, 12.0f, false, kMuted);
     assignRoleLabel_.setText (lm.getText ("page.customer_admin.venue_role"), juce::dontSendNotification);
-    addAndMakeVisible (assignRoleLabel_);
+    contentHolder_->addAndMakeVisible (assignRoleLabel_);
 
     assignRoleBox_.addItem ("Host", 1);
     assignRoleBox_.addItem ("Admin", 2);
@@ -183,32 +188,32 @@ CustomerAdminPage::CustomerAdminPage()
     assignRoleBox_.setColour (juce::ComboBox::backgroundColourId, kPanel);
     assignRoleBox_.setColour (juce::ComboBox::textColourId, kText);
     assignRoleBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
-    addAndMakeVisible (assignRoleBox_);
+    contentHolder_->addAndMakeVisible (assignRoleBox_);
 
     styleButton (assignSubmitButton_, kSafe);
     assignSubmitButton_.onClick = [this] { submitVenueAssignment(); };
-    addAndMakeVisible (assignSubmitButton_);
+    contentHolder_->addAndMakeVisible (assignSubmitButton_);
 
     //--- Customer Search tab --------------------------------------------------
     styleLabel (searchLabel_, 12.0f, false, kMuted);
     searchLabel_.setText (lm.getText ("page.customer_admin.search_hint"), juce::dontSendNotification);
-    addChildComponent (searchLabel_);
+    contentHolder_->addChildComponent (searchLabel_);
 
     styleEditor (searchQueryEditor_, lm.getText ("page.customer_admin.search_placeholder"));
     searchQueryEditor_.onReturnKey = [this] { performSearch (true); };
-    addChildComponent (searchQueryEditor_);
+    contentHolder_->addChildComponent (searchQueryEditor_);
 
     styleButton (searchButton_, kAccent);
     searchButton_.onClick = [this] { performSearch (true); };
-    addChildComponent (searchButton_);
+    contentHolder_->addChildComponent (searchButton_);
 
     styleButton (searchMoreButton_, kPanel);
     searchMoreButton_.onClick = [this] { performSearch (false); };
-    addChildComponent (searchMoreButton_);
+    contentHolder_->addChildComponent (searchMoreButton_);
 
     searchList_.setColour (juce::ListBox::backgroundColourId, kPanel);
     searchList_.setColour (juce::ListBox::outlineColourId, kBorder);
-    addChildComponent (searchList_);
+    contentHolder_->addChildComponent (searchList_);
 
     searchModel_.onRowClicked = [this] (int row)
     {
@@ -219,86 +224,103 @@ CustomerAdminPage::CustomerAdminPage()
 
     //--- Profile detail panel (shared) ---------------------------------------
     styleLabel (profileHeaderLabel_, 15.0f, true, kText);
-    addAndMakeVisible (profileHeaderLabel_);
+    contentHolder_->addAndMakeVisible (profileHeaderLabel_);
 
     styleLabel (profileDetailsLabel_, 13.0f, false, kMuted);
     profileDetailsLabel_.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (profileDetailsLabel_);
+    contentHolder_->addAndMakeVisible (profileDetailsLabel_);
 
     styleLabel (venuesLabel_, 12.0f, false, kMuted);
     venuesLabel_.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (venuesLabel_);
+    contentHolder_->addAndMakeVisible (venuesLabel_);
 
     styleLabel (legacyProfileLabel_, 12.0f, false, kMuted);
     legacyProfileLabel_.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (legacyProfileLabel_);
+    contentHolder_->addAndMakeVisible (legacyProfileLabel_);
 
     styleLabel (resetSectionLabel_, 13.0f, true, kText);
     resetSectionLabel_.setText (lm.getText ("page.customer_admin.reset_section"), juce::dontSendNotification);
-    addAndMakeVisible (resetSectionLabel_);
+    contentHolder_->addAndMakeVisible (resetSectionLabel_);
 
     styleButton (sendResetEmailButton_, kAccent);
     sendResetEmailButton_.onClick = [this] { onSendResetEmailClicked(); };
-    addAndMakeVisible (sendResetEmailButton_);
+    contentHolder_->addAndMakeVisible (sendResetEmailButton_);
 
     styleEditor (newPasswordEditor_, lm.getText ("page.customer_admin.new_password_hint"));
     newPasswordEditor_.setPasswordCharacter (juce::juce_wchar ('*'));
-    addAndMakeVisible (newPasswordEditor_);
+    contentHolder_->addAndMakeVisible (newPasswordEditor_);
 
     styleButton (setPasswordButton_, kDanger.withMultipliedSaturation (0.7f));
     setPasswordButton_.onClick = [this] { onSetPasswordClicked(); };
-    addAndMakeVisible (setPasswordButton_);
+    contentHolder_->addAndMakeVisible (setPasswordButton_);
 
     styleLabel (removalSectionLabel_, 13.0f, true, kText);
     removalSectionLabel_.setText (lm.getText ("page.customer_admin.removal_section"), juce::dontSendNotification);
-    addAndMakeVisible (removalSectionLabel_);
+    contentHolder_->addAndMakeVisible (removalSectionLabel_);
 
     styleButton (deactivateButton_, kSafe);
     deactivateButton_.onClick = [this] { onDeactivateClicked(); };
-    addAndMakeVisible (deactivateButton_);
+    contentHolder_->addAndMakeVisible (deactivateButton_);
 
     styleButton (reactivateButton_, kPanel);
     reactivateButton_.onClick = [this] { onReactivateClicked(); };
-    addAndMakeVisible (reactivateButton_);
+    contentHolder_->addAndMakeVisible (reactivateButton_);
 
     styleLabel (confirmEmailLabel_, 12.0f, false, kMuted);
     confirmEmailLabel_.setText (lm.getText ("page.customer_admin.confirm_email_hint"), juce::dontSendNotification);
-    addAndMakeVisible (confirmEmailLabel_);
+    contentHolder_->addAndMakeVisible (confirmEmailLabel_);
 
     styleEditor (confirmEmailEditor_, lm.getText ("page.customer_admin.confirm_email_placeholder"));
     confirmEmailEditor_.onTextChange = [this] { updateHardDeleteButtonState(); };
-    addAndMakeVisible (confirmEmailEditor_);
+    contentHolder_->addAndMakeVisible (confirmEmailEditor_);
 
     styleButton (hardDeleteButton_, kDanger);
     hardDeleteButton_.onClick = [this] { onHardDeleteClicked(); };
     hardDeleteButton_.setEnabled (false);
-    addAndMakeVisible (hardDeleteButton_);
+    contentHolder_->addAndMakeVisible (hardDeleteButton_);
 
     //--- Venue details panel (shares the right column; starts hidden -- see
     //    showHostProfilePanel()/showVenueDetailsPanel()) -----------------------
     styleLabel (venueDetailsHeaderLabel_, 15.0f, true, kText);
-    addChildComponent (venueDetailsHeaderLabel_);
+    contentHolder_->addChildComponent (venueDetailsHeaderLabel_);
 
     styleLabel (venueDetailsBodyLabel_, 13.0f, false, kMuted);
     venueDetailsBodyLabel_.setJustificationType (juce::Justification::topLeft);
-    addChildComponent (venueDetailsBodyLabel_);
+    contentHolder_->addChildComponent (venueDetailsBodyLabel_);
 
     styleLabel (deleteVenueSectionLabel_, 13.0f, true, kText);
     deleteVenueSectionLabel_.setText (lm.getText ("page.customer_admin.delete_venue_section"), juce::dontSendNotification);
-    addChildComponent (deleteVenueSectionLabel_);
+    contentHolder_->addChildComponent (deleteVenueSectionLabel_);
 
     styleLabel (confirmVenueNameLabel_, 12.0f, false, kMuted);
     confirmVenueNameLabel_.setText (lm.getText ("page.customer_admin.confirm_venue_name_hint"), juce::dontSendNotification);
-    addChildComponent (confirmVenueNameLabel_);
+    contentHolder_->addChildComponent (confirmVenueNameLabel_);
 
     styleEditor (confirmVenueNameEditor_, lm.getText ("page.customer_admin.confirm_venue_name_placeholder"));
     confirmVenueNameEditor_.onTextChange = [this] { updateDeleteVenueButtonState(); };
-    addChildComponent (confirmVenueNameEditor_);
+    contentHolder_->addChildComponent (confirmVenueNameEditor_);
 
     styleButton (deleteVenueButton_, kDanger);
     deleteVenueButton_.onClick = [this] { onDeleteVenueClicked(); };
     deleteVenueButton_.setEnabled (false);
-    addChildComponent (deleteVenueButton_);
+    contentHolder_->addChildComponent (deleteVenueButton_);
+
+    // Decorative header/column panels, drawn against contentHolder_'s own
+    // bounds (not CustomerAdminPage's) so they scroll along with the rest
+    // of the content.
+    contentHolder_->onPaint = [this] (juce::Graphics& g)
+    {
+        auto bounds = contentHolder_->getLocalBounds().reduced (22);
+        auto header = bounds.removeFromTop (96);
+        MenuTheme::drawHeaderPanel (g, header);
+
+        bounds.removeFromTop (14);
+        auto leftColumn = bounds.removeFromLeft (bounds.getWidth() * 3 / 5);
+        MenuTheme::drawHeaderPanel (g, leftColumn);
+
+        bounds.removeFromLeft (14);
+        MenuTheme::drawHeaderPanel (g, bounds);
+    };
 
     clearProfileView();
     showHostProfilePanel();
@@ -627,7 +649,7 @@ void CustomerAdminPage::refreshProfileView()
     else
     {
         for (auto& v : currentProfile_.venues)
-            venuesText << "  \xe2\x80\xa2 " << (v.venueName.isNotEmpty() ? v.venueName : v.venueId)
+            venuesText << juce::String(juce::CharPointer_UTF8("  \xe2\x80\xa2 ")) << (v.venueName.isNotEmpty() ? v.venueName : v.venueId)
                        << "  (" << v.role << ")\n";
     }
     venuesLabel_.setText (venuesText, juce::dontSendNotification);
@@ -920,22 +942,35 @@ void CustomerAdminPage::setStatus (const juce::String& message, bool isError)
 void CustomerAdminPage::paint (juce::Graphics& g)
 {
     MenuTheme::drawPageBackground (g, getLocalBounds());
-
-    auto bounds = getLocalBounds().reduced (22);
-    auto header = bounds.removeFromTop (96);
-    MenuTheme::drawHeaderPanel (g, header);
-
-    bounds.removeFromTop (14);
-    auto leftColumn = bounds.removeFromLeft (bounds.getWidth() * 3 / 5);
-    MenuTheme::drawHeaderPanel (g, leftColumn);
-
-    bounds.removeFromLeft (14);
-    MenuTheme::drawHeaderPanel (g, bounds);
 }
 
 void CustomerAdminPage::resized()
 {
-    auto bounds = getLocalBounds().reduced (22);
+    viewport_.setBounds (getLocalBounds());
+
+    const int startingWidth  = juce::jmax (900, viewport_.getWidth() - viewport_.getScrollBarThickness());
+    const int startingHeight = juce::jmax (contentHolder_->getHeight(), 700);
+    contentHolder_->setSize (startingWidth, startingHeight);
+    layoutContent();
+
+    // Grow to fit whichever column (left tab or right panel) actually
+    // needed more room -- lets the viewport's scrollbar reach the bottom
+    // of either on any window size. layoutContent() only depends on width,
+    // so a second pass at the corrected height reproduces the same
+    // positions.
+    const int leftBottom  = showingSearchTab_ ? searchList_.getBottom() : assignSubmitButton_.getBottom();
+    const int rightBottom = showingVenueInRightPanel_ ? deleteVenueButton_.getBottom() : hardDeleteButton_.getBottom();
+    const int neededHeight = juce::jmax (leftBottom, rightBottom) + 22;
+    if (neededHeight != contentHolder_->getHeight())
+    {
+        contentHolder_->setSize (startingWidth, neededHeight);
+        layoutContent();
+    }
+}
+
+void CustomerAdminPage::layoutContent()
+{
+    auto bounds = contentHolder_->getLocalBounds().reduced (22);
 
     auto header = bounds.removeFromTop (96).reduced (16, 12);
     title_.setBounds (header.removeFromTop (32));
@@ -962,7 +997,10 @@ void CustomerAdminPage::resized()
         btnRow.removeFromLeft (8);
         unassignedMoreButton_.setBounds (btnRow.removeFromLeft (100));
         leftColumn.removeFromTop (8);
-        unassignedList_.setBounds (leftColumn.removeFromTop (juce::jmax (100, leftColumn.getHeight() - 270)));
+        // Fixed height, not "whatever's left" -- the content now grows to
+        // fit its own needs rather than being squeezed into a given window
+        // size, so there's no natural "remainder" to fill.
+        unassignedList_.setBounds (leftColumn.removeFromTop (220));
         leftColumn.removeFromTop (10);
 
         assignHeaderLabel_.setBounds (leftColumn.removeFromTop (22));
@@ -987,7 +1025,9 @@ void CustomerAdminPage::resized()
         leftColumn.removeFromTop (8);
         searchMoreButton_.setBounds (leftColumn.removeFromTop (26).withWidth (110));
         leftColumn.removeFromTop (6);
-        searchList_.setBounds (leftColumn);
+        // Fixed height, not "whatever's left" -- see the unassignedList_
+        // comment above for why.
+        searchList_.setBounds (leftColumn.removeFromTop (320));
     }
 
     //--- Right column: profile panel OR venue-details panel ------------------

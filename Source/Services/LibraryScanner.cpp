@@ -812,6 +812,11 @@ juce::String LibraryScanner::normaliseExt(const juce::String& ext)
 //==============================================================================
 juce::File LibraryScanner::getSongbookFile() const
 {
+    return getDefaultSongbookFile();
+}
+
+juce::File LibraryScanner::getDefaultSongbookFile()
+{
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                .getChildFile("EncoreKaraoke")
                .getChildFile("songbook.json");

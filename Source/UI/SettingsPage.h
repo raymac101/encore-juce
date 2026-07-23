@@ -165,6 +165,12 @@ public:
         device selector and mic channel-mapping controls. */
     void setAudioEngine(AudioEngine* engine);
 
+    //==========================================================================
+    /** Shows a status message under the logo file path (upload success/
+        failure), and re-enables the Save/Default buttons once the async
+        upload/reset triggered by onUploadLogo/onResetLogo completes. */
+    void setLogoStatus(const juce::String& text, bool isError);
+
 private:
     //==========================================================================
     // Colours (matching the rest of the app)

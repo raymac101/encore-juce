@@ -92,6 +92,11 @@ public:
     juce::File              getSongbookFile() const;
     juce::File              getScanRoot()     const { return scanRoot_; }
 
+    /** Same path as getSongbookFile(), callable without a LibraryScanner
+        instance (the path never depends on instance state). Used by
+        SongbookStorageService to find the local file to upload. */
+    static juce::File       getDefaultSongbookFile();
+
     //==========================================================================
     // Metadata enrichment
     //  Reads metadata.json from the app-data folder, matches by

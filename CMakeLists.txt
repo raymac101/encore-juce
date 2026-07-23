@@ -111,6 +111,7 @@ target_sources(EncoreJUCE
         Source/Services/UserPreferences.cpp
         Source/Services/WaveformGenerator.cpp
         Source/Services/FirestoreClient.cpp
+        Source/Services/SongbookStorageService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
         Source/Services/RequestService.cpp
@@ -269,12 +270,31 @@ if(NOT SQLite3_FOUND)
 endif()
 target_link_libraries(EncoreJUCE PRIVATE SQLite3::SQLite3)
 
-# Copy assets to output directory
-add_custom_command(TARGET EncoreJUCE POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:EncoreJUCE>/assets
-    COMMENT "Copying assets to output directory")
+# Copy assets to output directory. On macOS the real files must live under
+# Contents/Resources/ (standard bundle layout) rather than next to the
+# executable in Contents/MacOS/ -- newer codesign deep-verifies loose,
+# non-executable files sitting alongside the binary as if they were
+# subcomponents needing their own signature, which a plain resource file
+# can never satisfy, and the whole bundle fails to sign. A compatibility
+# symlink at the old Contents/MacOS/assets location keeps every existing
+# `currentExecutableFile`-relative asset lookup in Source/ working unchanged.
+if(APPLE)
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets
+            $<TARGET_BUNDLE_CONTENT_DIR:EncoreJUCE>/Resources/assets
+        COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:EncoreJUCE>/assets
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ../Resources/assets
+            $<TARGET_FILE_DIR:EncoreJUCE>/assets
+        COMMENT "Copying assets into app bundle Resources (with MacOS/ compatibility symlink)")
+else()
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets
+            $<TARGET_FILE_DIR:EncoreJUCE>/assets
+        COMMENT "Copying assets to output directory")
+endif()
 
 # Copy localisation files. On macOS they go inside the .app bundle's
 # Contents/Resources/Languages/ (standard bundle layout). On other platforms

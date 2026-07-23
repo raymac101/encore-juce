@@ -222,15 +222,19 @@ juce::String ChartsPage::tr(const juce::String& key, const juce::String& fallbac
 }
 
 ChartsPage::ChartsPage()
+    : contentHolder_ (std::make_unique<ContentHolder>())
 {
     setOpaque(true);
+    addAndMakeVisible(viewport_);
+    viewport_.setViewedComponent(contentHolder_.get(), false);
+    viewport_.setScrollBarsShown(true, false);
 
-    addAndMakeVisible(titleLabel_);
+    contentHolder_->addAndMakeVisible(titleLabel_);
     titleLabel_.setText(tr("charts.title", "Analytics Dashboard"), juce::dontSendNotification);
     titleLabel_.setColour(juce::Label::textColourId, kText);
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(24.0f)).boldened());
 
-    addAndMakeVisible(timeRangeBox_);
+    contentHolder_->addAndMakeVisible(timeRangeBox_);
     rebuildTimeRangeOptions();
     timeRangeBox_.onChange = [this]()
     {
@@ -243,10 +247,10 @@ ChartsPage::ChartsPage()
         refreshAnalytics();
     };
 
-    addAndMakeVisible(customStartLabel_);
-    addAndMakeVisible(customEndLabel_);
-    addAndMakeVisible(customStartDate_);
-    addAndMakeVisible(customEndDate_);
+    contentHolder_->addAndMakeVisible(customStartLabel_);
+    contentHolder_->addAndMakeVisible(customEndLabel_);
+    contentHolder_->addAndMakeVisible(customStartDate_);
+    contentHolder_->addAndMakeVisible(customEndDate_);
     customStartLabel_.setText(tr("charts.custom_start", "Start"), juce::dontSendNotification);
     customEndLabel_.setText(tr("charts.custom_end", "End"), juce::dontSendNotification);
     customStartDate_.setText("2026-01-01", juce::dontSendNotification);
@@ -264,8 +268,8 @@ ChartsPage::ChartsPage()
             refreshAnalytics();
     };
 
-    addAndMakeVisible(refreshButton_);
-    addAndMakeVisible(exportButton_);
+    contentHolder_->addAndMakeVisible(refreshButton_);
+    contentHolder_->addAndMakeVisible(exportButton_);
     refreshButton_.onClick = [this]() { refreshAnalytics(); };
     exportButton_.onClick = [this]() { exportData(); };
     refreshButton_.setButtonText(tr("charts.refresh", "Refresh"));
@@ -291,12 +295,12 @@ ChartsPage::ChartsPage()
     timeRangeBox_.setColour(juce::ComboBox::textColourId, juce::Colours::white);
     timeRangeBox_.setColour(juce::ComboBox::outlineColourId, kBorder);
 
-    addAndMakeVisible(loadingLabel_);
+    contentHolder_->addAndMakeVisible(loadingLabel_);
     loadingLabel_.setColour(juce::Label::textColourId, kMuted);
 
     auto makeMetric = [this](juce::Label& lbl)
     {
-        addAndMakeVisible(lbl);
+        contentHolder_->addAndMakeVisible(lbl);
         lbl.setJustificationType(juce::Justification::centred);
         lbl.setColour(juce::Label::textColourId, juce::Colours::white);
         lbl.setColour(juce::Label::backgroundColourId, juce::Colour(0xff1f3564));
@@ -315,16 +319,16 @@ ChartsPage::ChartsPage()
     sourceBreakdownChart_ = std::make_unique<PieChart>();
     deviceBreakdownChart_ = std::make_unique<PieChart>();
 
-    addAndMakeVisible(*membersPerNightChart_);
-    addAndMakeVisible(*topMembersChart_);
-    addAndMakeVisible(*topSongsChart_);
-    addAndMakeVisible(*peakHoursChart_);
-    addAndMakeVisible(*sourceBreakdownChart_);
-    addAndMakeVisible(*deviceBreakdownChart_);
+    contentHolder_->addAndMakeVisible(*membersPerNightChart_);
+    contentHolder_->addAndMakeVisible(*topMembersChart_);
+    contentHolder_->addAndMakeVisible(*topSongsChart_);
+    contentHolder_->addAndMakeVisible(*peakHoursChart_);
+    contentHolder_->addAndMakeVisible(*sourceBreakdownChart_);
+    contentHolder_->addAndMakeVisible(*deviceBreakdownChart_);
 
     auto prepGroup = [this](juce::GroupComponent& g, const juce::String& title)
     {
-        addAndMakeVisible(g);
+        contentHolder_->addAndMakeVisible(g);
         g.setText(title);
         g.setColour(juce::GroupComponent::textColourId, kText);
         g.setColour(juce::GroupComponent::outlineColourId, kBorder);
@@ -337,7 +341,7 @@ ChartsPage::ChartsPage()
 
     auto prepText = [this](juce::TextEditor& t)
     {
-        addAndMakeVisible(t);
+        contentHolder_->addAndMakeVisible(t);
         t.setMultiLine(true);
         t.setReadOnly(true);
         t.setScrollbarsShown(true);
@@ -365,18 +369,45 @@ ChartsPage::ChartsPage()
     customStartDate_.setVisible(false);
     customEndDate_.setVisible(false);
 
+    // Decorative header panel, drawn against contentHolder_'s own bounds
+    // (not ChartsPage's) so it scrolls along with the rest of the content.
+    contentHolder_->onPaint = [this](juce::Graphics& g)
+    {
+        MenuTheme::drawHeaderPanel(g, contentHolder_->getLocalBounds().reduced(8).removeFromTop(74));
+    };
+
     refreshAnalytics();
 }
 
 void ChartsPage::paint(juce::Graphics& g)
 {
     MenuTheme::drawPageBackground(g, getLocalBounds());
-    MenuTheme::drawHeaderPanel(g, getLocalBounds().reduced(8).removeFromTop(74));
 }
 
 void ChartsPage::resized()
 {
-    auto area = getLocalBounds().reduced(12);
+    viewport_.setBounds(getLocalBounds());
+
+    const int startingWidth  = juce::jmax(900, viewport_.getWidth() - viewport_.getScrollBarThickness());
+    const int startingHeight = juce::jmax(contentHolder_->getHeight(), 900);
+    contentHolder_->setSize(startingWidth, startingHeight);
+    layoutContent();
+
+    // Grow to fit the insights panel at the bottom -- lets the viewport's
+    // scrollbar reach it on any window size. layoutContent() only depends
+    // on width, so a second pass at the corrected height reproduces the
+    // same positions.
+    const int neededHeight = insightsGroup_.getBottom() + 12;
+    if (neededHeight != contentHolder_->getHeight())
+    {
+        contentHolder_->setSize(startingWidth, neededHeight);
+        layoutContent();
+    }
+}
+
+void ChartsPage::layoutContent()
+{
+    auto area = contentHolder_->getLocalBounds().reduced(12);
 
     auto header = area.removeFromTop(70).reduced(12, 8);
     titleLabel_.setBounds(header.removeFromLeft(320));
@@ -454,8 +485,12 @@ void ChartsPage::resized()
     weeklyStatsText_.setBounds(bright.reduced(8, 22));
 
     area.removeFromTop(8);
-    insightsGroup_.setBounds(area);
-    insightsText_.setBounds(area.reduced(8, 22));
+    // Fixed height, not "whatever's left" -- the content now grows to fit
+    // its own needs rather than being squeezed into a given window size, so
+    // there's no natural "remainder" to fill.
+    auto insightsArea = area.removeFromTop(200);
+    insightsGroup_.setBounds(insightsArea);
+    insightsText_.setBounds(insightsArea.reduced(8, 22));
 }
 
 void ChartsPage::updateAllText()

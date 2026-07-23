@@ -145,10 +145,11 @@ public:
     
     void resized() override;
     void paint(juce::Graphics& g) override;
-    
-protected:
+
     //==============================================================================
-    // Screen Size Information
+    // Screen Size Information -- public: pure formatting/lookup utilities
+    // with no encapsulation reason to require a ResponsiveLayout instance
+    // (TestingPage's ContentPanel, a plain juce::Component, calls these).
     static ScreenSize getScreenSizeFromDimensions(int width, int height);
     static ScreenCategory getScreenCategory(ScreenSize size);
     static juce::String getScreenSizeText(ScreenSize size);
@@ -156,7 +157,9 @@ protected:
     static float getAspectRatio(ScreenSize size);
     static bool isUltraWideScreen(ScreenSize size);
     static float getDefaultScale(ScreenSize size);
-    
+
+protected:
+
     //==============================================================================
     /** Called when screen size changes - override in subclasses */
     virtual void updateUIForScreenSize() {}

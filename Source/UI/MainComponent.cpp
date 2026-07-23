@@ -21,6 +21,7 @@
 #include "../Services/SongDatabase.h"
 #include "../Services/ImageCache.h"
 #include "../Services/FirestoreClient.h"
+#include "../Services/SongbookStorageService.h"
 #include "../Services/ArchiveService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
@@ -1728,6 +1729,104 @@ void MainComponent::setupUI()
             if (auto* settings = mainArea != nullptr ? mainArea->getSettingsPage() : nullptr)
                 if (settings->onSetEmergencyCode)
                     settings->onSetEmergencyCode(generated);
+        };
+
+        sp->onUploadLogo = [this](const juce::File& logoFile)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            VenueService::getInstance().uploadLogo(venueId, logoFile,
+                [safe, venueId](bool ok, juce::String logoUrl, juce::String error)
+                {
+                    if (safe == nullptr)
+                        return;
+
+                    if (auto* settings = safe->mainArea != nullptr ? safe->mainArea->getSettingsPage() : nullptr)
+                        settings->setLogoStatus(ok ? LocalizationManager::getInstance().getText("settings.logo_upload_success")
+                                                    : error,
+                                                 ! ok);
+
+                    if (! ok)
+                        return;
+
+                    VenueService::getInstance().loadVenue(venueId,
+                        [safe, logoUrl](bool loaded, VenueItem v, juce::String loadErr)
+                        {
+                            if (safe == nullptr) return;
+                            if (! loaded)
+                            {
+                                DBG("[Settings] reload venue after logo upload failed: " << loadErr);
+                                return;
+                            }
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->setVenueData(v);
+
+                            // Push the new logo straight into the lyric display
+                            // without waiting for the next full venue reload.
+                            if (safe->lyricWindow_ != nullptr)
+                            {
+                                auto img = ArtworkCache::getInstance().getOrFetch(logoUrl,
+                                    [safe, logoUrl]
+                                    {
+                                        if (safe == nullptr || safe->lyricWindow_ == nullptr) return;
+                                        auto loaded2 = ArtworkCache::getInstance().getOrFetch(logoUrl);
+                                        if (loaded2.isValid())
+                                            if (auto* d = safe->lyricWindow_->getDisplay())
+                                                d->setVenueLogo(loaded2);
+                                    });
+                                if (img.isValid())
+                                {
+                                    safe->pendingVenueLogo_ = img;
+                                    if (auto* d = safe->lyricWindow_->getDisplay())
+                                        d->setVenueLogo(img);
+                                }
+                            }
+                        });
+                });
+        };
+
+        sp->onResetLogo = [this]()
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            VenueService::getInstance().resetLogo(venueId,
+                [safe, venueId](bool ok, juce::String error)
+                {
+                    if (safe == nullptr)
+                        return;
+
+                    if (auto* settings = safe->mainArea != nullptr ? safe->mainArea->getSettingsPage() : nullptr)
+                        settings->setLogoStatus(ok ? LocalizationManager::getInstance().getText("settings.logo_reset_success")
+                                                    : error,
+                                                 ! ok);
+
+                    if (! ok)
+                        return;
+
+                    safe->pendingVenueLogo_ = {};
+                    if (safe->lyricWindow_ != nullptr)
+                        if (auto* d = safe->lyricWindow_->getDisplay())
+                            d->setVenueLogo ({});
+
+                    VenueService::getInstance().loadVenue(venueId,
+                        [safe](bool loaded, VenueItem v, juce::String loadErr)
+                        {
+                            if (safe == nullptr) return;
+                            if (! loaded)
+                            {
+                                DBG("[Settings] reload venue after logo reset failed: " << loadErr);
+                                return;
+                            }
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->setVenueData(v);
+                        });
+                });
         };
 
         sp->onInviteUser = [this, normalizeRoleForFirestore](const juce::String& email, const juce::String& roleLabel)
@@ -4400,7 +4499,39 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             // can edit any field. Saves are routed through MainArea's
             // onVenueSettingsChanged callback wired in the constructor.
             if (safe->mainArea != nullptr)
+            {
                 safe->mainArea->setVenueData (v);
+                safe->mainArea->setActiveVenueId (venueId);
+            }
+
+            // Make sure this venue has a current songbook.json in Firebase
+            // Storage -- the TAGG mobile app reads it directly, and a venue
+            // that's never been scanned from any PC (or whose Storage
+            // folder was never created) leaves TAGG showing an error when a
+            // customer tries to connect. If there's no local songbook to
+            // fall back on either, kick off the same initial-scan flow used
+            // for a first-time venue switch (unless that's already about to
+            // run below via requestInitialScan).
+            if (! requestInitialScan)
+            {
+                SongbookStorageService::getInstance().ensureSongbookExists (venueId,
+                    [safe, venueId] (bool exists, bool justUploaded, juce::String error)
+                    {
+                        if (safe == nullptr || safe->activeVenueId_ != venueId)
+                            return;
+
+                        if (justUploaded)
+                            DBG ("[Songbook] Uploaded local songbook.json to Storage for venue " << venueId);
+                        else if (! exists)
+                        {
+                            DBG ("[Songbook] No songbook.json in Storage and nothing local to fall back on"
+                                 << (error.isNotEmpty() ? (" (" + error + ")") : juce::String())
+                                 << " -- starting initial scan for venue " << venueId);
+                            if (safe->mainArea != nullptr)
+                                safe->mainArea->triggerInitialSongLoad();
+                        }
+                    });
+            }
 
             safe->refreshSettingsUsers();
             safe->refreshSettingsInvitations();
@@ -5145,7 +5276,7 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
             {
                 DBG ("[Pipeline] appendSong failed: " << err);
                 RequestService::getInstance().patchStatus (venueId, id,
-                    "rejected", "Server error \xe2\x80\x94 please try again.");
+                    "rejected", juce::String(juce::CharPointer_UTF8("Server error \xe2\x80\x94 please try again.")));
             }
         });
 }

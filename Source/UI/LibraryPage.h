@@ -80,7 +80,36 @@ public:
     // when the host picks a venue that wasn't previously configured on this PC.
     void startInitialSongLoad() { onInitialSongLoad(); }
 
+    //==========================================================================
+    // Sets the venue whose Firebase Storage copy of songbook.json should be
+    // refreshed after each completed scan. Set by MainComponent whenever the
+    // active venue changes.
+    void setActiveVenueId(const juce::String& venueId) { activeVenueId_ = venueId; }
+
 private:
+    //==========================================================================
+    // Plain Component with a paint callback -- lets the decorative header
+    // panels drawn around the form scroll along with it (Viewport-clipped
+    // children are repositioned automatically, but a *parent's* own paint()
+    // isn't, so that drawing has to happen on this scrolled child instead
+    // of on LibraryPage itself).
+    class ContentHolder : public juce::Component
+    {
+    public:
+        std::function<void(juce::Graphics&)> onPaint;
+        void paint(juce::Graphics& g) override { if (onPaint) onPaint(g); }
+    };
+
+    std::unique_ptr<ContentHolder> contentHolder_;
+    juce::Viewport viewport_;
+
+    // Runs the existing fixed-pixel layout against contentHolder_'s current
+    // bounds. Called twice from resized() -- once at a starting guess
+    // height, then again after correcting contentHolder_ to the height the
+    // stats panel actually needed -- so the viewport's scroll range always
+    // reaches the last stat row on any window size.
+    void layoutContent();
+
     //==========================================================================
     // juce::Timer — polls scan progress ~10 Hz
     void timerCallback() override;
@@ -97,6 +126,14 @@ private:
     //==========================================================================
     // Helpers
     void startFolderChooser(bool appendMode);
+
+    // Saves songs_ to the local songbook.json/SQLite index (via scanner_)
+    // and, if a venue is active, re-uploads the local songbook.json to
+    // Firebase Storage so TAGG always sees the current library. Callable
+    // from any thread (the Storage upload dispatches its own background
+    // thread). Use this instead of calling scanner_.saveSongbook() directly.
+    void persistSongbook();
+
     void refreshStats();
     void setProgressVisible(bool visible);
     void setScanningState(bool scanning);
@@ -155,6 +192,7 @@ private:
     LibraryScanner::ScanStats     stats_;
     bool                          lastScanWasAppend_ = false;
     int                           globalScanTaskId_ = 0;
+    juce::String                  activeVenueId_;
 
     // FileChooser must outlive the callback lambda
     std::shared_ptr<juce::FileChooser> fileChooser_;

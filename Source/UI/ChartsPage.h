@@ -28,6 +28,20 @@ private:
     class BarChart;
     class PieChart;
 
+    // Plain Component with a paint callback -- lets the decorative header
+    // panel scroll along with the rest of the content (see LibraryPage for
+    // the same pattern and rationale).
+    class ContentHolder : public juce::Component
+    {
+    public:
+        std::function<void(juce::Graphics&)> onPaint;
+        void paint(juce::Graphics& g) override { if (onPaint) onPaint(g); }
+    };
+
+    std::unique_ptr<ContentHolder> contentHolder_;
+    juce::Viewport viewport_;
+    void layoutContent();
+
   juce::String tr(const juce::String& key, const juce::String& fallback) const;
     void rebuildTimeRangeOptions();
     AnalyticsService::TimeRange currentRange() const;

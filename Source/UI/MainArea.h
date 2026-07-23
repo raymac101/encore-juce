@@ -120,6 +120,13 @@ public:
         if (settingsPage) settingsPage->setVenueData(venue);
     }
 
+    /** Tells the Library page which venue's Storage songbook.json copy
+        should be refreshed after each completed scan. */
+    void setActiveVenueId(const juce::String& venueId)
+    {
+        if (libraryPage) libraryPage->setActiveVenueId(venueId);
+    }
+
     /** Switch to the Library page and kick off the full initial song-load
         flow (file-chooser + scan). Used after a venue switch. */
     void triggerInitialSongLoad()

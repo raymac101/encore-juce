@@ -8,6 +8,7 @@
 
 #include "VenueService.h"
 #include "FirestoreClient.h"
+#include "../Firebase/FirebaseConfig.h"
 #include <algorithm>
 
 VenueService& VenueService::getInstance()
@@ -527,6 +528,119 @@ void VenueService::addCode(const juce::String& venueId, WriteCallback onDone)
         const bool ok = FC::getInstance().patchDocument(path, fields);
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]()
+                { onDone(ok, ok ? juce::String() : juce::String("patch failed")); });
+    });
+}
+
+void VenueService::uploadLogo(const juce::String& venueId, const juce::File& logoFile, UploadLogoCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, {}, "No venueId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, logoFile, onDone = std::move(onDone)]()
+    {
+        juce::MemoryBlock data;
+        if (! logoFile.existsAsFile() || ! logoFile.loadFileAsData(data))
+        {
+            if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, {}, "Could not read logo file."); });
+            return;
+        }
+
+        const auto ext = logoFile.getFileExtension().toLowerCase();
+        const auto objectName = "venues/" + venueId + "/artwork/logo-"
+                                + juce::String(juce::Time::currentTimeMillis()) + ext;
+        const auto bucket = FirebaseConfig::storageBucket;
+        auto url = juce::URL("https://firebasestorage.googleapis.com/v0/b/" + bucket
+                              + "/o?uploadType=media&name=" + juce::URL::addEscapeChars(objectName, true));
+        url = url.withPOSTData(data);
+
+        juce::String mime = "image/png";
+        if (ext == ".jpg" || ext == ".jpeg") mime = "image/jpeg";
+        else if (ext == ".gif")              mime = "image/gif";
+
+        int status = 0;
+        const auto headers = "Authorization: Bearer " + FC::getInstance().getFreshIdToken() + "\r\n"
+                             + "Content-Type: " + mime + "\r\n"
+                             + "Accept: application/json";
+        auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+            .withConnectionTimeoutMs(20000)
+            .withExtraHeaders(headers)
+            .withHttpRequestCmd("POST")
+            .withStatusCode(&status);
+
+        auto stream = std::unique_ptr<juce::InputStream>(url.createInputStream(opts));
+
+        juce::String logoUrl, error;
+        bool uploadOk = false;
+        if (stream == nullptr)
+        {
+            error = "Storage upload connection failed.";
+        }
+        else
+        {
+            const auto response = stream->readEntireStreamAsString();
+            if (status < 200 || status >= 300)
+            {
+                error = "Storage upload failed (HTTP " + juce::String(status) + ")";
+            }
+            else
+            {
+                juce::var parsed;
+                if (juce::JSON::parse(response, parsed).failed() || ! parsed.isObject())
+                {
+                    error = "Storage upload response parse failed.";
+                }
+                else
+                {
+                    const auto storagePath = parsed.getProperty("name", objectName).toString();
+                    const auto token = parsed.getProperty("downloadTokens", "").toString();
+                    logoUrl = "https://firebasestorage.googleapis.com/v0/b/" + bucket + "/o/"
+                             + juce::URL::addEscapeChars(storagePath, true) + "?alt=media";
+                    if (token.isNotEmpty())
+                        logoUrl << "&token=" << juce::URL::addEscapeChars(token, true);
+                    uploadOk = true;
+                }
+            }
+        }
+
+        if (! uploadOk)
+        {
+            if (onDone) juce::MessageManager::callAsync([onDone, error] { onDone(false, {}, error); });
+            return;
+        }
+
+        // Persist the new URL onto the venue document -- this is the field
+        // the lyric display already reads via ArtworkCache::getOrFetch.
+        auto fields = FC::makeFields({ { "logoUrl", FC::stringValue(logoUrl) } });
+        const auto path = "venues/" + venueId + "?updateMask.fieldPaths=logoUrl";
+        const bool patched = FC::getInstance().patchDocument(path, fields);
+
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, patched, logoUrl]
+            {
+                onDone(patched, logoUrl, patched ? juce::String() : juce::String("Uploaded, but failed to save logoUrl on the venue."));
+            });
+    });
+}
+
+void VenueService::resetLogo(const juce::String& venueId, WriteCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, onDone = std::move(onDone)]()
+    {
+        auto fields = FC::makeFields({ { "logoUrl", FC::stringValue({}) } });
+        const auto path = "venues/" + venueId + "?updateMask.fieldPaths=logoUrl";
+        const bool ok = FC::getInstance().patchDocument(path, fields);
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok]
                 { onDone(ok, ok ? juce::String() : juce::String("patch failed")); });
     });
 }

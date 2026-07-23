@@ -8,6 +8,7 @@
 
 #include "OnboardingWizard.h"
 #include "../LoginTheme.h"
+#include "../../Localization/LocalizationManager.h"
 #include "../../Services/FirestoreClient.h"
 #include "../../Services/VenueService.h"
 #include "../../Services/CompanyService.h"
@@ -15,6 +16,7 @@
 #include "../../Services/InvitationService.h"
 #include "../../Services/HostService.h"
 #include "../../Services/LibraryScanner.h"
+#include "../../Services/SongbookStorageService.h"
 #include "../../Services/SongDatabase.h"
 #include "../../Services/UserPreferences.h"
 #include "../../Models/Host.h"
@@ -200,7 +202,7 @@ public:
         setOpaque(false);
         setLookAndFeel(&lnf_);
         addAndMakeVisible(cancelButton_);
-        cancelButton_.setButtonText("Cancel");
+        cancelButton_.setButtonText(LocalizationManager::getInstance().getText("onboarding.button_cancel"));
         cancelButton_.getProperties().set("ghost", true);
         // Cancel must NOT be treated as a successful completion -- callers
         // (e.g. LoginWindow's runFlow()) assume "completed" means the wizard
@@ -318,20 +320,21 @@ private:
     public:
         CreateAccountStep()
         {
-            styleHeading(heading_, "Create Your Account");
-            styleSubheading(sub_, "Let's get your karaoke setup started.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.create_account.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.create_account.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
-            setupField(firstNameLabel_, firstNameEd_, "First Name", "Jamie");
-            setupField(lastNameLabel_,  lastNameEd_,  "Last Name",  "Rivera");
-            setupField(stageNameLabel_, stageNameEd_, "Stage Name (shown to singers)", "DJ Jamie");
-            setupField(emailLabel_,     emailEd_,     "Email", "you@example.com");
-            setupField(passLabel_,      passEd_,      "Password", "At least 6 characters");
+            setupField(firstNameLabel_, firstNameEd_, lm.getText("onboarding.create_account.first_name_label"), lm.getText("onboarding.create_account.first_name_placeholder"));
+            setupField(lastNameLabel_,  lastNameEd_,  lm.getText("onboarding.create_account.last_name_label"),  lm.getText("onboarding.create_account.last_name_placeholder"));
+            setupField(stageNameLabel_, stageNameEd_, lm.getText("onboarding.create_account.stage_name_label"), lm.getText("onboarding.create_account.stage_name_placeholder"));
+            setupField(emailLabel_,     emailEd_,     lm.getText("onboarding.create_account.email_label"),     lm.getText("onboarding.create_account.email_placeholder"));
+            setupField(passLabel_,      passEd_,      lm.getText("onboarding.create_account.password_label"),  lm.getText("onboarding.create_account.password_placeholder"));
             passEd_.setPasswordCharacter((juce::juce_wchar) 0x2022);
-            setupField(confirmLabel_,   confirmEd_,   "Confirm Password", "Re-enter password");
+            setupField(confirmLabel_,   confirmEd_,   lm.getText("onboarding.create_account.confirm_password_label"), lm.getText("onboarding.create_account.confirm_password_placeholder"));
             confirmEd_.setPasswordCharacter((juce::juce_wchar) 0x2022);
 
-            styleFieldLabel(avatarLabel_, "Choose an Avatar");
+            styleFieldLabel(avatarLabel_, lm.getText("onboarding.create_account.avatar_label"));
             addAndMakeVisible(avatarLabel_);
             addAndMakeVisible(avatarViewport_);
             avatarViewport_.setViewedComponent(&avatarGridContainer_, false);
@@ -342,7 +345,7 @@ private:
             styleStatus(statusLabel_);
 
             addAndMakeVisible(submitButton_);
-            submitButton_.setButtonText("Create Account");
+            submitButton_.setButtonText(lm.getText("onboarding.create_account.submit_button"));
             submitButton_.onClick = [this] { submit(); };
         }
 
@@ -488,30 +491,31 @@ private:
             const auto password = passEd_.getText();
             const auto confirm  = confirmEd_.getText();
 
+            auto& lm = LocalizationManager::getInstance();
             if (first.isEmpty() || last.isEmpty() || email.isEmpty())
             {
-                statusLabel_.setText("First name, last name and email are required.", juce::dontSendNotification);
+                statusLabel_.setText(lm.getText("onboarding.create_account.error_required_fields"), juce::dontSendNotification);
                 return;
             }
             if (! looksLikeEmail(email))
             {
-                statusLabel_.setText("Enter a valid email address.", juce::dontSendNotification);
+                statusLabel_.setText(lm.getText("onboarding.create_account.error_invalid_email"), juce::dontSendNotification);
                 return;
             }
             if (password.length() < 6)
             {
-                statusLabel_.setText("Password must be at least 6 characters.", juce::dontSendNotification);
+                statusLabel_.setText(lm.getText("onboarding.create_account.error_password_length"), juce::dontSendNotification);
                 return;
             }
             if (password != confirm)
             {
-                statusLabel_.setText("Passwords do not match.", juce::dontSendNotification);
+                statusLabel_.setText(lm.getText("onboarding.create_account.error_password_mismatch"), juce::dontSendNotification);
                 return;
             }
 
             submitButton_.setEnabled(false);
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
-            statusLabel_.setText("Creating your account...", juce::dontSendNotification);
+            statusLabel_.setText(lm.getText("onboarding.create_account.status_creating"), juce::dontSendNotification);
 
             const auto stageName = stage.isNotEmpty() ? stage : (first + " " + last);
             const auto avatarPath = selectedAvatarPath();
@@ -531,7 +535,7 @@ private:
                         if (safe == nullptr) return;
                         safe->submitButton_.setEnabled(true);
                         safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
-                        safe->statusLabel_.setText(msg.isNotEmpty() ? msg : "Could not create account.",
+                        safe->statusLabel_.setText(msg.isNotEmpty() ? msg : LocalizationManager::getInstance().getText("onboarding.create_account.error_generic"),
                                                    juce::dontSendNotification);
                     });
                     return;
@@ -610,15 +614,18 @@ private:
                              std::function<void(bool joined)> onDone)
             : invitation_(std::move(invitation)), uid_(std::move(uid)), onDone_(std::move(onDone))
         {
-            styleHeading(heading_, "You Were Invited!");
-            styleSubheading(sub_, juce::String(invitation_.invitedByName.isNotEmpty()
-                                              ? invitation_.invitedByName : invitation_.invitedByEmail)
-                                     + " invited you to join a venue on Encore.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.join_invited.heading"));
+            styleSubheading(sub_, lm.getTextWithParams("onboarding.join_invited.subtitle",
+                                     { juce::String(invitation_.invitedByName.isNotEmpty()
+                                                   ? invitation_.invitedByName : invitation_.invitedByEmail) }));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
             addAndMakeVisible(detailLabel_);
-            detailLabel_.setText("Venue: " + invitation_.venueName
-                                 + "\nRole: " + juce::String(AccessRightsUtil::userRoleToString(invitation_.role)),
+            detailLabel_.setText(lm.getTextWithParams("onboarding.join_invited.detail_venue_line", { invitation_.venueName })
+                                 + "\n"
+                                 + lm.getTextWithParams("onboarding.join_invited.detail_role_line",
+                                       { juce::String(AccessRightsUtil::userRoleToString(invitation_.role)) }),
                                  juce::dontSendNotification);
             detailLabel_.setFont(juce::Font(juce::FontOptions(15.0f)));
             detailLabel_.setJustificationType(juce::Justification::topLeft);
@@ -628,11 +635,11 @@ private:
             styleStatus(statusLabel_);
 
             addAndMakeVisible(acceptButton_);
-            acceptButton_.setButtonText("Accept & Join This Venue");
+            acceptButton_.setButtonText(lm.getText("onboarding.join_invited.accept_button"));
             acceptButton_.onClick = [this] { accept(); };
 
             addAndMakeVisible(declineButton_);
-            declineButton_.setButtonText("No Thanks, Set Up My Own");
+            declineButton_.setButtonText(lm.getText("onboarding.join_invited.decline_button"));
             declineButton_.getProperties().set("ghost", true);
             declineButton_.onClick = [this] { if (onDone_) onDone_(false); };
         }
@@ -657,7 +664,7 @@ private:
             acceptButton_.setEnabled(false);
             declineButton_.setEnabled(false);
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
-            statusLabel_.setText("Joining venue...", juce::dontSendNotification);
+            statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.join_invited.status_joining"), juce::dontSendNotification);
 
             juce::Component::SafePointer<JoinInvitedVenueStep> safe(this);
             InvitationService::getInstance().acceptInvitation(invitation_, uid_,
@@ -673,7 +680,7 @@ private:
                         safe->acceptButton_.setEnabled(true);
                         safe->declineButton_.setEnabled(true);
                         safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
-                        safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not join venue.",
+                        safe->statusLabel_.setText(error.isNotEmpty() ? error : LocalizationManager::getInstance().getText("onboarding.join_invited.error_generic"),
                                                    juce::dontSendNotification);
                     }
                 });
@@ -693,15 +700,16 @@ private:
     public:
         AccountTypeStep(std::function<void(int tier)> onChosen)
             : onChosen_(std::move(onChosen)),
-              card1_(TierCard::Icon::SingleVenue, "Single Venue",
-                     "I run karaoke at one location. Simple setup, one venue, one login."),
-              card2_(TierCard::Icon::MultiVenue, "Multiple Venues",
-                     "I own several venues and want to bring on other hosts."),
-              card3_(TierCard::Icon::Company, "Karaoke Company",
-                     "We run karaoke across many venues with many hosts and computers.")
+              card1_(TierCard::Icon::SingleVenue, LocalizationManager::getInstance().getText("onboarding.account_type.card_single_title"),
+                     LocalizationManager::getInstance().getText("onboarding.account_type.card_single_description")),
+              card2_(TierCard::Icon::MultiVenue, LocalizationManager::getInstance().getText("onboarding.account_type.card_multi_title"),
+                     LocalizationManager::getInstance().getText("onboarding.account_type.card_multi_description")),
+              card3_(TierCard::Icon::Company, LocalizationManager::getInstance().getText("onboarding.account_type.card_company_title"),
+                     LocalizationManager::getInstance().getText("onboarding.account_type.card_company_description"))
         {
-            styleHeading(heading_, "How Will You Use Encore?");
-            styleSubheading(sub_, "Pick the option that best matches your setup.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.account_type.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.account_type.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
             for (auto* card : { &card1_, &card2_, &card3_ })
@@ -741,19 +749,20 @@ private:
     public:
         CompanyInfoStep(std::function<void(Company)> onDone) : onDone_(std::move(onDone))
         {
-            styleHeading(heading_, "Tell Us About Your Company");
-            styleSubheading(sub_, "This groups your venues together so you can manage hosts across all of them.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.company_info.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.company_info.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
-            setupField(nameLabel_, nameEd_, "Company Name", "Sunset Karaoke Group");
-            setupField(addressLabel_, addressEd_, "Address", "123 Main St");
-            setupField(cityLabel_, cityEd_, "City", "Austin");
-            setupField(countryLabel_, countryEd_, "Country", "USA");
+            setupField(nameLabel_, nameEd_, lm.getText("onboarding.company_info.name_label"), lm.getText("onboarding.company_info.name_placeholder"));
+            setupField(addressLabel_, addressEd_, lm.getText("onboarding.company_info.address_label"), lm.getText("onboarding.company_info.address_placeholder"));
+            setupField(cityLabel_, cityEd_, lm.getText("onboarding.company_info.city_label"), lm.getText("onboarding.company_info.city_placeholder"));
+            setupField(countryLabel_, countryEd_, lm.getText("onboarding.company_info.country_label"), lm.getText("onboarding.company_info.country_placeholder"));
 
             addAndMakeVisible(statusLabel_);
             styleStatus(statusLabel_);
             addAndMakeVisible(nextButton_);
-            nextButton_.setButtonText("Next: Add Your First Venue");
+            nextButton_.setButtonText(lm.getText("onboarding.company_info.next_button"));
             nextButton_.onClick = [this] { submit(); };
         }
 
@@ -799,13 +808,13 @@ private:
             const auto name = nameEd_.getText().trim();
             if (name.isEmpty())
             {
-                statusLabel_.setText("Company name is required.", juce::dontSendNotification);
+                statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.company_info.error_name_required"), juce::dontSendNotification);
                 return;
             }
 
             nextButton_.setEnabled(false);
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
-            statusLabel_.setText("Creating company...", juce::dontSendNotification);
+            statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.company_info.status_creating"), juce::dontSendNotification);
 
             Company c;
             c.name = name.toStdString();
@@ -823,7 +832,7 @@ private:
                     {
                         safe->nextButton_.setEnabled(true);
                         safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
-                        safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not create company.",
+                        safe->statusLabel_.setText(error.isNotEmpty() ? error : LocalizationManager::getInstance().getText("onboarding.company_info.error_generic"),
                                                    juce::dontSendNotification);
                         return;
                     }
@@ -853,14 +862,15 @@ private:
                      std::function<void()> onDone)
             : tier_(tier), companyId_(std::move(companyId)), createdVenues_(createdVenues), onDone_(std::move(onDone))
         {
-            styleHeading(heading_, tier_ == 3 ? "Add Your Venues" : "Tell Us About Your Venue");
-            styleSubheading(sub_, "Provide information about your venue so your customers can find you.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, tier_ == 3 ? lm.getText("onboarding.venue_info.heading_multi") : lm.getText("onboarding.venue_info.heading_single"));
+            styleSubheading(sub_, lm.getText("onboarding.venue_info.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
-            setupField(nameLabel_, nameEd_, "Venue Name", "The Blue Note Lounge");
-            setupField(addressLabel_, addressEd_, "Address", "456 Elm St");
-            setupField(cityLabel_, cityEd_, "City", "Austin");
-            setupField(countryLabel_, countryEd_, "Country", "USA");
+            setupField(nameLabel_, nameEd_, lm.getText("onboarding.venue_info.name_label"), lm.getText("onboarding.venue_info.name_placeholder"));
+            setupField(addressLabel_, addressEd_, lm.getText("onboarding.venue_info.address_label"), lm.getText("onboarding.venue_info.address_placeholder"));
+            setupField(cityLabel_, cityEd_, lm.getText("onboarding.venue_info.city_label"), lm.getText("onboarding.venue_info.city_placeholder"));
+            setupField(countryLabel_, countryEd_, lm.getText("onboarding.venue_info.country_label"), lm.getText("onboarding.venue_info.country_placeholder"));
 
             addAndMakeVisible(createdListLabel_);
             createdListLabel_.setFont(juce::Font(juce::FontOptions(13.0f)));
@@ -872,13 +882,13 @@ private:
             styleStatus(statusLabel_);
 
             addAndMakeVisible(addButton_);
-            addButton_.setButtonText(tier_ == 3 ? "Add This Venue" : "Create Venue & Continue");
+            addButton_.setButtonText(tier_ == 3 ? lm.getText("onboarding.venue_info.add_button_multi") : lm.getText("onboarding.venue_info.add_button_single"));
             addButton_.onClick = [this] { submit(); };
 
             if (tier_ == 3)
             {
                 addAndMakeVisible(continueButton_);
-                continueButton_.setButtonText("Continue");
+                continueButton_.setButtonText(lm.getText("onboarding.venue_info.continue_button"));
                 continueButton_.getProperties().set("ghost", true);
                 continueButton_.setEnabled(false);
                 continueButton_.onClick = [this] { if (onDone_) onDone_(); };
@@ -942,8 +952,9 @@ private:
         void refreshCreatedList()
         {
             if (tier_ != 3 || createdVenues_ == nullptr) return;
-            juce::String text = createdVenues_->empty() ? juce::String("No venues added yet.")
-                                                          : juce::String("Added so far: ");
+            auto& lm = LocalizationManager::getInstance();
+            juce::String text = createdVenues_->empty() ? lm.getText("onboarding.venue_info.list_empty")
+                                                          : (lm.getText("onboarding.venue_info.list_prefix") + " ");
             for (size_t i = 0; i < createdVenues_->size(); ++i)
             {
                 if (i > 0) text += ", ";
@@ -957,13 +968,13 @@ private:
             const auto name = nameEd_.getText().trim();
             if (name.isEmpty())
             {
-                statusLabel_.setText("Venue name is required.", juce::dontSendNotification);
+                statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.venue_info.error_name_required"), juce::dontSendNotification);
                 return;
             }
 
             addButton_.setEnabled(false);
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
-            statusLabel_.setText("Creating venue...", juce::dontSendNotification);
+            statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.venue_info.status_creating"), juce::dontSendNotification);
 
             VenueItem v;
             v.name = name.toStdString();
@@ -983,13 +994,20 @@ private:
                     {
                         safe->addButton_.setEnabled(true);
                         safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
-                        safe->statusLabel_.setText(error.isNotEmpty() ? error : "Could not create venue.",
+                        safe->statusLabel_.setText(error.isNotEmpty() ? error : LocalizationManager::getInstance().getText("onboarding.venue_info.error_generic"),
                                                    juce::dontSendNotification);
                         return;
                     }
 
                     const auto venueName = juce::String(v.name);
                     LicenseService::getInstance().createLicenseForVenue(venueId, venueName, nullptr);
+
+                    // Seed an empty songbook.json in Storage right away so the
+                    // venue's folder exists from the moment it's created --
+                    // TAGG reads this file directly and shouldn't ever see a
+                    // 404 for a venue that exists in Firestore. Overwritten
+                    // with real data the first time a library scan completes.
+                    SongbookStorageService::getInstance().seedEmptySongbook(venueId);
 
                     // Self-grant the creator's association — role "Admin",
                     // doc id `{uid}_{venueId}` (matches
@@ -1019,7 +1037,7 @@ private:
                         safe->addButton_.setEnabled(true);
                         safe->continueButton_.setEnabled(true);
                         safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSuccessText));
-                        safe->statusLabel_.setText("Venue added! Add another or continue.", juce::dontSendNotification);
+                        safe->statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.venue_info.status_added_continue"), juce::dontSendNotification);
                         safe->nameEd_.clear(); safe->addressEd_.clear();
                         safe->cityEd_.clear(); safe->countryEd_.clear();
                         safe->refreshCreatedList();
@@ -1049,12 +1067,13 @@ private:
         HostInviteStep(std::vector<VenueItem> venues, std::function<void()> onDone)
             : venues_(std::move(venues)), onDone_(std::move(onDone))
         {
-            styleHeading(heading_, "Invite Your Hosts");
-            styleSubheading(sub_, "Optional — you can always invite hosts later from Settings.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.host_invite.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.host_invite.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
-            styleFieldLabel(emailLabel_, "Host Email");
-            styleEditor(emailEd_, "host@example.com");
+            styleFieldLabel(emailLabel_, lm.getText("onboarding.host_invite.email_label"));
+            styleEditor(emailEd_, lm.getText("onboarding.host_invite.email_placeholder"));
             addAndMakeVisible(emailLabel_); addAndMakeVisible(emailEd_);
 
             addAndMakeVisible(venueBox_);
@@ -1063,7 +1082,7 @@ private:
             if (! venues_.empty()) venueBox_.setSelectedId(1);
 
             addAndMakeVisible(addRowButton_);
-            addRowButton_.setButtonText("Add Invite");
+            addRowButton_.setButtonText(lm.getText("onboarding.host_invite.add_button"));
             addRowButton_.onClick = [this] { addPendingInvite(); };
 
             addAndMakeVisible(pendingListLabel_);
@@ -1075,11 +1094,11 @@ private:
             styleStatus(statusLabel_);
 
             addAndMakeVisible(sendButton_);
-            sendButton_.setButtonText("Send Invites & Continue");
+            sendButton_.setButtonText(lm.getText("onboarding.host_invite.send_button"));
             sendButton_.onClick = [this] { sendAll(); };
 
             addAndMakeVisible(skipButton_);
-            skipButton_.setButtonText("Skip for Now");
+            skipButton_.setButtonText(lm.getText("onboarding.host_invite.skip_button"));
             skipButton_.getProperties().set("ghost", true);
             skipButton_.onClick = [this] { if (onDone_) onDone_(); };
         }
@@ -1132,7 +1151,7 @@ private:
 
             juce::String text;
             for (auto& inv : pending_)
-                text += inv.email + " → " + inv.venueName + "\n";
+                text += LocalizationManager::getInstance().getTextWithParams("onboarding.host_invite.pending_row", { inv.email, inv.venueName }) + "\n";
             pendingListLabel_.setText(text, juce::dontSendNotification);
         }
 
@@ -1147,7 +1166,7 @@ private:
             sendButton_.setEnabled(false);
             skipButton_.setEnabled(false);
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
-            statusLabel_.setText("Sending invites...", juce::dontSendNotification);
+            statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.host_invite.status_sending"), juce::dontSendNotification);
 
             const auto inviterEmail = FC::getInstance().getEmail();
             const auto inviterName  = HostService::getInstance().hasCurrent()
@@ -1202,24 +1221,25 @@ private:
     public:
         LibraryScanStep(std::function<void()> onDone) : onDone_(std::move(onDone))
         {
-            styleHeading(heading_, "Build Your Songbook");
-            styleSubheading(sub_, "Point Encore at your karaoke files (CDG/ZIP/MP4/M4A) so we can scan and build your songbook.");
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.library_scan.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.library_scan.subtitle"));
             addAndMakeVisible(heading_); addAndMakeVisible(sub_);
 
             addAndMakeVisible(statusLabel_);
             statusLabel_.setFont(juce::Font(juce::FontOptions(14.0f)));
             statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kBodyText));
             statusLabel_.setJustificationType(juce::Justification::centred);
-            statusLabel_.setText("No folder scanned yet.", juce::dontSendNotification);
+            statusLabel_.setText(lm.getText("onboarding.library_scan.status_initial"), juce::dontSendNotification);
 
             addAndMakeVisible(progressBar_);
 
             addAndMakeVisible(scanButton_);
-            scanButton_.setButtonText("Choose Music Folder & Scan");
+            scanButton_.setButtonText(lm.getText("onboarding.library_scan.scan_button"));
             scanButton_.onClick = [this] { chooseFolderAndScan(); };
 
             addAndMakeVisible(continueButton_);
-            continueButton_.setButtonText("Continue to Login");
+            continueButton_.setButtonText(lm.getText("onboarding.library_scan.continue_button"));
             continueButton_.onClick = [this] { if (onDone_) onDone_(); };
 
             if (songDb_.open())
@@ -1230,7 +1250,7 @@ private:
                 juce::MessageManager::callAsync([this, cur, total, name]()
                 {
                     progressValue_ = total > 0 ? (double) cur / (double) total : -1.0;
-                    statusLabel_.setText("Scanning: " + name, juce::dontSendNotification);
+                    statusLabel_.setText(LocalizationManager::getInstance().getTextWithParams("onboarding.library_scan.status_scanning", { name }), juce::dontSendNotification);
                 });
             };
             scanner_.onComplete = [this](std::vector<CdgSong> songs, LibraryScanner::ScanStats)
@@ -1240,7 +1260,7 @@ private:
                     stopTimer();
                     progressValue_ = 1.0;
                     scanButton_.setEnabled(true);
-                    statusLabel_.setText("Done! Found " + juce::String(count) + " songs.",
+                    statusLabel_.setText(LocalizationManager::getInstance().getTextWithParams("onboarding.library_scan.status_done", { juce::String(count) }),
                                         juce::dontSendNotification);
                 });
             };
@@ -1250,7 +1270,7 @@ private:
                 {
                     stopTimer();
                     scanButton_.setEnabled(true);
-                    statusLabel_.setText("Scan error: " + err, juce::dontSendNotification);
+                    statusLabel_.setText(LocalizationManager::getInstance().getTextWithParams("onboarding.library_scan.status_error", { err }), juce::dontSendNotification);
                 });
             };
         }
@@ -1287,7 +1307,7 @@ private:
                 return;
 
             const auto startDir = juce::File::getSpecialLocation(juce::File::userMusicDirectory);
-            fileChooser_ = std::make_shared<juce::FileChooser>("Select your karaoke music folder", startDir);
+            fileChooser_ = std::make_shared<juce::FileChooser>(LocalizationManager::getInstance().getText("onboarding.library_scan.file_chooser_title"), startDir);
             fileChooser_->launchAsync(
                 juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
                 [this](const juce::FileChooser& fc)
@@ -1299,7 +1319,7 @@ private:
                     UserPreferences::getInstance().setLibraryPath(result.getFullPathName());
                     scanButton_.setEnabled(false);
                     progressValue_ = -1.0;
-                    statusLabel_.setText("Starting scan...", juce::dontSendNotification);
+                    statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.library_scan.status_starting"), juce::dontSendNotification);
                     scanner_.startInitialScan(result);
                     startTimerHz(10);
                 });
@@ -1443,7 +1463,7 @@ void OnboardingWizard::Content::showStep(Step step)
 
 //==============================================================================
 OnboardingWizard::OnboardingWizard(StartStep startStep, std::function<void()> onFinished)
-    : juce::DocumentWindow("Welcome to Encore", juce::Colours::black, 0),
+    : juce::DocumentWindow(LocalizationManager::getInstance().getText("onboarding.window_title"), juce::Colours::black, 0),
       onFinished_(std::move(onFinished))
 {
     setUsingNativeTitleBar(false);

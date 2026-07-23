@@ -412,10 +412,21 @@ public:
         };
         btnSaveLogo_.onClick = [this]() {
             if (selectedLogoFile_.existsAsFile() && owner_.onUploadLogo)
+            {
+                btnSaveLogo_.setEnabled(false);
+                btnDefaultLogo_.setEnabled(false);
+                logoPathLabel_.setText(LocalizationManager::getInstance().getText("settings.logo_uploading"), juce::dontSendNotification);
+                logoPathLabel_.setColour(juce::Label::textColourId, juce::Colour(kTextSecond));
                 owner_.onUploadLogo(selectedLogoFile_);
+            }
         };
         btnDefaultLogo_.onClick = [this]() {
-            if (owner_.onResetLogo) owner_.onResetLogo();
+            if (owner_.onResetLogo)
+            {
+                btnSaveLogo_.setEnabled(false);
+                btnDefaultLogo_.setEnabled(false);
+                owner_.onResetLogo();
+            }
         };
 
         // ── Section 5: Queue / Display Settings ──────────────────────────────
@@ -1215,6 +1226,16 @@ public:
         refreshAudioDeviceSection();
     }
 
+    //--------------------------------------------------------------------------
+    void setLogoStatus(const juce::String& text, bool isError)
+    {
+        btnSaveLogo_.setEnabled(true);
+        btnDefaultLogo_.setEnabled(true);
+        logoPathLabel_.setText(text, juce::dontSendNotification);
+        logoPathLabel_.setColour(juce::Label::textColourId,
+                                  isError ? juce::Colour(0xfff87171) : juce::Colour(kTextPrimary));
+    }
+
 private:
     SettingsPage& owner_;
     bool venueEditMode_ = false;
@@ -1567,6 +1588,11 @@ void SettingsPage::setPendingInvitations(const std::vector<PendingInvitation>& i
 void SettingsPage::setAudioEngine(AudioEngine* engine)
 {
     if (panel_) panel_->setAudioEngine(engine);
+}
+
+void SettingsPage::setLogoStatus(const juce::String& text, bool isError)
+{
+    if (panel_) panel_->setLogoStatus(text, isError);
 }
 
 void SettingsPage::notifyChanged()

@@ -251,25 +251,29 @@ namespace
 }
 
 MixerPage::MixerPage()
+    : contentHolder_ (std::make_unique<ContentHolder>())
 {
     setOpaque(true);
+    addAndMakeVisible(viewport_);
+    viewport_.setViewedComponent(contentHolder_.get(), false);
+    viewport_.setScrollBarsShown(true, false);
 
     titleLabel.setText({}, juce::dontSendNotification);
     titleLabel.setFont(juce::Font(22.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId, juce::Colour(0xffd8dde3));
-    addAndMakeVisible(titleLabel);
+    contentHolder_->addAndMakeVisible(titleLabel);
 
     subtitleLabel.setText({}, juce::dontSendNotification);
     subtitleLabel.setFont(juce::Font(13.0f, juce::Font::plain));
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7f8b9c));
-    addAndMakeVisible(subtitleLabel);
+    contentHolder_->addAndMakeVisible(subtitleLabel);
 
     bypassAllButton_.setButtonText("Bypass All Plugins");
     bypassAllButton_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2735));
     bypassAllButton_.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd3dce9));
     bypassAllButton_.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd3dce9));
     bypassAllButton_.setClickingTogglesState(false);
-    addAndMakeVisible(bypassAllButton_);
+    contentHolder_->addAndMakeVisible(bypassAllButton_);
 
     buildStrip(stripMusic,  {}, juce::Colour(0xff2ea8ff));
     buildStrip(stripVocal1, {}, juce::Colour(0xffeaa700));
@@ -283,6 +287,68 @@ MixerPage::MixerPage()
     updateAllText();
     pushStateFromEngine();
     startTimerHz(30);
+
+    // Decorative strip cards + live meters, drawn against contentHolder_'s
+    // own bounds (not MixerPage's) so they scroll along with the rest of
+    // the content.
+    contentHolder_->onPaint = [this](juce::Graphics& g)
+    {
+        auto area = contentHolder_->getLocalBounds();
+        MenuTheme::drawHeaderPanel(g, area.removeFromTop(74).reduced(12, 6));
+
+        auto stripBounds = contentHolder_->getLocalBounds().reduced(14).withTrimmedTop(80);
+        const int stripW = stripBounds.getWidth() / stripCount;
+
+        for (int i = 0; i < stripCount; ++i)
+        {
+            auto col = stripBounds.removeFromLeft(stripW).reduced(4, 0);
+
+            MenuTheme::drawGlassCard(g, col.toFloat(), 10.0f);
+
+            auto meter = col.removeFromRight(10).reduced(3, 36);
+            g.setColour(juce::Colour(0xff0a0f16));
+            g.fillRoundedRectangle(meter.toFloat(), 3.0f);
+
+            const float m = juce::jlimit(0.0f, 1.0f, strips[(size_t) i].meterLevel);
+            auto fill = meter.withTop((int) juce::jmap(1.0f - m, 0.0f, 1.0f,
+                                                       (float) meter.getY(), (float) meter.getBottom()));
+            g.setColour(strips[(size_t) i].accent.withMultipliedBrightness(1.1f));
+            g.fillRoundedRectangle(fill.toFloat(), 3.0f);
+
+            if (i == stripMaster)
+            {
+                auto& sw = strips[(size_t) i];
+                auto compBounds = sw.compMeterBounds;
+                auto limBounds = sw.limiterMeterBounds;
+
+                g.setColour(juce::Colour(0xff0a0f16));
+                g.fillRoundedRectangle(compBounds.toFloat(), 2.0f);
+                g.fillRoundedRectangle(limBounds.toFloat(), 2.0f);
+
+                g.setColour(juce::Colour(0xff2a3445));
+                g.drawRoundedRectangle(compBounds.toFloat(), 2.0f, 1.0f);
+                g.drawRoundedRectangle(limBounds.toFloat(), 2.0f, 1.0f);
+
+                const float compLevel = juce::jlimit(0.0f, 1.0f, sw.compOutputMeterLevel);
+                auto compFill = compBounds.withTop((int) juce::jmap(1.0f - compLevel,
+                                                                     0.0f,
+                                                                     1.0f,
+                                                                     (float) compBounds.getY(),
+                                                                     (float) compBounds.getBottom()));
+                g.setColour(juce::Colour(0xff2dd4bf));
+                g.fillRoundedRectangle(compFill.toFloat(), 2.0f);
+
+                const float limReduction = juce::jlimit(0.0f, 1.0f, sw.limiterReductionMeterLevel);
+                auto limFill = limBounds.withHeight((int) juce::jmap(limReduction,
+                                                                      0.0f,
+                                                                      1.0f,
+                                                                      0.0f,
+                                                                      (float) limBounds.getHeight()));
+                g.setColour(juce::Colour(0xffff6b6b));
+                g.fillRoundedRectangle(limFill.toFloat(), 2.0f);
+            }
+        }
+    };
 }
 
 void MixerPage::setAudioEngine(AudioEngine* engine)
@@ -324,7 +390,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
     sw.name->setFont(juce::Font(13.0f, juce::Font::bold));
     sw.name->setJustificationType(juce::Justification::centred);
     sw.name->setColour(juce::Label::textColourId, juce::Colour(0xffc6d1df));
-    addAndMakeVisible(*sw.name);
+    contentHolder_->addAndMakeVisible(*sw.name);
 
     sw.fader.reset(makeFader());
     sw.fader->setLookAndFeel(&kFaderLookAndFeel);
@@ -334,7 +400,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
     sw.fader->setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xffd9dee7));
     sw.fader->setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(0xff2a3445));
     sw.fader->setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0x1affffff));
-    addAndMakeVisible(*sw.fader);
+    contentHolder_->addAndMakeVisible(*sw.fader);
 
     sw.mute = std::make_unique<juce::ToggleButton>(name);
     sw.solo = std::make_unique<juce::ToggleButton>(name);
@@ -342,8 +408,8 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
     sw.solo->setColour(juce::ToggleButton::textColourId, juce::Colour(0xffc6d1df));
     sw.mute->setColour(juce::ToggleButton::tickColourId, juce::Colour(0xfff55f6f));
     sw.solo->setColour(juce::ToggleButton::tickColourId, juce::Colour(0xff48d39f));
-    addAndMakeVisible(*sw.mute);
-    addAndMakeVisible(*sw.solo);
+    contentHolder_->addAndMakeVisible(*sw.mute);
+    contentHolder_->addAndMakeVisible(*sw.solo);
 
     sw.eqLow.reset(makeEqKnob());
     sw.eqMid.reset(makeEqKnob());
@@ -354,7 +420,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         knob->setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff1a2230));
         knob->setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xffd9dee7));
         knob->setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(0xff2a3445));
-        addAndMakeVisible(*knob);
+        contentHolder_->addAndMakeVisible(*knob);
     }
 
     sw.insertA = std::make_unique<juce::ComboBox>();
@@ -370,7 +436,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         cb->setColour(juce::ComboBox::textColourId, juce::Colour(0xffd3dce9));
         cb->setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff2a3445));
         cb->setColour(juce::ComboBox::arrowColourId, accent);
-        addAndMakeVisible(*cb);
+        contentHolder_->addAndMakeVisible(*cb);
     }
 
     sw.pluginAButton = std::make_unique<juce::TextButton>("Comp");
@@ -381,7 +447,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         b->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd3dce9));
         b->setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd3dce9));
         b->setClickingTogglesState(false);
-        addAndMakeVisible(*b);
+        contentHolder_->addAndMakeVisible(*b);
         b->setVisible(index == stripMaster);
     }
 
@@ -395,7 +461,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         cb->setColour(juce::ComboBox::textColourId, juce::Colour(0xffd3dce9));
         cb->setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff2a3445));
         cb->setColour(juce::ComboBox::arrowColourId, accent);
-        addAndMakeVisible(*cb);
+        contentHolder_->addAndMakeVisible(*cb);
     }
 
     sw.pluginSlotAEdit = std::make_unique<juce::TextButton>("...");
@@ -407,7 +473,7 @@ void MixerPage::buildStrip(int index, const juce::String& name, juce::Colour acc
         b->setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd3dce9));
         b->setClickingTogglesState(false);
         b->setEnabled(false);
-        addAndMakeVisible(*b);
+        contentHolder_->addAndMakeVisible(*b);
     }
 }
 
@@ -869,67 +935,36 @@ void MixerPage::setAllPluginsBypassed(bool shouldBypass)
 
 void MixerPage::paint(juce::Graphics& g)
 {
-    auto area = getLocalBounds();
-    MenuTheme::drawPageBackground(g, area);
-    MenuTheme::drawHeaderPanel(g, area.removeFromTop(74).reduced(12, 6));
-
-    auto stripBounds = getLocalBounds().reduced(14).withTrimmedTop(80);
-    const int stripW = stripBounds.getWidth() / stripCount;
-
-    for (int i = 0; i < stripCount; ++i)
-    {
-        auto col = stripBounds.removeFromLeft(stripW).reduced(4, 0);
-
-        MenuTheme::drawGlassCard(g, col.toFloat(), 10.0f);
-
-        auto meter = col.removeFromRight(10).reduced(3, 36);
-        g.setColour(juce::Colour(0xff0a0f16));
-        g.fillRoundedRectangle(meter.toFloat(), 3.0f);
-
-        const float m = juce::jlimit(0.0f, 1.0f, strips[(size_t) i].meterLevel);
-        auto fill = meter.withTop((int) juce::jmap(1.0f - m, 0.0f, 1.0f,
-                                                   (float) meter.getY(), (float) meter.getBottom()));
-        g.setColour(strips[(size_t) i].accent.withMultipliedBrightness(1.1f));
-        g.fillRoundedRectangle(fill.toFloat(), 3.0f);
-
-        if (i == stripMaster)
-        {
-            auto& sw = strips[(size_t) i];
-            auto compBounds = sw.compMeterBounds;
-            auto limBounds = sw.limiterMeterBounds;
-
-            g.setColour(juce::Colour(0xff0a0f16));
-            g.fillRoundedRectangle(compBounds.toFloat(), 2.0f);
-            g.fillRoundedRectangle(limBounds.toFloat(), 2.0f);
-
-            g.setColour(juce::Colour(0xff2a3445));
-            g.drawRoundedRectangle(compBounds.toFloat(), 2.0f, 1.0f);
-            g.drawRoundedRectangle(limBounds.toFloat(), 2.0f, 1.0f);
-
-            const float compLevel = juce::jlimit(0.0f, 1.0f, sw.compOutputMeterLevel);
-            auto compFill = compBounds.withTop((int) juce::jmap(1.0f - compLevel,
-                                                                 0.0f,
-                                                                 1.0f,
-                                                                 (float) compBounds.getY(),
-                                                                 (float) compBounds.getBottom()));
-            g.setColour(juce::Colour(0xff2dd4bf));
-            g.fillRoundedRectangle(compFill.toFloat(), 2.0f);
-
-            const float limReduction = juce::jlimit(0.0f, 1.0f, sw.limiterReductionMeterLevel);
-            auto limFill = limBounds.withHeight((int) juce::jmap(limReduction,
-                                                                  0.0f,
-                                                                  1.0f,
-                                                                  0.0f,
-                                                                  (float) limBounds.getHeight()));
-            g.setColour(juce::Colour(0xffff6b6b));
-            g.fillRoundedRectangle(limFill.toFloat(), 2.0f);
-        }
-    }
+    MenuTheme::drawPageBackground(g, getLocalBounds());
 }
 
 void MixerPage::resized()
 {
-    auto area = getLocalBounds().reduced(14);
+    viewport_.setBounds(getLocalBounds());
+
+    const int startingWidth  = viewport_.getWidth() - viewport_.getScrollBarThickness();
+    const int startingHeight = juce::jmax(contentHolder_->getHeight(), 500);
+    contentHolder_->setSize(startingWidth, startingHeight);
+    layoutContent();
+
+    // Grow to fit the tallest strip -- lets the viewport's scrollbar reach
+    // the bottom of every strip on any window size. layoutContent() only
+    // depends on width, so a second pass at the corrected height
+    // reproduces the same positions.
+    int neededHeight = 0;
+    for (auto& sw : strips)
+        neededHeight = juce::jmax(neededHeight, sw.fader->getBottom());
+    neededHeight += 14;
+    if (neededHeight != contentHolder_->getHeight())
+    {
+        contentHolder_->setSize(startingWidth, neededHeight);
+        layoutContent();
+    }
+}
+
+void MixerPage::layoutContent()
+{
+    auto area = contentHolder_->getLocalBounds().reduced(14);
 
     auto head = area.removeFromTop(68);
     auto bypassArea = head.removeFromRight(180).removeFromTop(30);
@@ -1057,5 +1092,5 @@ void MixerPage::timerCallback()
 
     refreshMasterDynamicsButtons();
 
-    repaint();
+    contentHolder_->repaint();
 }

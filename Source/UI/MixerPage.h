@@ -103,5 +103,22 @@ private:
 
     void timerCallback() override;
 
+    // Plain Component with a paint callback -- lets the decorative strip
+    // cards / meters scroll along with the rest of the content (see
+    // LibraryPage for the same pattern and rationale). The strip layout is
+    // a fixed total height regardless of window height (unlike its width,
+    // which already divides safely across a fixed stripCount), so this
+    // only ever needs a vertical scrollbar, not a horizontal one.
+    class ContentHolder : public juce::Component
+    {
+    public:
+        std::function<void(juce::Graphics&)> onPaint;
+        void paint(juce::Graphics& g) override { if (onPaint) onPaint(g); }
+    };
+
+    std::unique_ptr<ContentHolder> contentHolder_;
+    juce::Viewport viewport_;
+    void layoutContent();
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixerPage)
 };

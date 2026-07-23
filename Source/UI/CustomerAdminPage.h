@@ -95,6 +95,20 @@ private:
 
     void setStatus (const juce::String& message, bool isError = false);
 
+    // Plain Component with a paint callback -- lets the decorative header
+    // panels scroll along with the rest of the content (see LibraryPage for
+    // the same pattern and rationale).
+    class ContentHolder : public juce::Component
+    {
+    public:
+        std::function<void(juce::Graphics&)> onPaint;
+        void paint (juce::Graphics& g) override { if (onPaint) onPaint (g); }
+    };
+
+    std::unique_ptr<ContentHolder> contentHolder_;
+    juce::Viewport viewport_;
+    void layoutContent();
+
     //==========================================================================
     juce::Label title_, subtitle_, statusLabel_;
     juce::TextButton tabUnassignedButton_ { "Unassigned Users" };

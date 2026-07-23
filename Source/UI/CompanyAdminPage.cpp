@@ -34,88 +34,92 @@ const juce::Colour kMuted  { 0xffc7d2e0 };
 }
 
 CompanyAdminPage::CompanyAdminPage()
+    : contentHolder_ (std::make_unique<ContentHolder>())
 {
     setOpaque(true);
+    addAndMakeVisible (viewport_);
+    viewport_.setViewedComponent (contentHolder_.get(), false);
+    viewport_.setScrollBarsShown (true, false);
 
     auto& lm = LocalizationManager::getInstance();
 
     title_.setFont (juce::Font (juce::FontOptions().withHeight (30.0f)).boldened());
     title_.setColour (juce::Label::textColourId, kText);
-    addAndMakeVisible (title_);
+    contentHolder_->addAndMakeVisible (title_);
 
     subtitle_.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
     subtitle_.setColour (juce::Label::textColourId, kMuted);
     subtitle_.setText (lm.getText ("page.company_admin.subtitle"), juce::dontSendNotification);
-    addAndMakeVisible (subtitle_);
+    contentHolder_->addAndMakeVisible (subtitle_);
 
     status_.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
     status_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (status_);
+    contentHolder_->addAndMakeVisible (status_);
 
     companyInfoTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
     companyInfoTitle_.setColour (juce::Label::textColourId, kText);
-    addAndMakeVisible (companyInfoTitle_);
+    contentHolder_->addAndMakeVisible (companyInfoTitle_);
 
     companyIdEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.company_id_hint"), kMuted);
     companyIdEditor_.setColour (juce::TextEditor::backgroundColourId, kPanel);
     companyIdEditor_.setColour (juce::TextEditor::textColourId, kText);
     companyIdEditor_.setColour (juce::TextEditor::outlineColourId, kBorder);
     companyIdEditor_.setColour (juce::TextEditor::focusedOutlineColourId, kAccent);
-    addAndMakeVisible (companyIdEditor_);
+    contentHolder_->addAndMakeVisible (companyIdEditor_);
 
     companyIdLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
     companyIdLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (companyIdLabel_);
+    contentHolder_->addAndMakeVisible (companyIdLabel_);
 
     companyNameLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
     companyNameLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (companyNameLabel_);
+    contentHolder_->addAndMakeVisible (companyNameLabel_);
 
     companyStatusLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
     companyStatusLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (companyStatusLabel_);
+    contentHolder_->addAndMakeVisible (companyStatusLabel_);
 
     logoLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
     logoLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (logoLabel_);
+    contentHolder_->addAndMakeVisible (logoLabel_);
 
     logoPathLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
     logoPathLabel_.setColour (juce::Label::textColourId, kMuted);
     logoPathLabel_.setJustificationType (juce::Justification::centredLeft);
-    addAndMakeVisible (logoPathLabel_);
+    contentHolder_->addAndMakeVisible (logoPathLabel_);
 
     companyNameEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.company_name_hint"), kMuted);
     companyNameEditor_.setColour (juce::TextEditor::backgroundColourId, kPanel);
     companyNameEditor_.setColour (juce::TextEditor::textColourId, kText);
     companyNameEditor_.setColour (juce::TextEditor::outlineColourId, kBorder);
     companyNameEditor_.setColour (juce::TextEditor::focusedOutlineColourId, kAccent);
-    addAndMakeVisible (companyNameEditor_);
+    contentHolder_->addAndMakeVisible (companyNameEditor_);
 
     companyStatusBox_.addItem (lm.getText ("company_admin.status_active"), 1);
     companyStatusBox_.addItem (lm.getText ("company_admin.status_suspended"), 2);
     companyStatusBox_.setColour (juce::ComboBox::backgroundColourId, kPanel);
     companyStatusBox_.setColour (juce::ComboBox::textColourId, kText);
     companyStatusBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
-    addAndMakeVisible (companyStatusBox_);
+    contentHolder_->addAndMakeVisible (companyStatusBox_);
 
     membersTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
     membersTitle_.setColour (juce::Label::textColourId, kText);
-    addAndMakeVisible (membersTitle_);
+    contentHolder_->addAndMakeVisible (membersTitle_);
 
     memberUserIdLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
     memberUserIdLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (memberUserIdLabel_);
+    contentHolder_->addAndMakeVisible (memberUserIdLabel_);
 
     memberRoleLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
     memberRoleLabel_.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (memberRoleLabel_);
+    contentHolder_->addAndMakeVisible (memberRoleLabel_);
 
     memberUserIdEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.member_user_id_hint"), kMuted);
     memberUserIdEditor_.setColour (juce::TextEditor::backgroundColourId, kPanel);
     memberUserIdEditor_.setColour (juce::TextEditor::textColourId, kText);
     memberUserIdEditor_.setColour (juce::TextEditor::outlineColourId, kBorder);
     memberUserIdEditor_.setColour (juce::TextEditor::focusedOutlineColourId, kAccent);
-    addAndMakeVisible (memberUserIdEditor_);
+    contentHolder_->addAndMakeVisible (memberUserIdEditor_);
 
     memberRoleBox_.addItem ("company_admin", 1);
     memberRoleBox_.addItem ("host", 2);
@@ -124,12 +128,12 @@ CompanyAdminPage::CompanyAdminPage()
     memberRoleBox_.setColour (juce::ComboBox::backgroundColourId, kPanel);
     memberRoleBox_.setColour (juce::ComboBox::textColourId, kText);
     memberRoleBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
-    addAndMakeVisible (memberRoleBox_);
+    contentHolder_->addAndMakeVisible (memberRoleBox_);
 
     membersListLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
     membersListLabel_.setColour (juce::Label::textColourId, kText);
     membersListLabel_.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (membersListLabel_);
+    contentHolder_->addAndMakeVisible (membersListLabel_);
 
     for (auto* button : { &applyCompanyIdButton_, &browseLogoButton_, &clearLogoButton_, &saveCompanyButton_,
                           &saveMemberButton_, &refreshMembersButton_,
@@ -138,7 +142,7 @@ CompanyAdminPage::CompanyAdminPage()
         button->setColour (juce::TextButton::buttonColourId, kPanel);
         button->setColour (juce::TextButton::textColourOffId, kText);
         button->setColour (juce::TextButton::textColourOnId, kText);
-        addAndMakeVisible (*button);
+        contentHolder_->addAndMakeVisible (*button);
     }
 
     applyCompanyIdButton_.onClick = [this]() { applyCompanyIdFromEditor(); };
@@ -178,6 +182,57 @@ CompanyAdminPage::CompanyAdminPage()
     configureCard (packageCard_,  lm.getText ("company_admin.packages"),  "0");
     configureCard (campaignCard_, lm.getText ("company_admin.campaigns"), "0");
 
+    // Decorative panels/cards, drawn against contentHolder_'s own bounds
+    // (not CompanyAdminPage's) so they scroll along with the rest of the
+    // content.
+    contentHolder_->onPaint = [this] (juce::Graphics& g)
+    {
+        auto bounds = contentHolder_->getLocalBounds().reduced (22);
+        MenuTheme::drawHeaderPanel (g, bounds);
+
+        auto header = bounds.removeFromTop (110);
+        MenuTheme::drawHeaderPanel (g, header);
+
+        auto infoArea = contentHolder_->getLocalBounds().reduced (28);
+        infoArea.removeFromTop (110);
+        infoArea.removeFromTop (12);
+        auto formArea = infoArea.removeFromTop (220);
+        MenuTheme::drawHeaderPanel (g, formArea);
+
+        auto preview = formArea.removeFromRight (180).reduced (16);
+        g.setColour (kBorder);
+        g.drawRoundedRectangle (preview.toFloat(), 14.0f, 1.0f);
+        if (logoPreview_.isValid())
+        {
+            g.drawImageWithin (logoPreview_, preview.getX() + 8, preview.getY() + 8,
+                               preview.getWidth() - 16, preview.getHeight() - 16,
+                               juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                               false);
+        }
+        else
+        {
+            g.setColour (kMuted.withAlpha (0.55f));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
+            g.drawFittedText (LocalizationManager::getInstance().getText ("company_admin.logo_preview"),
+                              preview.reduced (10), juce::Justification::centred, 2);
+        }
+
+        infoArea.removeFromTop (12);
+        MenuTheme::drawHeaderPanel (g, infoArea);
+
+        auto drawStatCard = [&g] (const StatCard& card)
+        {
+            auto rect = card.title.getBounds().getUnion (card.value.getBounds()).expanded (10, 8).toFloat();
+            MenuTheme::drawGlassCard (g, rect, 12.0f);
+        };
+
+        drawStatCard (venueCard_);
+        drawStatCard (hostCard_);
+        drawStatCard (deviceCard_);
+        drawStatCard (packageCard_);
+        drawStatCard (campaignCard_);
+    };
+
     setCompanyContext ({}, {});
 }
 
@@ -194,12 +249,12 @@ void CompanyAdminPage::configureCard (StatCard& card, const juce::String& title,
     card.title.setText (title, juce::dontSendNotification);
     card.title.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)).boldened());
     card.title.setColour (juce::Label::textColourId, kMuted);
-    addAndMakeVisible (card.title);
+    contentHolder_->addAndMakeVisible (card.title);
 
     card.value.setText (initialValue, juce::dontSendNotification);
     card.value.setFont (juce::Font (juce::FontOptions().withHeight (28.0f)).boldened());
     card.value.setColour (juce::Label::textColourId, kText);
-    addAndMakeVisible (card.value);
+    contentHolder_->addAndMakeVisible (card.value);
 }
 
 void CompanyAdminPage::setCompanyContext (const juce::String& companyId, const juce::String& companyRole)
@@ -609,51 +664,6 @@ void CompanyAdminPage::updateAllText()
 void CompanyAdminPage::paint (juce::Graphics& g)
 {
     MenuTheme::drawPageBackground (g, getLocalBounds());
-
-    auto bounds = getLocalBounds().reduced (22);
-    MenuTheme::drawHeaderPanel (g, bounds);
-
-    auto header = bounds.removeFromTop (110);
-    MenuTheme::drawHeaderPanel (g, header);
-
-    auto infoArea = getLocalBounds().reduced (28);
-    infoArea.removeFromTop (110);
-    infoArea.removeFromTop (12);
-    auto formArea = infoArea.removeFromTop (220);
-    MenuTheme::drawHeaderPanel (g, formArea);
-
-    auto preview = formArea.removeFromRight (180).reduced (16);
-    g.setColour (kBorder);
-    g.drawRoundedRectangle (preview.toFloat(), 14.0f, 1.0f);
-    if (logoPreview_.isValid())
-    {
-        g.drawImageWithin (logoPreview_, preview.getX() + 8, preview.getY() + 8,
-                           preview.getWidth() - 16, preview.getHeight() - 16,
-                           juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
-                           false);
-    }
-    else
-    {
-        g.setColour (kMuted.withAlpha (0.55f));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
-        g.drawFittedText (LocalizationManager::getInstance().getText ("company_admin.logo_preview"),
-                          preview.reduced (10), juce::Justification::centred, 2);
-    }
-
-    infoArea.removeFromTop (12);
-    MenuTheme::drawHeaderPanel (g, infoArea);
-
-    auto drawStatCard = [&g](const StatCard& card)
-    {
-        auto rect = card.title.getBounds().getUnion(card.value.getBounds()).expanded(10, 8).toFloat();
-        MenuTheme::drawGlassCard(g, rect, 12.0f);
-    };
-
-    drawStatCard(venueCard_);
-    drawStatCard(hostCard_);
-    drawStatCard(deviceCard_);
-    drawStatCard(packageCard_);
-    drawStatCard(campaignCard_);
 }
 
 void CompanyAdminPage::layoutCard (StatCard& card, juce::Rectangle<int> area)
@@ -664,7 +674,28 @@ void CompanyAdminPage::layoutCard (StatCard& card, juce::Rectangle<int> area)
 
 void CompanyAdminPage::resized()
 {
-    auto bounds = getLocalBounds().reduced (28);
+    viewport_.setBounds (getLocalBounds());
+
+    const int startingWidth  = juce::jmax (900, viewport_.getWidth() - viewport_.getScrollBarThickness());
+    const int startingHeight = juce::jmax (contentHolder_->getHeight(), 700);
+    contentHolder_->setSize (startingWidth, startingHeight);
+    layoutContent();
+
+    // Grow to fit the stat-card grid at the bottom -- lets the viewport's
+    // scrollbar reach it on any window size. layoutContent() only depends
+    // on width, so a second pass at the corrected height reproduces the
+    // same positions.
+    const int neededHeight = juce::jmax (deviceCard_.value.getBottom(), campaignCard_.value.getBottom()) + 16;
+    if (neededHeight != contentHolder_->getHeight())
+    {
+        contentHolder_->setSize (startingWidth, neededHeight);
+        layoutContent();
+    }
+}
+
+void CompanyAdminPage::layoutContent()
+{
+    auto bounds = contentHolder_->getLocalBounds().reduced (28);
     auto header = bounds.removeFromTop (110).reduced (18, 16);
 
     title_.setBounds (header.removeFromTop (38));
@@ -726,7 +757,10 @@ void CompanyAdminPage::resized()
     membersListLabel_.setBounds (membersArea);
 
     bounds.removeFromTop (12);
-    auto grid = bounds;
+    // Fixed height, not "whatever's left" -- the content now grows to fit
+    // its own needs rather than being squeezed into a given window size, so
+    // there's no natural "remainder" to fill.
+    auto grid = bounds.removeFromTop (212);
     auto row1 = grid.removeFromTop ((grid.getHeight() / 2) - 8);
     auto row2 = grid;
     auto cardW = (row1.getWidth() - 16) / 3;

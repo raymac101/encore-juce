@@ -21,6 +21,12 @@
     Customer Admin tool (Source/UI/CustomerAdminPage.h), never in
     self-service profile editing.
 
+    The actual form lives in the nested ContentPanel, at a fixed natural
+    size, inside a juce::Viewport -- shrinking the window (or the app's
+    fixed-size min bounds not being small enough on some display) reveals a
+    scrollbar instead of squeezing the two-column layout into negative-size
+    rectangles, which used to crash on a small enough window.
+
   ==============================================================================
 */
 
@@ -49,55 +55,9 @@ public:
     std::function<void()> onProfileSaved;
 
 private:
-    void buildAvatarGrid();
-    void selectAvatar (int tileIndex);
-    void updateSaveButtonState();
-    void onSaveClicked();
-    void setStatus (const juce::String& message, bool isError = false);
-
-    //==========================================================================
-    class AvatarTile : public juce::Component
-    {
-    public:
-        int tileIndex = -1;
-        juce::Image image;
-        bool selected = false;
-        std::function<void (int)> onClicked;
-
-        void paint (juce::Graphics& g) override;
-        void mouseUp (const juce::MouseEvent&) override { if (onClicked) onClicked (tileIndex); }
-    };
-
-    //==========================================================================
-    juce::Label title_, subtitle_, statusLabel_;
-
-    juce::Label fullNameLabel_;
-    juce::TextEditor fullNameEditor_;
-    juce::Label emailLabel_;
-    juce::TextEditor emailEditor_;
-    juce::Label stageNameLabel_;
-    juce::TextEditor stageNameEditor_;
-    juce::Label birthdayLabel_;
-    juce::TextEditor birthdayEditor_;
-    juce::Label countryLabel_;
-    juce::TextEditor countryEditor_;
-    juce::Label cityLabel_;
-    juce::TextEditor cityEditor_;
-    juce::Label genderLabel_;
-    juce::ComboBox genderBox_;
-    juce::Label roleLabel_;
-    juce::Label roleValueLabel_;
-
-    juce::Label avatarSectionLabel_;
-    juce::Component avatarGridHolder_;
-    std::vector<juce::String> avatarFileNames_;
-    std::vector<std::unique_ptr<AvatarTile>> avatarTiles_;
-    juce::String selectedAvatarUrl_;   // relative asset path, e.g. "assets/images/avatars/1064391.png"
-
-    juce::TextButton saveButton_ { "Save Profile" };
-
-    juce::String currentUid_;
-    bool loaded_ = false;
+    class ContentPanel;
+    std::unique_ptr<ContentPanel> content_;
+    juce::Viewport viewport_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProfilePage)
 };

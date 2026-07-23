@@ -12,6 +12,7 @@
 
 #include "LoginWindow.h"
 #include "LoginTheme.h"
+#include "../Localization/LocalizationManager.h"
 #include "../Auth/LoginFlowController.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/UserPreferences.h"
@@ -31,6 +32,7 @@ public:
         : onComplete_(std::move(onComplete))
     {
         setLookAndFeel(&lnf_);
+        auto& lm = LocalizationManager::getInstance();
 
         // Logo (matches `.encore-logo` in the Angular auth screen).
         const auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
@@ -46,7 +48,7 @@ public:
         versionLabel_.setFont(juce::Font(juce::FontOptions(14.0f)));
         const juce::String baseVersion = ProjectInfo::versionString;
         const juce::String buildNumber = juce::String(ENCORE_BUILD_NUMBER);
-        versionLabel_.setText("Version " + baseVersion + " (Build " + buildNumber + ")",
+        versionLabel_.setText(lm.getTextWithParams("login.version_label", { baseVersion, buildNumber }),
                               juce::dontSendNotification);
 
         addAndMakeVisible(headingLabel_);
@@ -57,7 +59,7 @@ public:
         headingLabel_.setFont(juce::Font(juce::FontOptions(28.0f)).withStyle(juce::Font::plain));
         headingLabel_.setJustificationType(juce::Justification::centredLeft);
         headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
-        headingLabel_.setText("Login", juce::dontSendNotification);
+        headingLabel_.setText(lm.getText("login.heading_login"), juce::dontSendNotification);
 
         statusLabel_.setJustificationType(juce::Justification::centred);
         statusLabel_.setColour(juce::Label::textColourId,
@@ -73,15 +75,15 @@ public:
         addChildComponent(appleButton_);
         addChildComponent(getStartedButton_);
 
-        styleEditor(emailEditor_, "E-Mail");
-        styleEditor(passwordEditor_, "Password");
+        styleEditor(emailEditor_, lm.getText("login.email_placeholder"));
+        styleEditor(passwordEditor_, lm.getText("login.password_placeholder"));
         passwordEditor_.setPasswordCharacter((juce::juce_wchar) 0x2022); // bullet
 
-        loginButton_.setButtonText("Login");
-        switchModeButton_.setButtonText("Switch to Sign Up");
-        googleButton_.setButtonText("Sign in with Google");
-        appleButton_.setButtonText("Sign in with Apple");
-        getStartedButton_.setButtonText("New to Encore?  Start here");
+        loginButton_.setButtonText(lm.getText("login.button_login"));
+        switchModeButton_.setButtonText(lm.getText("login.button_switch_to_signup"));
+        googleButton_.setButtonText(lm.getText("login.button_google"));
+        appleButton_.setButtonText(lm.getText("login.button_apple"));
+        getStartedButton_.setButtonText(lm.getText("login.button_get_started"));
 
         // Tag ghost (secondary) buttons so the L&F draws them differently.
         switchModeButton_.getProperties().set("ghost", true);
@@ -100,7 +102,7 @@ public:
 
        #if ENCORE_DEV_SKIP_LOGIN
         addChildComponent(skipButton_);
-        skipButton_.setButtonText("Skip Login (Dev)");
+        skipButton_.setButtonText(lm.getText("login.dev_skip_button"));
         skipButton_.getProperties().set("ghost", true);
         skipButton_.onClick = [this]
         {
@@ -117,12 +119,13 @@ public:
         // ── Multi-page widgets (created up-front, hidden by default) ─────────
         // SelectVenue: heading + remember-toggle + scrolling venue cards
         addChildComponent(venuesHeadingLabel_);
-        venuesHeadingLabel_.setText("Your Available Venues", juce::dontSendNotification);
+        venuesHeadingLabel_.setText(lm.getText("login.select_venue.available_venues_heading"), juce::dontSendNotification);
         venuesHeadingLabel_.setFont(juce::Font(juce::FontOptions(20.0f, juce::Font::bold)));
         venuesHeadingLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff1f2937));
         venuesHeadingLabel_.setJustificationType(juce::Justification::centredLeft);
 
         addChildComponent(rememberVenueToggle_);
+        rememberVenueToggle_.setButtonText(lm.getText("login.select_venue.remember_toggle"));
         rememberVenueToggle_.setColour(juce::ToggleButton::textColourId, juce::Colour(0xff374151));
         rememberVenueToggle_.setColour(juce::ToggleButton::tickColourId, juce::Colour(LoginTheme::kAccentBlue));
         rememberVenueToggle_.setColour(juce::ToggleButton::tickDisabledColourId, juce::Colour(0xff9ca3af));
@@ -145,15 +148,15 @@ public:
         addChildComponent(useDifferentVenueButton_);
         addChildComponent(messageEditor_);
 
-        styleEditor(messageEditor_, "Optional message to the venue admin (e.g. 'I'm the new KJ for Friday nights')");
+        styleEditor(messageEditor_, lm.getText("login.request_access.message_placeholder"));
         messageEditor_.setMultiLine(true);
         messageEditor_.setReturnKeyStartsNewLine(true);
 
-        refreshButton_.setButtonText("Refresh");
-        signOutButton_.setButtonText("Sign Out");
-        createVenueButton_.setButtonText("Create New Venue");
-        requestAccessButton_.setButtonText("Send Access Request");
-        useDifferentVenueButton_.setButtonText("Use a Different Venue");
+        refreshButton_.setButtonText(lm.getText("login.awaiting.button_refresh"));
+        signOutButton_.setButtonText(lm.getText("login.shared.button_sign_out"));
+        createVenueButton_.setButtonText(lm.getText("login.awaiting.button_create_venue"));
+        requestAccessButton_.setButtonText(lm.getText("login.request_access.button_send"));
+        useDifferentVenueButton_.setButtonText(lm.getText("login.request_access.button_use_different_venue"));
 
         refreshButton_.onClick = [this]
         {
@@ -191,7 +194,7 @@ public:
 
             auto proceed = [this, venueId](bool initialScan)
             {
-                setBusy(true, "Opening venue...");
+                setBusy(true, LocalizationManager::getInstance().getText("login.select_venue.status_opening_venue"));
 
                 // selectVenue() checks the license before persisting/opening —
                 // must resolve before we ever hand off to onComplete_, or an
@@ -212,14 +215,13 @@ public:
 
             if (isSwitch)
             {
+                auto& lmRef = LocalizationManager::getInstance();
                 juce::AlertWindow::showOkCancelBox(
                     juce::AlertWindow::WarningIcon,
-                    "Switch venue?",
-                    "You are switching from the venue configured to this PC. "
-                    "To do this you need to re-scan the music and generate a "
-                    "new songbook. Do you want to continue?",
-                    "Yes",
-                    "Cancel",
+                    lmRef.getText("login.select_venue.switch_dialog_title"),
+                    lmRef.getText("login.select_venue.switch_dialog_body"),
+                    lmRef.getText("login.select_venue.switch_dialog_confirm"),
+                    lmRef.getText("login.select_venue.switch_dialog_cancel"),
                     nullptr,
                     juce::ModalCallbackFunction::create(
                         [proceed](int result)
@@ -239,7 +241,7 @@ public:
         {
             juce::ignoreUnused(row);
             statusLabel_.setText(
-                "Accepting invitations from JUCE isn't wired up yet - coming next.",
+                LocalizationManager::getInstance().getText("login.awaiting.status_accept_not_implemented"),
                 juce::dontSendNotification);
         };
 
@@ -497,6 +499,7 @@ private:
     //==============================================================================
     void applyPage()
     {
+        auto& lm = LocalizationManager::getInstance();
         const bool login  = page_ == Page::Login;
         const bool sel    = page_ == Page::SelectVenue;
         const bool await_ = page_ == Page::AwaitingInvitation;
@@ -519,7 +522,8 @@ private:
         invitationsListBox_.setVisible(await_);
         refreshButton_.setVisible(await_);
         createVenueButton_.setVisible(await_ && (flowResult_.canCreateVenue || flowResult_.offerSelfServeSetup));
-        createVenueButton_.setButtonText(flowResult_.offerSelfServeSetup ? "Get Started" : "Create New Venue");
+        createVenueButton_.setButtonText(flowResult_.offerSelfServeSetup ? lm.getText("login.awaiting.button_get_started_alt")
+                                                                          : lm.getText("login.awaiting.button_create_venue"));
         signOutButton_.setVisible(sel || await_ || req);
         messageEditor_.setVisible(req);
         requestAccessButton_.setVisible(req);
@@ -539,10 +543,10 @@ private:
                 break;
 
             case Page::SelectVenue:
-                headingLabel_.setText("Select Your Venue", juce::dontSendNotification);
+                headingLabel_.setText(lm.getText("login.select_venue.heading"), juce::dontSendNotification);
                 headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
                 statusLabel_.setText(
-                    "You have access to multiple venues. Please select the one you'd like to use.",
+                    lm.getText("login.select_venue.subtitle"),
                     juce::dontSendNotification);
                 statusLabel_.setColour(juce::Label::textColourId,
                                        juce::Colour(LoginTheme::kSubtleText));
@@ -555,21 +559,21 @@ private:
                 break;
 
             case Page::AwaitingInvitation:
-                headingLabel_.setText("Welcome to Encore", juce::dontSendNotification);
+                headingLabel_.setText(lm.getText("login.awaiting.heading"), juce::dontSendNotification);
                 headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
                 statusLabel_.setText(
                     flowResult_.invitations.empty()
-                        ? "No invitations yet. Ask a venue admin to invite you, then click Refresh."
-                        : "You have pending invitations.",
+                        ? lm.getText("login.awaiting.status_no_invitations")
+                        : lm.getText("login.awaiting.status_has_invitations"),
                     juce::dontSendNotification);
                 invitationsListBox_.updateContent();
                 break;
 
             case Page::RequestAccess:
-                headingLabel_.setText("Request Access", juce::dontSendNotification);
+                headingLabel_.setText(lm.getText("login.request_access.heading"), juce::dontSendNotification);
                 headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
                 statusLabel_.setText(
-                    "This computer is set for a venue you don't belong to yet.",
+                    lm.getText("login.request_access.subtitle"),
                     juce::dontSendNotification);
                 break;
         }
@@ -597,9 +601,10 @@ private:
 
     void refreshLoginPage()
     {
-        loginButton_.setButtonText(isLoginMode_ ? "Login" : "Sign Up");
-        switchModeButton_.setButtonText(isLoginMode_ ? "Switch to Sign Up" : "Switch to Login");
-        headingLabel_.setText(isLoginMode_ ? "Login" : "Sign Up",
+        auto& lm = LocalizationManager::getInstance();
+        loginButton_.setButtonText(isLoginMode_ ? lm.getText("login.button_login") : lm.getText("login.button_signup"));
+        switchModeButton_.setButtonText(isLoginMode_ ? lm.getText("login.button_switch_to_signup") : lm.getText("login.button_switch_to_login"));
+        headingLabel_.setText(isLoginMode_ ? lm.getText("login.heading_login") : lm.getText("login.heading_signup"),
                               juce::dontSendNotification);
     }
 
@@ -629,15 +634,16 @@ private:
         const auto email    = emailEditor_.getText().trim();
         const auto password = passwordEditor_.getText();
 
+        auto& lm = LocalizationManager::getInstance();
         if (email.isEmpty() || password.length() < 6)
         {
-            statusLabel_.setText("Enter a valid email and a password (≥ 6 chars).",
+            statusLabel_.setText(lm.getText("login.error_invalid_email_password"),
                                  juce::dontSendNotification);
             return;
         }
 
         const bool signUp = ! isLoginMode_;
-        setBusy(true, signUp ? "Creating your account..." : "Signing in...");
+        setBusy(true, signUp ? lm.getText("login.status_creating_account") : lm.getText("login.status_signing_in"));
 
         juce::Component::SafePointer<LoginContent> safe(this);
         juce::Thread::launch([safe, email, password, signUp]
@@ -665,7 +671,7 @@ private:
 
     void handleOAuth(const juce::String& providerId)
     {
-        setBusy(true, "Opening browser...");
+        setBusy(true, LocalizationManager::getInstance().getText("login.status_opening_browser"));
         juce::Component::SafePointer<LoginContent> safe(this);
         juce::Thread::launch([safe, providerId]
         {
@@ -692,21 +698,22 @@ private:
     {
         // Identity Toolkit returns codes like "EMAIL_NOT_FOUND",
         // "INVALID_PASSWORD", "EMAIL_EXISTS", "WEAK_PASSWORD : Password should be at least 6 characters".
-        if (code.contains("EMAIL_NOT_FOUND"))     return "User not found, please sign up.";
-        if (code.contains("INVALID_PASSWORD"))    return "Password is incorrect.";
-        if (code.contains("INVALID_LOGIN_CREDENTIALS")) return "Email or password is incorrect.";
-        if (code.contains("EMAIL_EXISTS"))        return "This email is already registered.";
-        if (code.contains("WEAK_PASSWORD"))       return "Password is too weak (min 6 chars).";
-        if (code.contains("USER_DISABLED"))       return "This account has been disabled.";
-        if (code.contains("INVALID_EMAIL"))       return "Not a valid email address.";
-        return code.isEmpty() ? juce::String("Sign-in failed. Please try again.") : code;
+        auto& lm = LocalizationManager::getInstance();
+        if (code.contains("EMAIL_NOT_FOUND"))     return lm.getText("login.error_user_not_found");
+        if (code.contains("INVALID_PASSWORD"))    return lm.getText("login.error_password_incorrect");
+        if (code.contains("INVALID_LOGIN_CREDENTIALS")) return lm.getText("login.error_invalid_credentials");
+        if (code.contains("EMAIL_EXISTS"))        return lm.getText("login.error_email_exists");
+        if (code.contains("WEAK_PASSWORD"))       return lm.getText("login.error_weak_password");
+        if (code.contains("USER_DISABLED"))       return lm.getText("login.error_user_disabled");
+        if (code.contains("INVALID_EMAIL"))       return lm.getText("login.error_invalid_email");
+        return code.isEmpty() ? lm.getText("login.error_signin_failed_generic") : code;
     }
 
     //==============================================================================
     // Scenario flow
     void runFlow()
     {
-        setBusy(true, "Loading your profile...");
+        setBusy(true, LocalizationManager::getInstance().getText("login.shared.status_loading_profile"));
         LoginFlowController::runPostAuthFlow(
             [this](LoginFlowController::Result result)
             {
@@ -742,7 +749,7 @@ private:
 
                     if (pickId.isNotEmpty())
                     {
-                        setBusy(true, "Loading venue...");
+                        setBusy(true, LocalizationManager::getInstance().getText("login.shared.status_loading_venue"));
                         LoginFlowController::selectVenue(pickId, [this, pickId](bool ok, juce::String licenseMessage)
                         {
                             setBusy(false, {});
@@ -784,7 +791,8 @@ private:
             [this](juce::String error)
             {
                 setBusy(false, {});
-                statusLabel_.setText("Error: " + error, juce::dontSendNotification);
+                statusLabel_.setText(LocalizationManager::getInstance().getTextWithParams("login.shared.error_prefix", { error }),
+                                     juce::dontSendNotification);
             });
     }
 
@@ -794,11 +802,12 @@ private:
     void showLicenseInvalidAndSignOut(const juce::String& message)
     {
         setBusy(false, {});
+        auto& lm = LocalizationManager::getInstance();
         juce::AlertWindow::showMessageBoxAsync(
             juce::AlertWindow::WarningIcon,
-            "Venue Unavailable",
+            lm.getText("login.alert.venue_unavailable_title"),
             message.isNotEmpty() ? message
-                                 : "This venue's license is not active. Contact your account owner.");
+                                 : lm.getText("login.alert.venue_license_invalid_body"));
 
         FirestoreClient::getInstance().signOut();
         page_ = Page::Login;
@@ -826,7 +835,7 @@ private:
         if (flowResult_.venueId.isEmpty())
             return;
 
-        setBusy(true, "Sending request...");
+        setBusy(true, LocalizationManager::getInstance().getText("login.request_access.status_sending"));
 
         // Look up venue name (best effort) for the request payload.
         juce::Component::SafePointer<LoginContent> safe(this);
@@ -842,9 +851,10 @@ private:
                         return;
 
                     safe->setBusy(false, {});
+                    auto& lmRef = LocalizationManager::getInstance();
                     safe->statusLabel_.setText(
-                        ok ? "Request sent. The venue admin has been notified."
-                           : juce::String("Failed: ") + error,
+                        ok ? lmRef.getText("login.request_access.status_sent")
+                           : lmRef.getTextWithParams("login.request_access.status_failed", { error }),
                         juce::dontSendNotification);
 
                     safe->requestAccessButton_.setEnabled(! ok);
@@ -863,7 +873,7 @@ private:
             : association_(a), isConfigured_(configured)
         {
             addAndMakeVisible(selectButton_);
-            selectButton_.setButtonText("SELECT");
+            selectButton_.setButtonText(LocalizationManager::getInstance().getText("login.select_venue.card_select_button"));
             // Custom green button — bypass the LoginLookAndFeel gradient.
             selectButton_.getProperties().set("greenSelect", true);
             selectButton_.onClick = [this] { if (onSelect) onSelect(); };
@@ -910,6 +920,7 @@ private:
 
         void paint(juce::Graphics& g) override
         {
+            auto& lm = LocalizationManager::getInstance();
             const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
             const float r = 12.0f;
 
@@ -970,21 +981,22 @@ private:
             // VenueService::getCurrent() would have it. Skip for now and
             // rely on the address line being enough.
 
-            g.drawText("Role: " + juce::String(AccessRightsUtil::userRoleToString(association_.role)),
+            g.drawText(lm.getTextWithParams("login.select_venue.card_role_label",
+                           { juce::String(AccessRightsUtil::userRoleToString(association_.role)) }),
                        textX, y, textW, 16, juce::Justification::centredLeft);
             y += 16;
 
             const juce::String last = association_.lastAccessDate.toMilliseconds() > 0
                                          ? association_.lastAccessDate.formatted("%b %d, %Y")
-                                         : "Invalid Date";
-            g.drawText("Last visited: " + last, textX, y, textW, 16,
+                                         : lm.getText("login.select_venue.card_invalid_date");
+            g.drawText(lm.getTextWithParams("login.select_venue.card_last_visited", { last }), textX, y, textW, 16,
                        juce::Justification::centredLeft);
             y += 18;
 
             // "Configured on this PC" pill.
             if (isConfigured_)
             {
-                const juce::String pillText = "Configured on this PC";
+                const juce::String pillText = lm.getText("login.select_venue.card_configured_pill");
                 auto font = juce::Font(juce::FontOptions(11.0f, juce::Font::bold));
                 const int pillW = (int) juce::GlyphArrangement::getStringWidth(font, pillText) + 20;
                 juce::Rectangle<float> pill((float) textX, (float) y, (float) pillW, 22.0f);
@@ -1029,8 +1041,8 @@ private:
             g.drawText(i.venueName, 12, 6, w - 100, 22, juce::Justification::centredLeft);
             g.setColour(juce::Colour(LoginTheme::kSubtleText));
             g.setFont(juce::Font(juce::FontOptions(12.0f)));
-            g.drawText("Invited by " + i.invitedByName + " as "
-                         + juce::String(AccessRightsUtil::userRoleToString(i.role)),
+            g.drawText(LocalizationManager::getInstance().getTextWithParams("login.awaiting.invite_row_subtitle",
+                           { i.invitedByName, juce::String(AccessRightsUtil::userRoleToString(i.role)) }),
                        12, 28, w - 100, 18, juce::Justification::centredLeft);
 
             // "Accept" hint button
@@ -1038,7 +1050,8 @@ private:
             g.fillRoundedRectangle((float)(w - 90), 14.0f, 78.0f, 28.0f, 4.0f);
             g.setColour(juce::Colours::black);
             g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
-            g.drawText("Accept", w - 90, 14, 78, 28, juce::Justification::centred);
+            g.drawText(LocalizationManager::getInstance().getText("login.awaiting.invite_row_accept_button"),
+                       w - 90, 14, 78, 28, juce::Justification::centred);
         }
 
         void listBoxItemClicked(int row, const juce::MouseEvent& e) override
@@ -1085,7 +1098,7 @@ private:
     // SelectVenue page (custom cards instead of ListBox)
     class VenueCardComponent;
     juce::Label             venuesHeadingLabel_;
-    juce::ToggleButton      rememberVenueToggle_ { "Remember this venue on this PC" };
+    juce::ToggleButton      rememberVenueToggle_;
     juce::Viewport          venuesViewport_;
     juce::Component         venuesContainer_;
     std::vector<std::unique_ptr<VenueCardComponent>> venueCards_;
@@ -1107,7 +1120,7 @@ private:
 
 //==============================================================================
 LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
-    : DocumentWindow("Encore - Sign In",
+    : DocumentWindow(LocalizationManager::getInstance().getText("login.window_title"),
                      juce::Desktop::getInstance().getDefaultLookAndFeel()
                          .findColour(juce::ResizableWindow::backgroundColourId),
                      DocumentWindow::closeButton)

@@ -336,8 +336,8 @@ void QueueBar::NowPlayingCard::mouseDown(const juce::MouseEvent& e)
     juce::PopupMenu menu;
     menu.addItem(1, isPlaying ? "Pause" : "Play", true);
     menu.addSeparator();
-    menu.addItem(2, "Return to Queue \xe2\x80\x94 Next", true);
-    menu.addItem(3, "Return to Queue \xe2\x80\x94 End",  true);
+    menu.addItem(2, juce::String(juce::CharPointer_UTF8("Return to Queue \xe2\x80\x94 Next")), true);
+    menu.addItem(3, juce::String(juce::CharPointer_UTF8("Return to Queue \xe2\x80\x94 End")),  true);
     menu.addSeparator();
     menu.addItem(4, "Skip & Clear", true);
 
