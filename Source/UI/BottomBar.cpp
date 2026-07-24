@@ -941,12 +941,24 @@ void BottomBar::setButtonImage(juce::ImageButton& button, const juce::Image& ima
 
 void BottomBar::setMainScreenExpanded(bool expanded)
 {
+    // Guard against redundant work: refreshRibbonState() calls this on
+    // every ~50ms timer tick (so the icon self-heals no matter what
+    // triggered a fullscreen change), not just when the button is clicked.
+    // Reassigning images unconditionally at 20Hz was measurably expensive
+    // enough to make the whole app feel sluggish -- see BottomBar.h.
+    if (expanded == mainScreenExpanded_)
+        return;
+
     mainScreenExpanded_ = expanded;
     setButtonImage(expandMainScreenButton, expanded ? screen1CollapseImage : screen1ExpandImage);
 }
 
 void BottomBar::setLyricScreenExpanded(bool expanded)
 {
+    // See setMainScreenExpanded() above -- same reasoning.
+    if (expanded == lyricScreenExpanded_)
+        return;
+
     lyricScreenExpanded_ = expanded;
     setButtonImage(expandLyricScreenButton, expanded ? screen2CollapseImage : screen2ExpandImage);
 }

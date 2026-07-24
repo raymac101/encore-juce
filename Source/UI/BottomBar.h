@@ -90,7 +90,13 @@ public:
 
     /** Update the main-screen button's icon to reflect the window's actual
         fullscreen state. Called after any change, whether triggered by this
-        button or elsewhere (e.g. the Window menu). */
+        button or elsewhere (e.g. the Window menu). Also called on every
+        ~50ms UI-refresh tick so the icon self-heals regardless of trigger
+        source -- cheap ONLY because the implementation no-ops when
+        `expanded` matches the current state; do not remove that guard, an
+        earlier unconditional version was measurably responsible for
+        whole-app sluggishness (repeated juce::ImageButton::setImages() at
+        20Hz). */
     void setMainScreenExpanded (bool expanded);
 
     /** Same, for the lyric (singer-facing) display window. */
