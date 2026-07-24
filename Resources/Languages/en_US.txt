@@ -409,6 +409,8 @@ settings.archive_history_title=Archive History
 settings.archive_history_body=Archive history viewer coming soon.
 
 # ── Application menu bar ─────────────────────────────────────────────────────
+menu.file=File
+menu.file.exit=Exit
 menu.window=Window
 menu.window.fullscreen=Fullscreen
 menu.window.reset_position=Reset Screen Position

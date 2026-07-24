@@ -993,6 +993,21 @@ void MainComponent::setupUI()
         audioEngine->setMasterVolume(v);
     };
 
+    bottomBar->onExpandMainScreenClicked = [this]() {
+        if (onToggleMainFullscreenRequested)
+            onToggleMainFullscreenRequested();
+    };
+
+    bottomBar->onExpandLyricScreenClicked = [this]() {
+        if (lyricWindow_ == nullptr)
+            lyricWindow_ = std::make_unique<LyricDisplayWindow>(audioEngine.get());
+
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->toggleFullScreen();
+
+        refreshRibbonState();
+    };
+
     // The BottomBar's own 30Hz timer will no longer auto-advance progress —
     // our 100ms timer below polls the real AudioEngine position instead.
     bottomBar->setExternalProgressControl(true);
@@ -2661,11 +2676,17 @@ void MainComponent::resized()
     // Basic responsive resized method
     auto bounds = getLocalBounds();
 
-    // Non-mac: embedded menu bar at the very top.
+    // Non-mac: embedded menu bar at the very top, with the app icon to its
+    // left (macOS shows the app icon in the system menu bar itself, so no
+    // equivalent is needed there).
    #if ! JUCE_MAC
     if (menuBar_ != nullptr && menuBar_->isVisible())
     {
         auto menuBounds = bounds.removeFromTop (24);
+
+        if (menuBarIcon_ != nullptr)
+            menuBarIcon_->setBounds (menuBounds.removeFromLeft (24).reduced (4));
+
         menuBar_->setBounds (menuBounds);
     }
    #endif
@@ -4128,9 +4149,12 @@ void MainComponent::refreshRibbonState()
     ribbonMenu->setLyricPreviewFile(currentRibbonCdgFile_);
 
     const bool lyricVisible = lyricWindow_ != nullptr && lyricWindow_->isVisible();
-    const bool lyricFull = lyricWindow_ != nullptr && lyricWindow_->isFullScreen();
+    const bool lyricFull = lyricWindow_ != nullptr && lyricWindow_->isTrulyFullScreen();
     ribbonMenu->setLyricWindowVisible(lyricVisible);
     ribbonMenu->setLyricWindowFullScreen(lyricFull);
+
+    if (bottomBar != nullptr)
+        bottomBar->setLyricScreenExpanded(lyricFull);
 
     juce::String nextSingerName;
     juce::String nextSongName;
@@ -4326,6 +4350,7 @@ void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
     if (model == nullptr)
     {
         menuBar_.reset();
+        menuBarIcon_.reset();
     }
     else
     {
@@ -4338,9 +4363,44 @@ void MainComponent::installMenuBarModel (juce::MenuBarModel* model)
         {
             menuBar_->setModel (model);
         }
+
+        if (menuBarIcon_ == nullptr)
+        {
+            auto appDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+            auto iconFile = appDir.getChildFile ("assets/images/Encore-E.png");
+            auto icon = juce::ImageFileFormat::loadFrom (iconFile);
+
+            if (icon.isValid())
+            {
+                menuBarIcon_ = std::make_unique<juce::ImageComponent>();
+                menuBarIcon_->setImage (icon, juce::RectanglePlacement::centred);
+                addAndMakeVisible (menuBarIcon_.get());
+            }
+        }
     }
     resized();
    #endif
+}
+
+//==============================================================================
+void MainComponent::setMenuBarVisible (bool visible)
+{
+   #if ! JUCE_MAC
+    if (menuBar_ != nullptr)
+        menuBar_->setVisible (visible);
+    if (menuBarIcon_ != nullptr)
+        menuBarIcon_->setVisible (visible);
+    resized();
+   #else
+    juce::ignoreUnused (visible);
+   #endif
+}
+
+//==============================================================================
+void MainComponent::setMainScreenFullscreenIcon (bool expanded)
+{
+    if (bottomBar != nullptr)
+        bottomBar->setMainScreenExpanded (expanded);
 }
 
 //==============================================================================

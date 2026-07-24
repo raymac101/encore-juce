@@ -80,6 +80,22 @@ public:
     std::function<void(int semitones)> onPitchChanged;
     std::function<void(int volumeStep)> onVolumeChanged;
 
+    /** Fired when the "expand main screen" button is clicked. MainComponent
+        has no direct handle on the app's top-level window, so this is a
+        request -- the actual toggle happens further up the call chain. */
+    std::function<void()> onExpandMainScreenClicked;
+
+    /** Fired when the "expand lyric screen" button is clicked. */
+    std::function<void()> onExpandLyricScreenClicked;
+
+    /** Update the main-screen button's icon to reflect the window's actual
+        fullscreen state. Called after any change, whether triggered by this
+        button or elsewhere (e.g. the Window menu). */
+    void setMainScreenExpanded (bool expanded);
+
+    /** Same, for the lyric (singer-facing) display window. */
+    void setLyricScreenExpanded (bool expanded);
+
     /** Re-read all translatable strings from LocalizationManager. */
     void updateAllText();
 
@@ -107,6 +123,15 @@ private:
 
     juce::Slider pitchSlider;
     juce::Slider volumeSlider;
+
+    // Stacked "expand to fullscreen" buttons, to the right of volumeSlider.
+    juce::ImageButton expandMainScreenButton  { "expandMainScreenButton" };
+    juce::ImageButton expandLyricScreenButton { "expandLyricScreenButton" };
+    juce::Image screen1ExpandImage, screen1CollapseImage;
+    juce::Image screen2ExpandImage, screen2CollapseImage;
+    bool mainScreenExpanded_ = false;
+    bool lyricScreenExpanded_ = false;
+    static void setButtonImage (juce::ImageButton& button, const juce::Image& image);
     juce::Label currentTimeLabel;
     juce::Label durationLabel;
     juce::Label pitchLabel;

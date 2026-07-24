@@ -218,6 +218,8 @@ ribbon.sfx.drum_roll=Drum Roll
 ribbon.sfx.buzzer=Buzzer
 
 # ── Application menu bar ─────────────────────────────────────────────────────
+menu.file=File
+menu.file.exit=Exit
 menu.window=Window
 menu.window.fullscreen=Fullscreen
 menu.window.reset_position=Reset Screen Position

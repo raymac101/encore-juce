@@ -68,8 +68,21 @@ public:
         otherwise centre it on the primary display with a sensible size. */
     void moveToSecondaryDisplay();
 
-    /** Enter/exit full-screen mode on the current display. */
+    /** Enter/exit true (taskbar-covering) full-screen, always on the
+        secondary display if one is connected -- see setTrueFullScreen(). */
     void toggleFullScreen();
+
+    /** True while this window is in true (taskbar-covering) fullscreen, as
+        toggled by setTrueFullScreen() below. Deliberately NOT the same
+        thing as juce::Component::isFullScreen() -- see setTrueFullScreen's
+        comment in the .cpp for why. */
+    bool isTrulyFullScreen() const noexcept { return trueFullScreen_; }
+
+    /** Enter/exit true fullscreen on the secondary display if one exists
+        (falling back to the primary display otherwise), always covering the
+        Windows taskbar. See the .cpp for why this doesn't just use
+        juce::Component::setFullScreen(). */
+    void setTrueFullScreen (bool shouldBeFullScreen);
 
     //==============================================================================
     // Persist bounds on move/resize (debounced).
@@ -88,6 +101,9 @@ private:
 
     LyricDisplayComponent* display_ = nullptr;   // owned by DocumentWindow
     std::unique_ptr<juce::KeyListener> fullScreenKeyListener_;
+
+    bool trueFullScreen_ = false;
+    juce::Rectangle<int> preFullScreenBounds_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayWindow)
 };

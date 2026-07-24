@@ -71,6 +71,26 @@ public:
         system menu bar is used instead so this is a no-op. */
     void installMenuBarModel (juce::MenuBarModel* model);
 
+    /** Show/hide the embedded menu bar row (Windows/Linux only) without
+        destroying it -- used while the main window is in true fullscreen
+        (see EncoreApplication::toggleMainFullscreen() in Main.cpp). No-op
+        on macOS, where the system menu bar is unaffected by this window's
+        fullscreen state. */
+    void setMenuBarVisible (bool visible);
+
+    /** Update the BottomBar's main-screen expand/collapse icon to match the
+        main window's actual fullscreen state. Called from Main.cpp after
+        toggling, whether triggered by the BottomBar button or the Window
+        menu's Fullscreen item, so the icon never goes stale. */
+    void setMainScreenFullscreenIcon (bool expanded);
+
+    /** Fired when the user clicks the BottomBar's "expand main screen"
+        button. MainComponent has no visibility into EncoreApplication's
+        concrete type (defined in Main.cpp), so -- same hand-off pattern as
+        onSignOutRequested below -- this is the request; Main.cpp wires it
+        to actually toggle the main window's fullscreen state. */
+    std::function<void()> onToggleMainFullscreenRequested;
+
     /** Load the active venue from Firestore and propagate its name/code to
         the queue bar and its logo + code to the lyric display window. Safe
         to call from the message thread; network work happens in background.
@@ -152,6 +172,7 @@ private:
     //==============================================================================
     // Embedded menu bar (Windows/Linux only — macOS uses the system bar).
     std::unique_ptr<juce::MenuBarComponent> menuBar_;
+    std::unique_ptr<juce::ImageComponent> menuBarIcon_;
 
     /** Resolve the .cdg file that pairs with a given audio file (typically
         a sibling with the same base name). Returns juce::File{} if none is

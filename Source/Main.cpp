@@ -143,6 +143,7 @@ public:
     //==============================================================================
     enum MenuCommand
     {
+        cmdExit                = 0x3000,
         cmdFullscreen          = 0x3001,
         cmdResetScreenPosition = 0x3002,
         cmdShowTitleBar        = 0x3003,
@@ -154,7 +155,7 @@ public:
     juce::StringArray getMenuBarNames() override
     {
         auto& lm = LocalizationManager::getInstance();
-        return { lm.getText ("menu.window"), lm.getText ("menu.local") };
+        return { lm.getText ("menu.file"), lm.getText ("menu.window"), lm.getText ("menu.local") };
     }
 
     juce::PopupMenu getMenuForIndex (int topLevelMenuIndex,
@@ -165,7 +166,11 @@ public:
 
         if (topLevelMenuIndex == 0)
         {
-            const bool isFull        = mainWindow != nullptr && mainWindow->isFullScreen();
+            menu.addItem (cmdExit, lm.getText ("menu.file.exit"));
+        }
+        else if (topLevelMenuIndex == 1)
+        {
+            const bool isFull        = mainWindow != nullptr && mainWindow->isTrulyFullScreen();
             const bool showTitleBar  = UserPreferences::getInstance().getShowTitleBar();
 
             menu.addItem (cmdFullscreen,
@@ -181,7 +186,7 @@ public:
                           /*isActive*/ true,
                           /*isTicked*/ showTitleBar);
         }
-        else if (topLevelMenuIndex == 1)
+        else if (topLevelMenuIndex == 2)
         {
             // Populate the Local menu with every supported language.
             // Cache the code list so menuItemSelected can look up by offset.
@@ -219,6 +224,7 @@ public:
 
         switch (menuItemID)
         {
+            case cmdExit:                 systemRequestedQuit();  break;
             case cmdFullscreen:          toggleMainFullscreen();  break;
             case cmdResetScreenPosition: resetScreenPositions();  break;
             case cmdShowTitleBar:        toggleTitleBars();       break;
@@ -226,16 +232,27 @@ public:
         }
     }
 
-private:
     //==============================================================================
+    /** Toggle the main window between its normal windowed state and a true,
+        taskbar-covering fullscreen. Public because it's also invoked from
+        BottomBar's "expand main screen" button via
+        MainComponent::onToggleMainFullscreenRequested (MainComponent has no
+        visibility into this class, so that callback dynamic_casts
+        JUCEApplication::getInstance() back to EncoreApplication and calls
+        this directly -- same hand-off pattern as signOutAndReturnToLogin()).
+        All the actual chrome/bounds/menu-bar-visibility work lives in
+        MainWindow::setTrueFullScreen() -- see its comment for why this
+        doesn't just use juce::Component::setFullScreen(). */
     void toggleMainFullscreen()
     {
         if (mainWindow != nullptr)
-            mainWindow->setFullScreen (! mainWindow->isFullScreen());
+            mainWindow->setTrueFullScreen (! mainWindow->isTrulyFullScreen());
 
         menuItemsChanged();
     }
 
+private:
+    //==============================================================================
     void resetScreenPositions()
     {
         // Move both windows to (0,0) with a reasonable default size. This is
@@ -243,8 +260,7 @@ private:
         // disconnecting a monitor.
         if (mainWindow != nullptr)
         {
-            if (mainWindow->isFullScreen())
-                mainWindow->setFullScreen (false);
+            mainWindow->setTrueFullScreen (false);
             mainWindow->setBounds (0, 0,
                                    juce::jmax (960,  mainWindow->getWidth()),
                                    juce::jmax (600,  mainWindow->getHeight()));
@@ -257,7 +273,7 @@ private:
             {
                 if (auto* lw = content->getLyricWindow())
                 {
-                    if (lw->isFullScreen()) lw->setFullScreen (false);
+                    lw->setTrueFullScreen (false);
                     lw->setBounds (0, 0,
                                    juce::jmax (960, lw->getWidth()),
                                    juce::jmax (540, lw->getHeight()));
@@ -409,17 +425,72 @@ public:
             setVisible (true);
         }
 
+        /** True while this window is in "true" (taskbar-covering) fullscreen,
+            as toggled by setTrueFullScreen() below. Deliberately NOT the same
+            thing as juce::Component::isFullScreen() -- see setTrueFullScreen's
+            comment for why. */
+        bool isTrulyFullScreen() const noexcept { return trueFullScreen_; }
+
+        /** Enter/exit true fullscreen: covers the entire monitor including
+            the Windows taskbar, and hides the embedded application menu bar.
+
+            juce::Component::setFullScreen() (SW_SHOWMAXIMIZED under the
+            hood) always snaps to the monitor's *work area*, which excludes
+            the taskbar, regardless of whether the window is borderless --
+            confirmed by hand-testing, not just reading the JUCE source. The
+            only way to actually cover the taskbar is to go borderless AND
+            explicitly set the window's bounds to the monitor's *total* area
+            ourselves, bypassing setFullScreen()/isFullScreen() entirely.
+            That's why this tracks its own trueFullScreen_ flag and
+            preFullScreenBounds_ rather than asking JUCE.
+
+            setUsingNativeTitleBar(false) alone is NOT enough to get a bare
+            window: it only swaps the OS-drawn title bar for JUCE's OWN
+            custom-drawn one (DocumentWindow::getTitleBarHeight(), default
+            26px) -- which still renders a title-bar strip with its own
+            minimize/maximize/close controls (yellow/green/red circles),
+            just not in the native Windows style. setTitleBarHeight(0)
+            collapses that strip to nothing so fullscreen is actually bare. */
+        void setTrueFullScreen (bool shouldBeFullScreen)
+        {
+            if (shouldBeFullScreen == trueFullScreen_)
+                return;
+
+            if (shouldBeFullScreen)
+            {
+                preFullScreenBounds_ = getBounds();
+                setUsingNativeTitleBar (false);
+                setTitleBarHeight (0);
+
+                if (auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (preFullScreenBounds_))
+                    setBounds (display->totalArea);
+            }
+            else
+            {
+                setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
+                setTitleBarHeight (26); // JUCE's own DocumentWindow default
+                setBounds (preFullScreenBounds_.isEmpty()
+                               ? juce::Rectangle<int> (0, 0, 1280, 800)
+                               : preFullScreenBounds_);
+            }
+
+            trueFullScreen_ = shouldBeFullScreen;
+
+            if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+            {
+                content->setMenuBarVisible (! trueFullScreen_);
+                content->setMainScreenFullscreenIcon (trueFullScreen_);
+            }
+        }
+
         void attachMainContent (const juce::String& venueId,
                                 bool requestInitialScan,
                                 juce::MenuBarModel* menuModel)
         {
             const auto previousBounds = getBounds();
-            const bool wasFullScreen  = isFullScreen();
 
             setContentOwned (new MainComponent(), true);
             setBounds (previousBounds);
-            if (wasFullScreen)
-                setFullScreen (true);
 
            #if ! JUCE_MAC
             if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
@@ -436,6 +507,19 @@ public:
                     if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
                         app->signOutAndReturnToLogin();
                 };
+                content->onToggleMainFullscreenRequested = []
+                {
+                    if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
+                        app->toggleMainFullscreen();
+                };
+
+                // The fresh content's menu bar starts visible (installMenuBarModel
+                // above) -- re-hide it if this window is currently in true
+                // fullscreen (this rebuild doesn't change trueFullScreen_ itself,
+                // previousBounds already preserved the correct monitor-covering
+                // bounds above).
+                content->setMenuBarVisible (! trueFullScreen_);
+                content->setMainScreenFullscreenIcon (trueFullScreen_);
             }
         }
 
@@ -470,7 +554,6 @@ public:
                 return;
 
             const auto previousBounds = getBounds();
-            const bool wasFullScreen  = isFullScreen();
 
             setContentOwned (new MainComponent(), true);
 
@@ -484,17 +567,30 @@ public:
                     if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
                         app->signOutAndReturnToLogin();
                 };
+                content->onToggleMainFullscreenRequested = []
+                {
+                    if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
+                        app->toggleMainFullscreen();
+                };
             }
 
             setBounds (previousBounds);
-            if (wasFullScreen)
-                setFullScreen (true);
 
            #if ! JUCE_MAC
-            // Re-attach the menu bar model to the fresh content component.
+            // Re-attach the menu bar model to the fresh content component, then
+            // re-hide it again if this window is currently in true fullscreen
+            // (previousBounds above already preserved the correct
+            // monitor-covering bounds; trueFullScreen_ itself is untouched by
+            // this rebuild).
             if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
+            {
                 if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
+                {
                     content->installMenuBarModel (app);
+                    content->setMenuBarVisible (! trueFullScreen_);
+                    content->setMainScreenFullscreenIcon (trueFullScreen_);
+                }
+            }
            #else
             // Ask the system menu bar to repaint with translated strings.
             if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
@@ -515,7 +611,11 @@ public:
 
         void writeBoundsNow()
         {
-            if (isFullScreen() || isMinimised()) return;
+            // trueFullScreen_ (not isFullScreen()) -- setTrueFullScreen() never
+            // calls the real juce::Component::setFullScreen(), so isFullScreen()
+            // would always read false here and let monitor-covering bounds get
+            // saved as if they were the normal windowed size.
+            if (trueFullScreen_ || isMinimised()) return;
             UserPreferences::getInstance().setWindowBounds(getBounds());
         }
 
@@ -531,6 +631,9 @@ public:
             MainWindow& owner;
         };
         std::unique_ptr<BoundsSaveTimer> boundsSaveTimer_;
+
+        bool trueFullScreen_ = false;
+        juce::Rectangle<int> preFullScreenBounds_;
 
         /* Note: Be careful if you override any DocumentWindow methods - the base
            class uses a lot of them, so by overriding you might break its functionality.

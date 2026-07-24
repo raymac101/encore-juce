@@ -259,6 +259,38 @@ void BottomBar::setupUI()
     addAndMakeVisible(pitchSlider);
     addAndMakeVisible(volumeSlider);
 
+    {
+        auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+        auto loadImg = [&appDir](const char* filename)
+        {
+            auto file = appDir.getChildFile(juce::String("assets/images/") + filename);
+            return file.existsAsFile() ? juce::ImageFileFormat::loadFrom(file) : juce::Image();
+        };
+
+        screen1ExpandImage   = loadImg("Screen-1-expand.png");
+        screen1CollapseImage = loadImg("Screen-1-collapse.png");
+        screen2ExpandImage   = loadImg("Screen-2-expand.png");
+        screen2CollapseImage = loadImg("Screen-2-collapse.png");
+    }
+
+    setButtonImage(expandMainScreenButton, screen1ExpandImage);
+    setButtonImage(expandLyricScreenButton, screen2ExpandImage);
+
+    expandMainScreenButton.onClick = [this]()
+    {
+        if (onExpandMainScreenClicked)
+            onExpandMainScreenClicked();
+    };
+
+    expandLyricScreenButton.onClick = [this]()
+    {
+        if (onExpandLyricScreenClicked)
+            onExpandLyricScreenClicked();
+    };
+
+    addAndMakeVisible(expandMainScreenButton);
+    addAndMakeVisible(expandLyricScreenButton);
+
     currentTimeLabel.setText("0:00", juce::dontSendNotification);
     currentTimeLabel.setJustificationType(juce::Justification::centredRight);
     currentTimeLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(180, 200, 225));
@@ -420,11 +452,27 @@ void BottomBar::resized()
     jumpToEndButton.setBounds(nextSlot.withSizeKeepingCentre(kTransportIconSize, kTransportIconSize));
 
     auto knobsArea = slidersArea.reduced(4, 6);
+
+    constexpr int kScreenButtonSize = 26;
+    constexpr int kScreenButtonGap = 6;
+    constexpr int kScreenButtonColumnWidth = kScreenButtonSize + 12;
+    auto screenButtonsArea = knobsArea.removeFromRight(kScreenButtonColumnWidth);
+
     auto pitchArea = knobsArea.removeFromLeft(knobsArea.getWidth() / 2).reduced(4, 0);
     auto volumeArea = knobsArea.reduced(4, 0);
 
     pitchSlider.setBounds(pitchArea.reduced(0, 2));
     volumeSlider.setBounds(volumeArea.reduced(0, 2));
+
+    // Stack the two screen-expand buttons vertically, centred in their column.
+    auto buttonsColumn = screenButtonsArea.withSizeKeepingCentre(
+        kScreenButtonSize, kScreenButtonSize * 2 + kScreenButtonGap);
+    auto topButtonSlot = buttonsColumn.removeFromTop(kScreenButtonSize);
+    buttonsColumn.removeFromTop(kScreenButtonGap);
+    auto bottomButtonSlot = buttonsColumn;
+
+    expandMainScreenButton.setBounds(topButtonSlot);
+    expandLyricScreenButton.setBounds(bottomButtonSlot);
 
     repaint(waveformArea);
 }
@@ -878,4 +926,27 @@ juce::Rectangle<int> BottomBar::getSlidersArea() const
 {
     auto bounds = getLocalBounds();
     return bounds.removeFromRight(static_cast<int>(getWidth() * 0.24f));
+}
+
+void BottomBar::setButtonImage(juce::ImageButton& button, const juce::Image& image)
+{
+    if (! image.isValid())
+        return;
+
+    button.setImages(false, true, true,
+                     image, 1.0f, juce::Colours::transparentBlack,
+                     image, 0.8f, juce::Colours::transparentBlack,
+                     image, 0.6f, juce::Colours::transparentBlack);
+}
+
+void BottomBar::setMainScreenExpanded(bool expanded)
+{
+    mainScreenExpanded_ = expanded;
+    setButtonImage(expandMainScreenButton, expanded ? screen1CollapseImage : screen1ExpandImage);
+}
+
+void BottomBar::setLyricScreenExpanded(bool expanded)
+{
+    lyricScreenExpanded_ = expanded;
+    setButtonImage(expandLyricScreenButton, expanded ? screen2CollapseImage : screen2ExpandImage);
 }

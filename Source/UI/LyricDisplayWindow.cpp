@@ -43,9 +43,9 @@ namespace
                 owner_.toggleFullScreen();
                 return true;
             }
-            if (key == juce::KeyPress::escapeKey && owner_.isFullScreen())
+            if (key == juce::KeyPress::escapeKey && owner_.isTrulyFullScreen())
             {
-                owner_.setFullScreen (false);
+                owner_.setTrueFullScreen (false);
                 return true;
             }
             return false;
@@ -54,6 +54,21 @@ namespace
     private:
         LyricDisplayWindow& owner_;
     };
+
+    // Prefer the first non-primary ("secondary") display if one is connected,
+    // otherwise fall back to the primary display. Returns nullptr only if
+    // there are no connected displays at all.
+    const juce::Displays::Display* getSecondaryOrPrimaryDisplay()
+    {
+        const auto& displays = juce::Desktop::getInstance().getDisplays();
+        const auto* primary  = displays.getPrimaryDisplay();
+
+        for (const auto& d : displays.displays)
+            if (&d != primary)
+                return &d;
+
+        return primary;
+    }
 }
 
 //==============================================================================
@@ -216,30 +231,18 @@ void LyricDisplayWindow::moveToSecondaryDisplay()
         setBounds (target);
 
        #if ! (JUCE_IOS || JUCE_ANDROID)
-        if (savedFullScreen) setFullScreen (true);
+        if (savedFullScreen) setTrueFullScreen (true);
        #endif
         return;
     }
 
-    // 2) Otherwise, default to full-screen on the first non-primary display.
-    const auto& displays = juce::Desktop::getInstance().getDisplays();
-    const auto* primary  = displays.getPrimaryDisplay();
-
-    const juce::Displays::Display* target = nullptr;
-    for (const auto& d : displays.displays)
-    {
-        if (&d != primary)
-        {
-            target = &d;
-            break;
-        }
-    }
-
-    if (target != nullptr)
+    // 2) Otherwise, default to full-screen on the secondary display (or the
+    //    primary one, if that's all that's connected).
+    if (const auto* target = getSecondaryOrPrimaryDisplay())
     {
         setBounds (target->userArea);
        #if ! (JUCE_IOS || JUCE_ANDROID)
-        setFullScreen (true);
+        setTrueFullScreen (true);
        #endif
     }
     else
@@ -250,8 +253,60 @@ void LyricDisplayWindow::moveToSecondaryDisplay()
 
 void LyricDisplayWindow::toggleFullScreen()
 {
-    setFullScreen (! isFullScreen());
-    UserPreferences::getInstance().setLyricWindowFullScreen (isFullScreen());
+    setTrueFullScreen (! trueFullScreen_);
+}
+
+void LyricDisplayWindow::setTrueFullScreen (bool shouldBeFullScreen)
+{
+    // juce::Component::setFullScreen() (SW_SHOWMAXIMIZED under the hood)
+    // always snaps to the monitor's *work area*, which excludes the
+    // taskbar, regardless of border style -- confirmed by hand-testing, not
+    // just reading the JUCE source. The only way to actually cover the
+    // taskbar is to go borderless AND explicitly set bounds to the
+    // monitor's *total* area ourselves, bypassing
+    // setFullScreen()/isFullScreen() entirely. That's also what lets this
+    // pin the window to a specific display (always the secondary one if
+    // present) on both entry AND exit, rather than trusting wherever JUCE's
+    // own pre-fullscreen-bounds memory points -- which knows nothing about
+    // "always prefer the secondary display" and can drift the window back
+    // to the primary display on exit.
+    //
+    // setUsingNativeTitleBar(false) alone is NOT enough to get a bare
+    // window: it only swaps the OS-drawn title bar for JUCE's OWN
+    // custom-drawn one (DocumentWindow::getTitleBarHeight(), default 26px)
+    // -- which still renders a title-bar strip with its own
+    // minimize/maximize/close controls (yellow/green/red circles), just
+    // not in the native Windows style. setTitleBarHeight(0) collapses that
+    // strip to nothing so fullscreen is actually bare.
+    if (shouldBeFullScreen == trueFullScreen_)
+        return;
+
+    const auto* display = getSecondaryOrPrimaryDisplay();
+
+    if (shouldBeFullScreen)
+    {
+        preFullScreenBounds_ = getBounds();
+        setUsingNativeTitleBar (false);
+        setTitleBarHeight (0);
+
+        if (display != nullptr)
+            setBounds (display->totalArea);
+    }
+    else
+    {
+        setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
+        setTitleBarHeight (26); // JUCE's own DocumentWindow default
+
+        auto restored = preFullScreenBounds_;
+        if (display != nullptr
+            && (restored.isEmpty() || ! display->totalArea.contains (restored.getCentre())))
+            restored = display->userArea.reduced (80);
+
+        setBounds (restored.isEmpty() ? juce::Rectangle<int> (0, 0, 960, 540) : restored);
+    }
+
+    trueFullScreen_ = shouldBeFullScreen;
+    UserPreferences::getInstance().setLyricWindowFullScreen (trueFullScreen_);
     scheduleBoundsSave();
 }
 
@@ -279,9 +334,11 @@ void LyricDisplayWindow::writeBoundsNow()
 {
     // Don't overwrite the remembered windowed bounds while full-screen or
     // minimised — the OS-reported rect would clobber the user's choice.
-    if (isFullScreen() || isMinimised())
+    // trueFullScreen_ (not isFullScreen()) -- setTrueFullScreen() never
+    // calls the real juce::Component::setFullScreen().
+    if (trueFullScreen_ || isMinimised())
     {
-        UserPreferences::getInstance().setLyricWindowFullScreen (isFullScreen());
+        UserPreferences::getInstance().setLyricWindowFullScreen (trueFullScreen_);
         return;
     }
 
