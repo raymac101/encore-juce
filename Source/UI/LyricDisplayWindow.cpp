@@ -278,11 +278,55 @@ void LyricDisplayWindow::setTrueFullScreen (bool shouldBeFullScreen)
     // minimize/maximize/close controls (yellow/green/red circles), just
     // not in the native Windows style. setTitleBarHeight(0) collapses that
     // strip to nothing so fullscreen is actually bare.
+    //
+    // macOS is a genuinely different path, not just an addition to the
+    // above -- confirmed by hand-testing: a borderless window resized to
+    // the display's full bounds does NOT actually get composited over the
+    // area the menu bar occupies (that layer sits above ordinary windows
+    // regardless of frame), even with the menu bar hidden via
+    // NSApplicationPresentationOptions. Real native fullscreen
+    // ([NSWindow toggleFullScreen:], the same call the window's own green
+    // button makes) does cover it correctly. JUCE's kiosk-mode
+    // implementation (juce_NSViewComponentPeer_mac.mm) only takes that
+    // native-fullscreen branch when the peer still has a native title bar
+    // (hasNativeTitleBar()) -- otherwise it falls back to the borderless
+    // branch that doesn't work here. So on macOS we deliberately keep the
+    // native title bar ON and let kiosk mode drive real fullscreen, instead
+    // of going borderless like Windows/Linux do below.
     if (shouldBeFullScreen == trueFullScreen_)
         return;
 
     const auto* display = getSecondaryOrPrimaryDisplay();
 
+   #if JUCE_MAC
+    if (shouldBeFullScreen)
+    {
+        preFullScreenBounds_ = getBounds();
+
+        // Native fullscreen transitions on whichever screen the window is
+        // currently mostly on -- position it on the target (secondary, if
+        // present) display first so it transitions there, not wherever it
+        // happened to be sitting.
+        if (display != nullptr)
+            setBounds (display->userArea.reduced (80));
+
+        setUsingNativeTitleBar (true);
+        juce::Desktop::getInstance().setKioskModeComponent (this, false);
+    }
+    else
+    {
+        juce::Desktop::getInstance().setKioskModeComponent (nullptr, false);
+
+        setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
+
+        auto restored = preFullScreenBounds_;
+        if (display != nullptr
+            && (restored.isEmpty() || ! display->totalArea.contains (restored.getCentre())))
+            restored = display->userArea.reduced (80);
+
+        setBounds (restored.isEmpty() ? juce::Rectangle<int> (0, 0, 960, 540) : restored);
+    }
+   #else
     if (shouldBeFullScreen)
     {
         preFullScreenBounds_ = getBounds();
@@ -304,6 +348,7 @@ void LyricDisplayWindow::setTrueFullScreen (bool shouldBeFullScreen)
 
         setBounds (restored.isEmpty() ? juce::Rectangle<int> (0, 0, 960, 540) : restored);
     }
+   #endif
 
     trueFullScreen_ = shouldBeFullScreen;
     UserPreferences::getInstance().setLyricWindowFullScreen (trueFullScreen_);

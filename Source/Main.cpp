@@ -450,12 +450,42 @@ public:
             26px) -- which still renders a title-bar strip with its own
             minimize/maximize/close controls (yellow/green/red circles),
             just not in the native Windows style. setTitleBarHeight(0)
-            collapses that strip to nothing so fullscreen is actually bare. */
+            collapses that strip to nothing so fullscreen is actually bare.
+
+            macOS is a genuinely different path, not just this window's copy
+            of the above -- confirmed by hand-testing on LyricDisplayWindow
+            (same underlying problem there): a borderless window resized to
+            the display's full bounds does NOT actually get composited over
+            the area the menu bar occupies, even with the menu bar hidden
+            via NSApplicationPresentationOptions -- that layer sits above
+            ordinary windows regardless of frame. Real native fullscreen
+            ([NSWindow toggleFullScreen:], the same call the window's own
+            green button makes) does cover it correctly. JUCE's kiosk-mode
+            implementation only takes that native-fullscreen branch when the
+            peer still has a native title bar, so macOS deliberately keeps
+            the native title bar ON and lets kiosk mode drive real
+            fullscreen instead of going borderless like Windows/Linux do. */
         void setTrueFullScreen (bool shouldBeFullScreen)
         {
             if (shouldBeFullScreen == trueFullScreen_)
                 return;
 
+           #if JUCE_MAC
+            if (shouldBeFullScreen)
+            {
+                preFullScreenBounds_ = getBounds();
+                setUsingNativeTitleBar (true);
+                juce::Desktop::getInstance().setKioskModeComponent (this, false);
+            }
+            else
+            {
+                juce::Desktop::getInstance().setKioskModeComponent (nullptr, false);
+                setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
+                setBounds (preFullScreenBounds_.isEmpty()
+                               ? juce::Rectangle<int> (0, 0, 1280, 800)
+                               : preFullScreenBounds_);
+            }
+           #else
             if (shouldBeFullScreen)
             {
                 preFullScreenBounds_ = getBounds();
@@ -473,6 +503,7 @@ public:
                                ? juce::Rectangle<int> (0, 0, 1280, 800)
                                : preFullScreenBounds_);
             }
+           #endif
 
             trueFullScreen_ = shouldBeFullScreen;
 
