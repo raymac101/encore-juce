@@ -550,7 +550,10 @@ void VenueService::uploadLogo(const juce::String& venueId, const juce::File& log
         }
 
         const auto ext = logoFile.getFileExtension().toLowerCase();
-        const auto objectName = "venues/" + venueId + "/artwork/logo-"
+        // Firebase Storage's top-level folder for venues is "Venues" (capital
+        // V) -- distinct from Firestore's lowercase "venues" collection,
+        // which this same function also PATCHes further down.
+        const auto objectName = "Venues/" + venueId + "/artwork/logo-"
                                 + juce::String(juce::Time::currentTimeMillis()) + ext;
         const auto bucket = FirebaseConfig::storageBucket;
         auto url = juce::URL("https://firebasestorage.googleapis.com/v0/b/" + bucket

@@ -230,6 +230,12 @@ private:
     bool audioStartupInProgress_ = false;
     bool audioStartupComplete_ = false;
 
+    // Non-empty while a Library scan/metadata/upload phase is in progress
+    // ("Scanning Folders...", "Uploading Songbook...", etc.) -- takes
+    // priority over the normal audio.feedback.* text in
+    // updateAudioStatusIndicator() until LibraryPage reports it's done.
+    juce::String librarySyncStatusMessage_;
+
     juce::String activeVenueId_;
     juce::String activeVenueName_;
     bool queueExpanded_ = false;
@@ -318,6 +324,7 @@ private:
     void updateConnectionStatus();
     void updateDebugInfo();
     void updateAudioStatusIndicator();
+    void setLibrarySyncStatusMessage(const juce::String& message);
     void runSongbookHealthCheckIfReady();
     void showSongUnavailableMessage(const QueueItem& item);
     void showSongLoadFailedMessage(const juce::String& songName,

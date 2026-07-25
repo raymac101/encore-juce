@@ -166,6 +166,12 @@ public:
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */
     std::function<void(const VenueItem&)> onVenueSettingsChanged;
 
+    /** Fired with a short phase description during a Library scan/metadata/
+        upload sequence ("Scanning Folders...", "Uploading Songbook...", etc.),
+        and with an empty string once nothing is in progress. MainComponent
+        forwards this to the BottomBar status area. */
+    std::function<void(const juce::String&)> onLibraryStatusMessage;
+
     /** Fired when the user presses Add to Queue / Play Next / Play Now in the
         Song Selection dialog (or cancels it). Wire this up in the app shell
         to drive the queue / player. */

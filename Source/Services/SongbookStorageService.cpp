@@ -20,7 +20,9 @@ SongbookStorageService& SongbookStorageService::getInstance()
 
 juce::String SongbookStorageService::storageObjectPath(const juce::String& venueId)
 {
-    return "venues/" + venueId + "/songbook.json";
+    // Firebase Storage's top-level folder for venues is "Venues" (capital V)
+    // -- distinct from Firestore's lowercase "venues" collection.
+    return "Venues/" + venueId + "/songbook.json";
 }
 
 //==============================================================================

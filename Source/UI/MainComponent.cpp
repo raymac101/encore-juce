@@ -1500,6 +1500,13 @@ void MainComponent::setupUI()
                 });
         };
 
+    // Reflect Library scan/metadata/upload progress in the BottomBar's
+    // status area (where "Audio Ready" normally shows).
+    mainArea->onLibraryStatusMessage = [this](const juce::String& msg)
+    {
+        setLibrarySyncStatusMessage(msg);
+    };
+
     // Push settings-page edits back to Firestore. On success the queue bar
     // and lyric display also pick up any name / code changes.
     mainArea->onVenueSettingsChanged = [this](const VenueItem& updated)
@@ -3137,6 +3144,14 @@ void MainComponent::updateAudioStatusIndicator()
     if (bottomBar == nullptr)
         return;
 
+    // A Library scan/metadata/upload phase in progress takes priority over
+    // the normal audio-engine status text.
+    if (librarySyncStatusMessage_.isNotEmpty())
+    {
+        bottomBar->setWaveformStatusMessage(librarySyncStatusMessage_);
+        return;
+    }
+
     auto& lm = LocalizationManager::getInstance();
     juce::String text;
 
@@ -3154,6 +3169,12 @@ void MainComponent::updateAudioStatusIndicator()
     }
 
     bottomBar->setWaveformStatusMessage(text);
+}
+
+void MainComponent::setLibrarySyncStatusMessage(const juce::String& message)
+{
+    librarySyncStatusMessage_ = message;
+    updateAudioStatusIndicator();
 }
 
 void MainComponent::updateConnectionStatus()

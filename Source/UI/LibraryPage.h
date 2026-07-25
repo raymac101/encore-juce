@@ -58,6 +58,14 @@ public:
     std::function<void(const std::vector<CdgSong>&)> onSongbookChanged;
 
     //==========================================================================
+    // Callback — fired with a short phase description ("Scanning Folders...",
+    // "Adding Meta Data...", "Uploading Songbook...", etc.) during a scan/
+    // metadata/upload sequence, and with an empty string when there's
+    // nothing in progress. MainComponent forwards this to the BottomBar's
+    // status area (where "Audio Ready" normally shows).
+    std::function<void(juce::String)> onStatusMessage;
+
+    //==========================================================================
     // Read-only access to the currently loaded songs
     const std::vector<CdgSong>& getSongs() const { return songs_; }
 
@@ -134,6 +142,12 @@ private:
     // thread). Use this instead of calling scanner_.saveSongbook() directly.
     void persistSongbook();
 
+    // Fires onStatusMessage (if set) and bumps statusMessageToken_, so a
+    // stale delayed-clear callback from an earlier phase (see persistSongbook)
+    // can detect it's no longer current and no-op instead of wiping out a
+    // newer message.
+    void reportStatus(const juce::String& message);
+
     void refreshStats();
     void setProgressVisible(bool visible);
     void setScanningState(bool scanning);
@@ -193,6 +207,7 @@ private:
     bool                          lastScanWasAppend_ = false;
     int                           globalScanTaskId_ = 0;
     juce::String                  activeVenueId_;
+    int                           statusMessageToken_ = 0;
 
     // FileChooser must outlive the callback lambda
     std::shared_ptr<juce::FileChooser> fileChooser_;

@@ -86,6 +86,10 @@ MainArea::MainArea()
             if (homePage)   homePage->setSongsFromLibrary(songs);
         };
 
+        libraryPage->onStatusMessage = [this](const juce::String& msg) {
+            if (onLibraryStatusMessage) onLibraryStatusMessage(msg);
+        };
+
         // Seed Search and Home pages with whatever is already on disk
         if (searchPage)
             searchPage->setSongs(libraryPage->getSongs());

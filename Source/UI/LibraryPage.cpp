@@ -209,6 +209,7 @@ LibraryPage::LibraryPage()
     scanner_.onError = [this](juce::String err) {
         setScanningState(false);
         showMessage(err, true);
+        reportStatus({});
     };
 
     //--------------------------------------------------------------------------
@@ -239,17 +240,63 @@ LibraryPage::LibraryPage()
 }
 
 //==============================================================================
+void LibraryPage::reportStatus(const juce::String& message)
+{
+    // persistSongbook() (and hence this) can be called from background
+    // threads (e.g. onGetMetaData's juce::Thread::launch), but onStatusMessage
+    // ultimately mutates BottomBar UI state, so always marshal onto the
+    // message thread. The token bump itself happens synchronously so an
+    // immediately-following call from any thread still invalidates any
+    // already-queued stale callback.
+    ++statusMessageToken_;
+    if (! onStatusMessage)
+        return;
+
+    if (juce::MessageManager::getInstance()->isThisTheMessageThread())
+    {
+        onStatusMessage(message);
+    }
+    else
+    {
+        juce::Component::SafePointer<LibraryPage> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, message]
+        {
+            if (safeThis != nullptr && safeThis->onStatusMessage)
+                safeThis->onStatusMessage(message);
+        });
+    }
+}
+
+//==============================================================================
 void LibraryPage::persistSongbook()
 {
     scanner_.saveSongbook(songs_);
 
-    if (activeVenueId_.isNotEmpty())
-        SongbookStorageService::getInstance().uploadLocalSongbook(activeVenueId_,
-            [](bool ok, juce::String error)
+    if (activeVenueId_.isEmpty())
+        return;
+
+    reportStatus("Uploading Songbook...");
+    const int myToken = statusMessageToken_;
+
+    juce::Component::SafePointer<LibraryPage> safeThis(this);
+    SongbookStorageService::getInstance().uploadLocalSongbook(activeVenueId_,
+        [safeThis, myToken](bool ok, juce::String error)
+        {
+            if (! ok)
+                DBG ("[Songbook] Storage upload failed: " << error);
+
+            if (safeThis == nullptr || safeThis->statusMessageToken_ != myToken)
+                return;
+
+            safeThis->reportStatus(ok ? "Song Library Updated!" : "Songbook Sync Failed");
+            const int doneToken = safeThis->statusMessageToken_;
+
+            juce::Timer::callAfterDelay(2500, [safeThis, doneToken]
             {
-                if (! ok)
-                    DBG ("[Songbook] Storage upload failed: " << error);
+                if (safeThis != nullptr && safeThis->statusMessageToken_ == doneToken)
+                    safeThis->reportStatus({});
             });
+        });
 }
 
 //==============================================================================
@@ -613,6 +660,8 @@ void LibraryPage::onAddSongs()
 {
     if (songIndices.empty())
         return;
+
+    reportStatus("Adding Meta Data...");
 
     // Show an immediate wait state while we build/check local metadata.
     setScanningState(true);
@@ -1046,6 +1095,7 @@ void LibraryPage::startFolderChooser(bool appendMode)
             lastScanWasAppend_ = appendMode;
             setScanningState(true);
             progressValue_ = -1.0; // indeterminate while collecting files
+            reportStatus("Scanning Folders...");
 
             if (appendMode)
                 scanner_.startAppendScan(result, songs_);
@@ -1069,6 +1119,7 @@ void LibraryPage::onGetMetaData()
     progressValue_ = -1.0;
     progressBar_->repaint();
     progressLabel_->setText(LocalizationManager::getInstance().getText("library.applying_metadata"), juce::dontSendNotification);
+    reportStatus("Adding Meta Data...");
 
     // Run on a background thread to avoid blocking the UI
     juce::Thread::launch([this]() {
