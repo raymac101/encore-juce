@@ -11,6 +11,8 @@
 */
 
 #include "QueueBar.h"
+#include "../Services/ImageCache.h"
+#include "../Services/QueueRotation.h"
 #include <cmath>
 
 //==============================================================================
@@ -25,74 +27,9 @@ static juce::String getMicIcons(int count)
 }
 
 //==============================================================================
-// Resolve a Singers/QueueItem.avatar string (typically something like
-// "assets/icons/1064391.png" from the Angular client) to a concrete file in
-// the JUCE app bundle's assets folder. Tries `assets/icon/<basename>` first
-// (this repo uses singular "icon"), then the literal relative path.
-static juce::Image loadAvatarFromAssets(const juce::String& avatarPath)
-{
-    if (avatarPath.isEmpty())
-        return {};
-
-    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-                      .getParentDirectory();
-
-    // 1) Try assets/icon/<basename>
-    auto baseName = avatarPath.fromLastOccurrenceOf("/", false, false);
-    if (baseName.isEmpty())
-        baseName = avatarPath;
-    auto candidate1 = appDir.getChildFile("assets/icon/" + baseName);
-    if (candidate1.existsAsFile())
-        return juce::ImageFileFormat::loadFrom(candidate1);
-
-    // 2) Try the literal relative path (in case it already begins with assets/)
-    auto candidate2 = appDir.getChildFile(avatarPath);
-    if (candidate2.existsAsFile())
-        return juce::ImageFileFormat::loadFrom(candidate2);
-
-    // 3) Try assets/<avatarPath> if the path was given without the "assets/"
-    auto candidate3 = appDir.getChildFile("assets/" + avatarPath);
-    if (candidate3.existsAsFile())
-        return juce::ImageFileFormat::loadFrom(candidate3);
-
-    return {};
-}
-
-static int findHostIndex(const std::vector<Singers>& singers)
-{
-    for (int i = 0; i < (int) singers.size(); ++i)
-        if (singers[(size_t) i].isHost)
-            return i;
-    return -1;
-}
-
-// Keep queue order contiguous and make the host the anchor at the start of
-// the round by assigning rotationOrder from the singer immediately after host.
-static void reindexQueueWithHostRoundAnchor(std::vector<Singers>& singers)
-{
-    for (int i = 0; i < (int) singers.size(); ++i)
-        singers[(size_t) i].order = i;
-
-    const int hostIndex = findHostIndex(singers);
-    if (hostIndex < 0)
-    {
-        int rot = 0;
-        for (int i = 0; i < (int) singers.size(); ++i)
-            singers[(size_t) i].rotationOrder = rot++;
-        return;
-    }
-
-    singers[(size_t) hostIndex].rotationOrder = -1;
-
-    int rot = 0;
-    const int n = (int) singers.size();
-    for (int step = 1; step < n; ++step)
-    {
-        const int i = (hostIndex + step) % n;
-        if (! singers[(size_t) i].isHost)
-            singers[(size_t) i].rotationOrder = rot++;
-    }
-}
+// Avatar string -> image resolution (preset:<id>, legacy relative path, or
+// a Firebase Storage URL for a user-uploaded photo) is centralized in
+// ArtworkCache::resolveAvatar().
 
 //==============================================================================
 // Loads a <symbol> from assets/images/sprite.svg and wraps it in a standalone
@@ -1111,7 +1048,16 @@ void QueueBar::setNowPlaying(const Singers& singer)
     currentSinger = singer;
     nowPlayingCard->hasSinger = true;
     nowPlayingCard->singer = singer;
-    nowPlayingCard->avatarImage = loadAvatarFromAssets(juce::String(singer.avatar));
+
+    const auto avatarField = juce::String(singer.avatar);
+    nowPlayingCard->avatarImage = ArtworkCache::getInstance().resolveAvatar(avatarField,
+        [safe = juce::Component::SafePointer<QueueBar>(this), avatarField]
+        {
+            if (safe == nullptr || ! safe->hasCurrentSinger)
+                return;
+            safe->nowPlayingCard->avatarImage = ArtworkCache::getInstance().resolveAvatar(avatarField);
+            safe->nowPlayingCard->repaint();
+        });
     nowPlayingCard->repaint();
 }
 
@@ -1169,7 +1115,7 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
 
-    const int hostIndex = findHostIndex(singers);
+    const int hostIndex = QueueRotation::findHostIndex(singers);
 
     // Host cannot be moved. Non-host singers also cannot be dropped into the
     // host slot or across the host boundary (keeps round anchor stable).
@@ -1181,11 +1127,13 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
         if (fromIndex > hostIndex && toIndex < hostIndex) return;
     }
 
-    auto singer = singers[(size_t)fromIndex];
-    singers.erase(singers.begin() + fromIndex);
-    singers.insert(singers.begin() + toIndex, singer);
-
-    reindexQueueWithHostRoundAnchor(singers);
+    // `singers` here is the currently DISPLAYED (anchor-rotated) order, not
+    // the stable RR -- remapFromDisplayDrag splices the drag within it and
+    // reconstructs the canonical RR (host-first) + the (possibly unchanged)
+    // anchor, then we re-derive the display from that.
+    auto remap = QueueRotation::remapFromDisplayDrag(singers, fromIndex, toIndex);
+    QueueRotation::stampDerivedRanks(remap.newRR, remap.newAnchorId);
+    singers = QueueRotation::deriveDisplayQueue(remap.newRR, remap.newAnchorId);
 
     rebuildSingerRows();
     resized();
@@ -1301,7 +1249,20 @@ void QueueBar::rebuildSingerRows()
         row->isFirst = (! row->isHost) && nonHostCount > 0
                      && (singers[(size_t)i].rotationOrder == firstRotation);
         row->isLast  = (! row->isHost) && (i == roundTailIndex);
-        row->avatarImage = loadAvatarFromAssets(juce::String(singers[(size_t)i].avatar));
+        row->avatarImage = ArtworkCache::getInstance().resolveAvatar(juce::String(singers[(size_t)i].avatar),
+            [safe = juce::Component::SafePointer<QueueBar>(this)]
+            {
+                // Rows are fully recreated on every rebuild, so the safest way
+                // to pick up a just-finished avatar download is to rebuild
+                // again (ArtworkCache has it cached now, so this resolves
+                // synchronously) rather than reach into a row that may
+                // already have been replaced.
+                if (safe == nullptr)
+                    return;
+                safe->rebuildSingerRows();
+                safe->resized();
+                safe->repaint();
+            });
 
         row->isNewlyAdded = singers[(size_t)i].isNewlyAdded;
 
@@ -1473,7 +1434,7 @@ void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
             ++toIndex;
     }
 
-    const int hostIndex = findHostIndex(owner.singers);
+    const int hostIndex = QueueRotation::findHostIndex(owner.singers);
     if (hostIndex >= 0)
     {
         if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
@@ -1529,7 +1490,7 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 
         int toIndex = col * rowsPerColumn + row;
 
-        const int hostIndex = findHostIndex(owner.singers);
+        const int hostIndex = QueueRotation::findHostIndex(owner.singers);
         if (hostIndex >= 0)
         {
             if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
@@ -1562,7 +1523,7 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
             ++toIndex;
     }
 
-    const int hostIndex = findHostIndex(owner.singers);
+    const int hostIndex = QueueRotation::findHostIndex(owner.singers);
     if (hostIndex >= 0)
     {
         if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);

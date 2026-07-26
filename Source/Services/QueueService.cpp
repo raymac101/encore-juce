@@ -201,22 +201,22 @@ namespace
             all.push_back(std::move(s));
         }
 
-        // Sort by persisted order, with deterministic tie-breakers so
-        // duplicate/missing order values do not reshuffle singers on restart.
+        // Sort by stable RR order (host always first, regardless of its
+        // stored order value -- heals any historical data where that wasn't
+        // enforced), with deterministic tie-breakers so duplicate/missing
+        // order values do not reshuffle singers on restart. `order` is the
+        // persisted Round Robin position and must NOT be rewritten here --
+        // only join/removal/manual-reorder are allowed to change it (see
+        // QueueRotation.h). Callers derive the rotated display queue (and
+        // restamp `rotationOrder`) themselves via QueueRotation.
         std::sort(all.begin(), all.end(),
                   [](const Singers& a, const Singers& b)
                   {
+                      if (a.isHost != b.isHost) return a.isHost;
                       if (a.order != b.order) return a.order < b.order;
                       if (a.rotationOrder != b.rotationOrder) return a.rotationOrder < b.rotationOrder;
                       return juce::String(a.name).toLowerCase() < juce::String(b.name).toLowerCase();
                   });
-
-        // Keep queue order contiguous for deterministic rendering, but preserve
-        // persisted round order from Firestore. Rewriting rotationOrder here
-        // would destroy the round anchor and move host placement to top-of-queue
-        // on app restart.
-        for (size_t i = 0; i < all.size(); ++i)
-            all[i].order = (int) i;
 
         int nowIdx = -1;
         for (size_t i = 0; i < all.size(); ++i)
@@ -568,8 +568,12 @@ void QueueService::appendSong(const juce::String& venueId,
         fields->setProperty("profileId",      FirestoreClient::stringValue(storedProfileId));
         fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
         fields->setProperty("status",         FirestoreClient::stringValue("queued"));
+        // `order` is the stable RR position -- appended to the bottom.
+        // `rotationOrder` is a derived display-rank cache (restamped by
+        // QueueRotation::stampDerivedRanks() the next time anything
+        // reloads/reorders); it must NOT be hardcoded to the new RR
+        // position here, or a new singer would appear to BE the anchor.
         fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
-        fields->setProperty("rotationOrder",  FirestoreClient::integerValue(maxOrder + 1));
         fields->setProperty("strikes",        FirestoreClient::integerValue(0));
         fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
         fields->setProperty("songs",          songsArrayValue(initialSongs));
@@ -663,26 +667,33 @@ void QueueService::removeSong(const juce::String& venueId,
 }
 
 void QueueService::deleteSinger(const juce::String& venueId,
-                                const juce::String& singerName,
+                                const juce::String& singerNameOrDocId,
                                 WriteCallback onDone)
 {
-    if (venueId.isEmpty() || singerName.isEmpty())
+    if (venueId.isEmpty() || singerNameOrDocId.isEmpty())
     {
         if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "missing arg"); });
         return;
     }
 
-    juce::Thread::launch([this, venueId, singerName, onDone = std::move(onDone)]()
+    juce::Thread::launch([this, venueId, singerNameOrDocId, onDone = std::move(onDone)]()
     {
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
-        auto found = findSingerByName(docs, singerName);
+        // Callers pass either the singer's Firestore doc ID (auth singers --
+        // e.g. MainComponent::onRemoveSinger) or their display name (e.g.
+        // the strike-out removal in queueAndLoadNextSingerSong). Try doc ID
+        // first since a name can legitimately collide with another field,
+        // but a doc ID match is unambiguous.
+        auto found = findSingerByDocId(docs, singerNameOrDocId);
+        if (found.docName.isEmpty())
+            found = findSingerByName(docs, singerNameOrDocId);
         if (found.docName.isEmpty())
         {
-            DBG ("[Queue] deleteSinger: singer '" << singerName << "' not found");
+            DBG ("[Queue] deleteSinger: singer '" << singerNameOrDocId << "' not found");
             if (onDone)
                 juce::MessageManager::callAsync([onDone] { onDone(false, "singer not found"); });
             return;
@@ -691,7 +702,7 @@ void QueueService::deleteSinger(const juce::String& venueId,
         const auto rel = relPathFromDocName(found.docName);
         const bool ok = FirestoreClient::getInstance().deleteDocument(rel);
 
-        DBG ("[Queue] deleteSinger singer='" << singerName
+        DBG ("[Queue] deleteSinger singer='" << singerNameOrDocId
              << "' ok=" << (ok ? 1 : 0));
 
         if (onDone)

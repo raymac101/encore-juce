@@ -162,32 +162,9 @@ namespace
         return out;
     }
 
-    static juce::Image loadAvatarFromAssets (const juce::String& avatarPath)
-    {
-        if (avatarPath.isEmpty())
-            return {};
-
-        auto appDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-                          .getParentDirectory();
-
-        auto baseName = avatarPath.fromLastOccurrenceOf ("/", false, false);
-        if (baseName.isEmpty())
-            baseName = avatarPath;
-
-        auto candidate1 = appDir.getChildFile ("assets/icon/" + baseName);
-        if (candidate1.existsAsFile())
-            return juce::ImageFileFormat::loadFrom (candidate1);
-
-        auto candidate2 = appDir.getChildFile (avatarPath);
-        if (candidate2.existsAsFile())
-            return juce::ImageFileFormat::loadFrom (candidate2);
-
-        auto candidate3 = appDir.getChildFile ("assets/" + avatarPath);
-        if (candidate3.existsAsFile())
-            return juce::ImageFileFormat::loadFrom (candidate3);
-
-        return {};
-    }
+    // Avatar string -> image resolution (preset:<id>, legacy relative path,
+    // or a Firebase Storage URL for a user-uploaded photo) is centralized in
+    // ArtworkCache::resolveAvatar().
 }
 
 //==============================================================================
@@ -268,7 +245,7 @@ void LyricDisplayComponent::setQueuePreview (const std::vector<QueuePreviewEntry
         if (key.empty() || queueAvatarCache_.find (key) != queueAvatarCache_.end())
             continue;
 
-        queueAvatarCache_[key] = loadAvatarFromAssets (entry.avatarPath);
+        resolveAndCacheAvatar (entry.avatarPath);
     }
     repaint();
 }
@@ -281,6 +258,11 @@ void LyricDisplayComponent::setLowerThirdNextUpSinger (const juce::String& singe
 
 juce::Image LyricDisplayComponent::getQueuePreviewAvatar (const juce::String& avatarPath)
 {
+    return resolveAndCacheAvatar (avatarPath);
+}
+
+juce::Image LyricDisplayComponent::resolveAndCacheAvatar (const juce::String& avatarPath)
+{
     const auto key = avatarPath.trim().toStdString();
     if (key.empty())
         return {};
@@ -289,7 +271,15 @@ juce::Image LyricDisplayComponent::getQueuePreviewAvatar (const juce::String& av
     if (cached != queueAvatarCache_.end())
         return cached->second;
 
-    auto image = loadAvatarFromAssets (avatarPath);
+    auto image = ArtworkCache::getInstance().resolveAvatar (avatarPath,
+        [safe = juce::Component::SafePointer<LyricDisplayComponent> (this), avatarPath]
+        {
+            if (safe == nullptr)
+                return;
+            const auto k = avatarPath.trim().toStdString();
+            safe->queueAvatarCache_[k] = ArtworkCache::getInstance().resolveAvatar (avatarPath);
+            safe->repaint();
+        });
     queueAvatarCache_[key] = image;
     return image;
 }
@@ -306,7 +296,7 @@ void LyricDisplayComponent::setNowSingingInfo (const juce::String& singerName,
 
     const auto key = nowSingingAvatarPath_.trim().toStdString();
     if (! key.empty() && queueAvatarCache_.find (key) == queueAvatarCache_.end())
-        queueAvatarCache_[key] = loadAvatarFromAssets (nowSingingAvatarPath_);
+        resolveAndCacheAvatar (nowSingingAvatarPath_);
 
     repaint();
 }
@@ -598,35 +588,46 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     g.setColour (juce::Colours::black.withAlpha (0.22f));
     g.fillRect (right);
 
+    auto& prefs = UserPreferences::getInstance();
+    const float logoScale         = prefs.getLyricLogoScalePercent()          / 100.0f;
+    const float brandTextScale    = prefs.getLyricBrandTextScalePercent()     / 100.0f;
+    const float nowTextScale      = prefs.getLyricNowSingingTextScalePercent() / 100.0f;
+    const float nowInfoScale      = prefs.getLyricNowSingingInfoScalePercent() / 100.0f;
+    const float upNextTextScale   = prefs.getLyricUpNextTextScalePercent()    / 100.0f;
+    const float upNextInfoScale   = prefs.getLyricUpNextInfoScalePercent()    / 100.0f;
+
     // Keep branding compact so the queue panel has enough height for 3 rows.
     auto brandArea = left.removeFromTop ((int) (left.getHeight() * 0.38f)).reduced (24, 16);
     auto queueArea = left.reduced (24, 10);
 
     if (logoImage_.isValid())
     {
-        auto logoArea = brandArea.removeFromTop ((int) (brandArea.getHeight() * 0.56f));
-        g.drawImage (logoImage_, logoArea.toFloat(),
-                     juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+        auto logoArea = brandArea.removeFromTop ((int) (brandArea.getHeight() * 0.56f * logoScale));
+        // No onlyReduceInSize here (unlike the pre-scale-slider version) --
+        // the slider needs to be able to grow the logo past its native
+        // pixel size, not just shrink it.
+        g.drawImage (logoImage_, logoArea.toFloat(), juce::RectanglePlacement::centred);
     }
 
     const auto venueLabel = venueName_.isNotEmpty() ? venueName_ : juce::String ("Encore Karaoke");
     g.setColour (juce::Colours::white);
-    g.setFont (juce::Font (juce::FontOptions().withHeight (juce::jmax (24.0f, brandArea.getHeight() * 0.16f))).boldened());
+    g.setFont (juce::Font (juce::FontOptions().withHeight (juce::jmax (24.0f, brandArea.getHeight() * 0.16f) * brandTextScale)).boldened());
     g.drawFittedText (venueLabel, brandArea, juce::Justification::centredTop, 2);
 
     if (nowSingingName_.isNotEmpty())
     {
         g.setColour (juce::Colour (0xff30daff));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
-        auto nowTitle = queueArea.removeFromTop (30);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * nowTextScale)).boldened());
+        auto nowTitle = queueArea.removeFromTop ((int) (30 * nowTextScale));
         g.drawText ("Now Singing", nowTitle, juce::Justification::centredLeft, true);
 
-        auto nowCard = queueArea.removeFromTop (72).reduced (0, 6);
+        const int nowCardH = (int) (72 * juce::jmax (nowInfoScale, nowTextScale));
+        auto nowCard = queueArea.removeFromTop (nowCardH).reduced (0, 6);
         g.setColour (juce::Colours::black.withAlpha (0.35f));
         g.fillRoundedRectangle (nowCard.toFloat(), 8.0f);
 
         auto nowText = nowCard.reduced (12, 10);
-        auto nowAvatarBox = nowText.removeFromLeft (48);
+        auto nowAvatarBox = nowText.removeFromLeft ((int) (48 * nowInfoScale));
         const int nowAvatarSize = juce::jmax (18, juce::jmin (nowAvatarBox.getWidth(), nowAvatarBox.getHeight()) - 8);
         auto nowAvatarArea = juce::Rectangle<int> (
             nowAvatarBox.getX() + (nowAvatarBox.getWidth()  - nowAvatarSize) / 2,
@@ -670,39 +671,39 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
 
         nowText.removeFromLeft (6);
         g.setColour (juce::Colours::white);
-        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
-        g.drawText (nowSingingName_, nowText.removeFromTop (24), juce::Justification::centredLeft, true);
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * nowTextScale)).boldened());
+        g.drawText (nowSingingName_, nowText.removeFromTop ((int) (24 * nowTextScale)), juce::Justification::centredLeft, true);
 
         juce::String nowSongLine = nowSingingSong_;
         if (nowSingingArtist_.isNotEmpty())
             nowSongLine << " - " << nowSingingArtist_;
 
         g.setColour (juce::Colours::white.withAlpha (0.80f));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * nowTextScale)));
         g.drawFittedText (nowSongLine, nowText, juce::Justification::centredLeft, 1);
 
         queueArea.removeFromTop (4);
     }
 
     g.setColour (juce::Colour (0xff30daff));
-    g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f)).boldened());
+    g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f * upNextTextScale)).boldened());
     if (! queuePreview_.empty())
     {
-        auto queueTitle = queueArea.removeFromTop (36);
+        auto queueTitle = queueArea.removeFromTop ((int) (36 * upNextTextScale));
         g.drawText ("Next Up", queueTitle, juce::Justification::centredLeft, true);
     }
 
     if (queuePreview_.empty())
     {
         g.setColour (juce::Colours::white.withAlpha (0.65f));
-        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * upNextTextScale)));
         g.drawFittedText ("Queue is waiting for singers", queueArea, juce::Justification::centred, 2);
     }
     else
     {
         // Keep queue rows visually stable (similar to the Now Singing card)
         // so avatar badges stay circular and text rhythm is consistent.
-        const int rowH = 72;
+        const int rowH = (int) (72 * juce::jmax (upNextInfoScale, upNextTextScale));
         for (int i = 0; i < (int) queuePreview_.size() && i < 3; ++i)
         {
             if (queueArea.getHeight() < rowH)
@@ -715,10 +716,10 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
 
             auto text = row.reduced (12, 10);
             g.setColour (juce::Colour (0xff30daff));
-            g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
-            g.drawText (juce::String (i + 1), text.removeFromLeft (26), juce::Justification::centred);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * upNextTextScale)).boldened());
+            g.drawText (juce::String (i + 1), text.removeFromLeft ((int) (26 * upNextTextScale)), juce::Justification::centred);
 
-            auto avatarBox = text.removeFromLeft (44);
+            auto avatarBox = text.removeFromLeft ((int) (44 * upNextInfoScale));
             const int avatarSize = juce::jmax (18, juce::jmin (avatarBox.getWidth(), avatarBox.getHeight()) - 8);
             auto avatarArea = juce::Rectangle<int> (
                 avatarBox.getX() + (avatarBox.getWidth()  - avatarSize) / 2,
@@ -752,15 +753,15 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             text.removeFromLeft (8);
 
             g.setColour (juce::Colours::white);
-            g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f)).boldened());
-            g.drawText (queuePreview_[(size_t) i].singerName, text.removeFromTop (24), juce::Justification::centredLeft, true);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * upNextTextScale)).boldened());
+            g.drawText (queuePreview_[(size_t) i].singerName, text.removeFromTop ((int) (24 * upNextTextScale)), juce::Justification::centredLeft, true);
 
             juce::String songLine = queuePreview_[(size_t) i].songName;
             if (queuePreview_[(size_t) i].artistName.isNotEmpty())
                 songLine << " - " << queuePreview_[(size_t) i].artistName;
 
             g.setColour (juce::Colours::white.withAlpha (0.78f));
-            g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)));
+            g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * upNextTextScale)));
             g.drawFittedText (songLine, text, juce::Justification::centredLeft, 1);
         }
     }
@@ -870,7 +871,10 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
     // --- Bottom lower-third: left Next Up, right Venue Code ---
     if (venueCode_.isNotEmpty() || lowerThirdNextUpSinger_.isNotEmpty())
     {
-        const int codeH = juce::jmax (90, area.getHeight() / 9);
+        // Use the same height getContentRenderArea() reserves space for, so
+        // the "Lyric Code Bar Height" slider actually resizes the bar that's
+        // drawn here rather than just changing how content is clipped above it.
+        const int codeH = getVenueCodeBarHeight (area);
         auto stripe = area.withTop (area.getBottom() - codeH);
 
         // Solid black bar across the full width of the lyric screen.
@@ -885,10 +889,12 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
         g.setColour (juce::Colours::white.withAlpha (0.12f));
         g.fillRect (leftHalf.getRight() + 7, stripe.getY() + 12, 1, stripe.getHeight() - 24);
 
+        const float bottomBarTextScale = UserPreferences::getInstance().getLyricBottomBarTextScalePercent() / 100.0f;
+
         if (lowerThirdNextUpSinger_.isNotEmpty())
         {
-            const float titleSize = juce::jmax (16.0f, leftHalf.getHeight() * 0.28f);
-            const float singerSize = juce::jmax (24.0f, leftHalf.getHeight() * 0.48f);
+            const float titleSize = juce::jmax (16.0f, leftHalf.getHeight() * 0.28f) * bottomBarTextScale;
+            const float singerSize = juce::jmax (24.0f, leftHalf.getHeight() * 0.48f) * bottomBarTextScale;
 
             g.setColour (juce::Colour (0xff30daff));
             g.setFont (juce::Font (juce::FontOptions().withHeight (titleSize)).boldened());
@@ -902,8 +908,8 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
 
         if (venueCode_.isNotEmpty())
         {
-            const float promptSize = juce::jmax (16.0f, rightHalf.getHeight() * 0.28f);
-            const float codeSize   = juce::jmax (28.0f, rightHalf.getHeight() * 0.54f);
+            const float promptSize = juce::jmax (16.0f, rightHalf.getHeight() * 0.28f) * bottomBarTextScale;
+            const float codeSize   = juce::jmax (28.0f, rightHalf.getHeight() * 0.54f) * bottomBarTextScale;
 
             g.setColour (juce::Colours::white);
             g.setFont (juce::Font (juce::FontOptions().withHeight (promptSize)));

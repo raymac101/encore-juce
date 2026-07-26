@@ -368,6 +368,96 @@ void UserPreferences::setLyricVenueCodeBarHeightPercent(int percent)
 }
 
 //==============================================================================
+// Lyric screen element scaling -- shared getter/setter shape, one JSON key
+// each, clamped 50-200, default 100.
+namespace
+{
+    int getScalePercent(const juce::var& root, const juce::CriticalSection& lock, const char* key)
+    {
+        const juce::ScopedLock sl(lock);
+        int p = (int) root.getProperty(key, juce::var(100));
+        return juce::jlimit(50, 200, p);
+    }
+}
+
+int UserPreferences::getLyricLogoScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricLogoScalePercent");
+}
+void UserPreferences::setLyricLogoScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricLogoScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricBrandTextScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricBrandTextScalePercent");
+}
+void UserPreferences::setLyricBrandTextScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricBrandTextScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricNowSingingTextScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricNowSingingTextScalePercent");
+}
+void UserPreferences::setLyricNowSingingTextScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricNowSingingTextScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricNowSingingInfoScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricNowSingingInfoScalePercent");
+}
+void UserPreferences::setLyricNowSingingInfoScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricNowSingingInfoScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricUpNextTextScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricUpNextTextScalePercent");
+}
+void UserPreferences::setLyricUpNextTextScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricUpNextTextScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricUpNextInfoScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricUpNextInfoScalePercent");
+}
+void UserPreferences::setLyricUpNextInfoScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricUpNextInfoScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+int UserPreferences::getLyricBottomBarTextScalePercent() const
+{
+    return getScalePercent(root_, lock_, "lyricBottomBarTextScalePercent");
+}
+void UserPreferences::setLyricBottomBarTextScalePercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricBottomBarTextScalePercent", juce::jlimit(50, 200, percent));
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);

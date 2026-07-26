@@ -114,6 +114,7 @@ target_sources(EncoreJUCE
         Source/Services/SongbookStorageService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
+        Source/Services/QueueRotation.cpp
         Source/Services/RequestService.cpp
         Source/Services/EmojiService.cpp
         Source/Services/ArchiveService.cpp

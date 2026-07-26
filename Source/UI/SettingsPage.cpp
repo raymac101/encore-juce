@@ -429,6 +429,70 @@ public:
             }
         };
 
+        // Lyric screen sizing sliders -- write straight to UserPreferences on
+        // every drag tick (no Save button); LyricDisplayComponent reads these
+        // directly on its next repaint (it already runs a 30Hz timer), so
+        // the lyric window updates live as the slider moves.
+        auto& prefs = UserPreferences::getInstance();
+
+        initFieldLabel(lblLyricLogoScale_, lm.getText("settings.lbl_lyric_logo_scale"));
+        initSlider(sLyricLogoScale_, 50, 200, 5, "%");
+        sLyricLogoScale_.setValue(prefs.getLyricLogoScalePercent(), juce::dontSendNotification);
+        sLyricLogoScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricLogoScalePercent((int) sLyricLogoScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricBrandTextScale_, lm.getText("settings.lbl_lyric_brand_text_scale"));
+        initSlider(sLyricBrandTextScale_, 50, 200, 5, "%");
+        sLyricBrandTextScale_.setValue(prefs.getLyricBrandTextScalePercent(), juce::dontSendNotification);
+        sLyricBrandTextScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricBrandTextScalePercent((int) sLyricBrandTextScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricNowSingingTextScale_, lm.getText("settings.lbl_lyric_now_singing_text_scale"));
+        initSlider(sLyricNowSingingTextScale_, 50, 200, 5, "%");
+        sLyricNowSingingTextScale_.setValue(prefs.getLyricNowSingingTextScalePercent(), juce::dontSendNotification);
+        sLyricNowSingingTextScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricNowSingingTextScalePercent((int) sLyricNowSingingTextScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricNowSingingInfoScale_, lm.getText("settings.lbl_lyric_now_singing_info_scale"));
+        initSlider(sLyricNowSingingInfoScale_, 50, 200, 5, "%");
+        sLyricNowSingingInfoScale_.setValue(prefs.getLyricNowSingingInfoScalePercent(), juce::dontSendNotification);
+        sLyricNowSingingInfoScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricNowSingingInfoScalePercent((int) sLyricNowSingingInfoScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricUpNextTextScale_, lm.getText("settings.lbl_lyric_up_next_text_scale"));
+        initSlider(sLyricUpNextTextScale_, 50, 200, 5, "%");
+        sLyricUpNextTextScale_.setValue(prefs.getLyricUpNextTextScalePercent(), juce::dontSendNotification);
+        sLyricUpNextTextScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricUpNextTextScalePercent((int) sLyricUpNextTextScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricUpNextInfoScale_, lm.getText("settings.lbl_lyric_up_next_info_scale"));
+        initSlider(sLyricUpNextInfoScale_, 50, 200, 5, "%");
+        sLyricUpNextInfoScale_.setValue(prefs.getLyricUpNextInfoScalePercent(), juce::dontSendNotification);
+        sLyricUpNextInfoScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricUpNextInfoScalePercent((int) sLyricUpNextInfoScale_.getValue());
+        };
+
+        initFieldLabel(lblLyricBottomBarTextScale_, lm.getText("settings.lbl_lyric_bottom_bar_text_scale"));
+        initSlider(sLyricBottomBarTextScale_, 50, 200, 5, "%");
+        sLyricBottomBarTextScale_.setValue(prefs.getLyricBottomBarTextScalePercent(), juce::dontSendNotification);
+        sLyricBottomBarTextScale_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricBottomBarTextScalePercent((int) sLyricBottomBarTextScale_.getValue());
+        };
+
+        // Moved here from Queue/Display Settings, and converted from a
+        // discrete %-choice ComboBox to a live-preview slider.
+        initFieldLabel(lblLyricCodeBarHeight_, lm.getText("settings.lbl_lyric_code_bar_height"));
+        initSlider(sLyricCodeBarHeight_, 6, 20, 1, "%");
+        sLyricCodeBarHeight_.setValue(prefs.getLyricVenueCodeBarHeightPercent(), juce::dontSendNotification);
+        sLyricCodeBarHeight_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricVenueCodeBarHeightPercent((int) sLyricCodeBarHeight_.getValue());
+        };
+
         // ── Section 5: Queue / Display Settings ──────────────────────────────
         initSectionLabel(secQueue_, lm.getText("settings.sec_queue"));
         initFieldLabel(lblLyricsBg_,        lm.getText("settings.lbl_lyrics_bg"));
@@ -442,7 +506,6 @@ public:
         initFieldLabel(lblShowMemory_,       lm.getText("settings.lbl_show_memory"));
         initFieldLabel(lblSilenceThreshold_, lm.getText("settings.lbl_silence_threshold"));
         initFieldLabel(lblLyricAdLead_,      lm.getText("settings.lbl_lyric_ad_lead"));
-        initFieldLabel(lblLyricCodeBarHeight_, lm.getText("settings.lbl_lyric_code_bar_height"));
 
         initCombo(cbLyricsBg_);
         cbLyricsBg_.addItem(lm.getText("settings.bg_none"),     1);
@@ -556,16 +619,6 @@ public:
             juce::dontSendNotification);
         cbLyricAdLead_.onChange = [this]() {
             UserPreferences::getInstance().setLyricAdTransitionLeadSeconds(cbLyricAdLead_.getSelectedId() + 2);
-        };
-
-        initCombo(cbLyricCodeBarHeight_);
-        for (int p = 8; p <= 16; ++p)
-            cbLyricCodeBarHeight_.addItem(juce::String(p) + "%", p - 7);
-        cbLyricCodeBarHeight_.setSelectedId(
-            juce::jlimit(1, 9, UserPreferences::getInstance().getLyricVenueCodeBarHeightPercent() - 7),
-            juce::dontSendNotification);
-        cbLyricCodeBarHeight_.onChange = [this]() {
-            UserPreferences::getInstance().setLyricVenueCodeBarHeightPercent(cbLyricCodeBarHeight_.getSelectedId() + 7);
         };
 
         // ── Section 6: Session Management ────────────────────────────────────
@@ -798,6 +851,11 @@ public:
             tb.setBounds(kCtrlX, y, kToggleW, kRowH);
             y += kRowH + kFieldGap;
         };
+        auto sliderRow = [&](juce::Label& lbl, juce::Slider& s) {
+            lbl.setBounds(kPadX, y, kLabelW, kRowH);
+            s.setBounds(kCtrlX, y, w - kCtrlX - kPadX, kRowH);
+            y += kRowH + kFieldGap;
+        };
         auto readRow = [&](juce::Label& lbl, juce::Label& val) {
             lbl.setBounds(kPadX, y, kLabelW, kRowH);
             val.setBounds(kCtrlX, y, w - kCtrlX - kPadX, kRowH);
@@ -924,7 +982,15 @@ public:
         y += kRowH + kFieldGap;
         btnSaveLogo_.setBounds(kPadX, y, 140, kRowH);
         btnDefaultLogo_.setBounds(kPadX + 148, y, 150, kRowH);
-        y += kRowH;
+        y += kRowH + kFieldGap;
+        sliderRow(lblLyricLogoScale_,          sLyricLogoScale_);
+        sliderRow(lblLyricBrandTextScale_,     sLyricBrandTextScale_);
+        sliderRow(lblLyricNowSingingTextScale_, sLyricNowSingingTextScale_);
+        sliderRow(lblLyricNowSingingInfoScale_, sLyricNowSingingInfoScale_);
+        sliderRow(lblLyricUpNextTextScale_,     sLyricUpNextTextScale_);
+        sliderRow(lblLyricUpNextInfoScale_,     sLyricUpNextInfoScale_);
+        sliderRow(lblLyricBottomBarTextScale_,  sLyricBottomBarTextScale_);
+        sliderRow(lblLyricCodeBarHeight_,       sLyricCodeBarHeight_);
         cardEnd(cs);
         y += kSectionGap;
 
@@ -942,7 +1008,6 @@ public:
         toggleRow(lblShowMemory_,       tbShowMemory_);
         comboRow(lblSilenceThreshold_,  cbSilenceThreshold_);
         comboRow(lblLyricAdLead_,       cbLyricAdLead_);
-        comboRow(lblLyricCodeBarHeight_, cbLyricCodeBarHeight_);
         cardEnd(cs);
         y += kSectionGap;
 
@@ -1035,6 +1100,14 @@ public:
         btnBrowseLogo_.setButtonText(lm.getText("settings.btn_browse"));
         btnSaveLogo_.setButtonText(lm.getText("settings.btn_save_logo"));
         btnDefaultLogo_.setButtonText(lm.getText("settings.btn_default_logo"));
+        lblLyricLogoScale_.setText(lm.getText("settings.lbl_lyric_logo_scale"), juce::dontSendNotification);
+        lblLyricBrandTextScale_.setText(lm.getText("settings.lbl_lyric_brand_text_scale"), juce::dontSendNotification);
+        lblLyricNowSingingTextScale_.setText(lm.getText("settings.lbl_lyric_now_singing_text_scale"), juce::dontSendNotification);
+        lblLyricNowSingingInfoScale_.setText(lm.getText("settings.lbl_lyric_now_singing_info_scale"), juce::dontSendNotification);
+        lblLyricUpNextTextScale_.setText(lm.getText("settings.lbl_lyric_up_next_text_scale"), juce::dontSendNotification);
+        lblLyricUpNextInfoScale_.setText(lm.getText("settings.lbl_lyric_up_next_info_scale"), juce::dontSendNotification);
+        lblLyricBottomBarTextScale_.setText(lm.getText("settings.lbl_lyric_bottom_bar_text_scale"), juce::dontSendNotification);
+        lblLyricCodeBarHeight_.setText(lm.getText("settings.lbl_lyric_code_bar_height"), juce::dontSendNotification);
 
         secQueue_.setText(lm.getText("settings.sec_queue"),                     juce::dontSendNotification);
         lblLyricsBg_.setText(lm.getText("settings.lbl_lyrics_bg"),              juce::dontSendNotification);
@@ -1048,7 +1121,6 @@ public:
         lblShowMemory_.setText(lm.getText("settings.lbl_show_memory"),          juce::dontSendNotification);
         lblSilenceThreshold_.setText(lm.getText("settings.lbl_silence_threshold"), juce::dontSendNotification);
         lblLyricAdLead_.setText(lm.getText("settings.lbl_lyric_ad_lead"), juce::dontSendNotification);
-        lblLyricCodeBarHeight_.setText(lm.getText("settings.lbl_lyric_code_bar_height"), juce::dontSendNotification);
 
         secSession_.setText(lm.getText("settings.sec_session"),              juce::dontSendNotification);
         lblSongsToday_.setText(lm.getText("settings.lbl_songs_today"),       juce::dontSendNotification);
@@ -1287,6 +1359,18 @@ private:
     juce::File       selectedLogoFile_;
     std::unique_ptr<juce::FileChooser> fc_;
 
+    // Lyric screen sizing sliders (live preview on the lyric display,
+    // no Save button -- same UserPreferences-direct pattern as the silence
+    // threshold / lyric ad lead controls below).
+    juce::Label  lblLyricLogoScale_, lblLyricBrandTextScale_,
+                 lblLyricNowSingingTextScale_, lblLyricNowSingingInfoScale_,
+                 lblLyricUpNextTextScale_, lblLyricUpNextInfoScale_,
+                 lblLyricBottomBarTextScale_, lblLyricCodeBarHeight_;
+    juce::Slider sLyricLogoScale_, sLyricBrandTextScale_,
+                 sLyricNowSingingTextScale_, sLyricNowSingingInfoScale_,
+                 sLyricUpNextTextScale_, sLyricUpNextInfoScale_,
+                 sLyricBottomBarTextScale_, sLyricCodeBarHeight_;
+
     // Section 5: Queue / Display
     juce::Label        secQueue_;
     juce::Label        lblLyricsBg_;
@@ -1299,8 +1383,6 @@ private:
     juce::ToggleButton tbShowOnline_,   tbShowOnlineEncore_,  tbShowMemory_;
     juce::Label        lblSilenceThreshold_, lblLyricAdLead_;
     juce::ComboBox     cbSilenceThreshold_, cbLyricAdLead_;
-    juce::Label        lblLyricCodeBarHeight_;
-    juce::ComboBox     cbLyricCodeBarHeight_;
 
     // Section 6: Session
     juce::Label      secSession_;
@@ -1383,6 +1465,20 @@ private:
         tb.setColour(juce::ToggleButton::tickColourId,         juce::Colour(kAccent));
         tb.setColour(juce::ToggleButton::tickDisabledColourId, juce::Colour(kTextSecond));
         addAndMakeVisible(tb);
+    }
+    void initSlider(juce::Slider& s, int minValue, int maxValue, int step, const juce::String& suffix)
+    {
+        s.setSliderStyle(juce::Slider::LinearHorizontal);
+        s.setRange((double) minValue, (double) maxValue, (double) step);
+        s.setTextValueSuffix(suffix);
+        s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, kRowH);
+        s.setColour(juce::Slider::backgroundColourId,      juce::Colour(0xff0d1527));
+        s.setColour(juce::Slider::trackColourId,           juce::Colour(kAccent));
+        s.setColour(juce::Slider::thumbColourId,            juce::Colour(kAccent));
+        s.setColour(juce::Slider::textBoxTextColourId,      juce::Colour(kTextPrimary));
+        s.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff0d1527));
+        s.setColour(juce::Slider::textBoxOutlineColourId,   juce::Colour(kAccent).withAlpha(0.4f));
+        addAndMakeVisible(s);
     }
     void initButton(juce::TextButton& btn, const juce::String& text, uint32_t colour)
     {

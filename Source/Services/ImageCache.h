@@ -40,6 +40,21 @@ public:
     juce::Image getOrFetch(const juce::String& url,
                            std::function<void()> onLoaded = nullptr);
 
+    /** Resolves a singer/host avatar field to a displayable image, handling
+        every format TAGG has ever stored there:
+          - "preset:<id>"                      -> assets/icon/<id>.png (new TAGG)
+          - "assets/icon/<file>.png"            -> that file (legacy TAGG)
+          - "assets/images/UnknownAvatar.png"   -> that file (no avatar selected)
+          - "https://firebasestorage..../..."   -> fetched via getOrFetch
+                                                    (user-uploaded custom photo)
+        Local-file cases resolve synchronously. The URL case follows
+        getOrFetch's usual contract: returns an invalid image immediately if
+        not yet cached, and invokes onLoaded on the message thread once the
+        download completes -- callers should re-call resolveAvatar() from
+        that callback to pick up the now-cached image. */
+    juce::Image resolveAvatar(const juce::String& avatarField,
+                              std::function<void()> onLoaded = nullptr);
+
     void clear();
 
 private:

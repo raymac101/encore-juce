@@ -28,8 +28,17 @@ struct Singers
     std::string name;                   // Singer's display name
     std::string avatar;                 // Avatar/image URL
     std::string deviceId;               // Device associated with singer
-    int order = 0;                      // Position in singer rotation
-    int rotationOrder = 0;              // Round-robin rotation position
+    // Stable Round Robin position. Assigned once when a singer first adds a
+    // song (appended to the bottom of the RR) and changed only by manual
+    // KJ drag-reorder or removal -- never by a song finishing, starting a
+    // performance, or being skipped. The host is always order 0.
+    int order = 0;
+    // Derived/cached queue rank relative to the current rotation anchor
+    // (0 = up next). Recomputed by QueueRotation::stampDerivedRanks()
+    // whenever the RR or anchor changes; also used to *recover* the anchor
+    // identity on load (see QueueRotation::findAnchorId). Not itself a
+    // source of truth for RR membership/order -- see `order` above.
+    int rotationOrder = 0;
     int strikes = 0;                    // Number of strikes (for removal)
     int songsPerformed = 0;             // Total songs completed
     bool currentlyUp = false;           // Is this singer currently performing?

@@ -99,6 +99,64 @@ juce::Image ArtworkCache::getOrFetch(const juce::String& url,
 }
 
 //==============================================================================
+juce::Image ArtworkCache::resolveAvatar(const juce::String& avatarField,
+                                        std::function<void()> onLoaded)
+{
+    const auto field = avatarField.trim();
+    if (field.isEmpty())
+        return {};
+
+    // User-uploaded custom photo: a full Firebase Storage download URL.
+    if (field.startsWithIgnoreCase("http://") || field.startsWithIgnoreCase("https://"))
+        return getOrFetch(field, std::move(onLoaded));
+
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                      .getParentDirectory();
+    auto iconDir = appDir.getChildFile("assets/icon");
+
+    // New TAGG preset format: "preset:<id>" -> assets/icon/<id>[.ext].
+    if (field.startsWithIgnoreCase("preset:"))
+    {
+        const auto id = field.substring(7).trim();
+        if (id.isEmpty())
+            return {};
+
+        auto direct = iconDir.getChildFile(id);
+        if (direct.existsAsFile())
+            return juce::ImageFileFormat::loadFrom(direct);
+
+        static const char* const extensions[] = { ".png", ".jpg", ".jpeg", ".gif" };
+        for (auto* ext : extensions)
+        {
+            auto candidate = iconDir.getChildFile(id + ext);
+            if (candidate.existsAsFile())
+                return juce::ImageFileFormat::loadFrom(candidate);
+        }
+        return {};
+    }
+
+    // Legacy TAGG relative path ("assets/icon/1082581.png") or the "no
+    // avatar selected" placeholder ("assets/images/UnknownAvatar.png").
+    auto baseName = field.fromLastOccurrenceOf("/", false, false);
+    if (baseName.isEmpty())
+        baseName = field;
+
+    auto candidate1 = iconDir.getChildFile(baseName);
+    if (candidate1.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate1);
+
+    auto candidate2 = appDir.getChildFile(field);
+    if (candidate2.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate2);
+
+    auto candidate3 = appDir.getChildFile("assets/" + field);
+    if (candidate3.existsAsFile())
+        return juce::ImageFileFormat::loadFrom(candidate3);
+
+    return {};
+}
+
+//==============================================================================
 void ArtworkCache::clear()
 {
     std::lock_guard<std::mutex> lock(mutex_);

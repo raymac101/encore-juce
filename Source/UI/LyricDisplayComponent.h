@@ -156,6 +156,12 @@ private:
     void updateAdPanelAnimation (bool idleMode);
     juce::Image getQueuePreviewAvatar (const juce::String& avatarPath);
 
+    // Resolves avatarPath via ArtworkCache::resolveAvatar(), caching the
+    // result in queueAvatarCache_ by the raw path/preset/URL string. If the
+    // avatar is a URL still downloading, updates the cache entry and repaints
+    // once it arrives.
+    juce::Image resolveAndCacheAvatar (const juce::String& avatarPath);
+
     double getPlaybackPositionSeconds() const;
     double getPlaybackDurationSeconds() const;
     int getAdPanelWidth (juce::Rectangle<int> area, bool idleMode) const;

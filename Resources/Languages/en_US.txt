@@ -569,12 +569,19 @@ settings.btn_invite_user=INVITE USER
 settings.lbl_current_users=Current Users
 
 # Logo management
-settings.sec_logo=Logo
+settings.sec_logo=Lyric Screen
 settings.lbl_logo=Logo:
 settings.ph_logo_file=Select your file!
 settings.btn_browse=BROWSE
 settings.btn_save_logo=SAVE LOGO
 settings.btn_default_logo=DEFAULT LOGO
+settings.lbl_lyric_logo_scale=Lyric Screen Logo Size:
+settings.lbl_lyric_brand_text_scale=Lyric Screen Text Size:
+settings.lbl_lyric_now_singing_text_scale=Now Singing Text Size:
+settings.lbl_lyric_now_singing_info_scale=Now Singing Info Size:
+settings.lbl_lyric_up_next_text_scale=Up Next Text Size:
+settings.lbl_lyric_up_next_info_scale=Up Next Info Size:
+settings.lbl_lyric_bottom_bar_text_scale=Bottom Bar Text Size:
 
 # Session statistics
 settings.lbl_songs_today=Songs Played Today:

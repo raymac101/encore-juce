@@ -943,18 +943,25 @@ void MixerPage::resized()
     viewport_.setBounds(getLocalBounds());
 
     const int startingWidth  = viewport_.getWidth() - viewport_.getScrollBarThickness();
-    const int startingHeight = juce::jmax(contentHolder_->getHeight(), 500);
+    // Unlike a page of stacked fixed-height rows, the channel strips'
+    // faders are deliberately stretchy (they claim whatever's left of the
+    // column after the fixed-height sections), so the content height must
+    // start from the viewport's actual visible height -- not just whatever
+    // it happened to be last time -- or the strips stay squished into a
+    // stale/default size even when the window has plenty of room.
+    const int startingHeight = juce::jmax(viewport_.getHeight(), 500);
     contentHolder_->setSize(startingWidth, startingHeight);
     layoutContent();
 
-    // Grow to fit the tallest strip -- lets the viewport's scrollbar reach
-    // the bottom of every strip on any window size. layoutContent() only
-    // depends on width, so a second pass at the corrected height
-    // reproduces the same positions.
+    // Grow to fit the tallest strip (and never shrink below the viewport)
+    // -- lets the viewport's scrollbar reach the bottom of every strip on
+    // any window size. layoutContent() only depends on width, so a second
+    // pass at the corrected height reproduces the same positions.
     int neededHeight = 0;
     for (auto& sw : strips)
         neededHeight = juce::jmax(neededHeight, sw.fader->getBottom());
     neededHeight += 14;
+    neededHeight = juce::jmax(neededHeight, viewport_.getHeight());
     if (neededHeight != contentHolder_->getHeight())
     {
         contentHolder_->setSize(startingWidth, neededHeight);

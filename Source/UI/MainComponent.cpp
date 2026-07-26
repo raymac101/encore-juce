@@ -15,6 +15,7 @@
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
+#include "../Services/QueueRotation.h"
 #include "../Services/RequestService.h"
 #include "../Services/EmojiService.h"
 #include "../Services/HostService.h"
@@ -251,32 +252,6 @@ int findHostIndexInQueue(const std::vector<Singers>& singers)
         if (singers[(size_t) i].isHost)
             return i;
     return -1;
-}
-
-void reindexQueueWithHostRoundAnchor(std::vector<Singers>& singers)
-{
-    for (int i = 0; i < (int) singers.size(); ++i)
-        singers[(size_t) i].order = i;
-
-    const int hostIndex = findHostIndexInQueue(singers);
-    if (hostIndex < 0)
-    {
-        int rot = 0;
-        for (int i = 0; i < (int) singers.size(); ++i)
-            singers[(size_t) i].rotationOrder = rot++;
-        return;
-    }
-
-    singers[(size_t) hostIndex].rotationOrder = -1;
-
-    int rot = 0;
-    const int n = (int) singers.size();
-    for (int step = 1; step < n; ++step)
-    {
-        const int i = (hostIndex + step) % n;
-        if (! singers[(size_t) i].isHost)
-            singers[(size_t) i].rotationOrder = rot++;
-    }
 }
 }
 
@@ -882,6 +857,14 @@ void MainComponent::setupUI()
         if (playStartTimeMs_ == 0)
             playStartTimeMs_ = juce::Time::currentTimeMillis();
 
+        // Fade out background music so it doesn't overlap karaoke -- covers
+        // the "song was merely preloaded, not autostarted" case (Auto Play
+        // off) and plain resume-from-pause, both of which reach this direct
+        // play path instead of loadAndPlaySong(). Harmless no-op if the
+        // background music isn't currently playing/fading.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeOut (1.5f);
+
         if (videoLoaded)
             lyricWindow_->playVideo();
         else
@@ -1270,57 +1253,47 @@ void MainComponent::setupUI()
 
                     if (playNext)
                     {
-                        // Move the newly-added singer to the front of the rotation
-                        // (position 1, right after the pinned host at 0).  We do
-                        // this by bumping every non-host singer's order up by 1,
-                        // then setting the new singer's order to 1.
-                        juce::Thread::launch([venueId, resolvedSingerName, safe]()
-                        {
-                            const auto collPath = "venues/" + venueId + "/queue";
-                            auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
-
-                            for (auto& d : docs)
+                        // "Play Next" is purely a rotation-anchor change --
+                        // the RR itself (`order`) is untouched. appendSong
+                        // already placed the new singer at the bottom of
+                        // the RR; here we just point the anchor at them.
+                        QueueService::getInstance().loadQueue(venueId,
+                            [venueId, resolvedSingerName, safe](bool loadedOk, QueueService::Snapshot snap, juce::String loadErr)
                             {
-                                auto fields   = d.getProperty("fields", juce::var());
-                                auto nameVar  = fields.getProperty("name", juce::var());
-                                juce::String docName = d.getProperty("name", "").toString();
-                                juce::String rel = docName.fromLastOccurrenceOf("/documents/", false, false);
-                                if (rel.isEmpty()) continue;
+                                if (! loadedOk)
+                                {
+                                    DBG ("[SongSelect] PlayNext: loadQueue failed: " << loadErr);
+                                    if (safe != nullptr) safe->reloadQueueFromFirestore(venueId);
+                                    return;
+                                }
 
-                                // Parse name and order
-                                auto nameVal = nameVar.hasProperty("stringValue")
-                                                   ? nameVar.getProperty("stringValue", "").toString()
-                                                   : juce::String();
-                                auto orderVar = fields.getProperty("order", juce::var());
-                                int currentOrder = orderVar.hasProperty("integerValue")
-                                                       ? (int) orderVar.getProperty("integerValue", "0")
-                                                             .toString().getLargeIntValue()
-                                                       : 0;
+                                auto rr = QueueRotation::sortByStableOrder(snap.singers);
+                                juce::String newAnchorId;
+                                for (auto& s : rr)
+                                {
+                                    if (! s.isHost && juce::String(s.name).trim().equalsIgnoreCase(resolvedSingerName))
+                                    {
+                                        newAnchorId = juce::String(s.id).trim();
+                                        break;
+                                    }
+                                }
 
-                                // Skip the host (order 0 or isHost flag)
-                                auto isHostVar = fields.getProperty("isHost", juce::var());
-                                bool isHost = isHostVar.hasProperty("booleanValue")
-                                                  && (bool) isHostVar.getProperty("booleanValue", false);
-                                if (isHost || currentOrder == 0)
-                                    continue;
+                                if (newAnchorId.isEmpty())
+                                {
+                                    if (safe != nullptr) safe->reloadQueueFromFirestore(venueId);
+                                    return;
+                                }
 
-                                int newOrder = (nameVal.equalsIgnoreCase(resolvedSingerName)) ? 1
-                                                                                           : currentOrder + 1;
-
-                                juce::DynamicObject::Ptr f = new juce::DynamicObject();
-                                f->setProperty("order", FirestoreClient::integerValue(newOrder));
-                                FirestoreClient::getInstance()
-                                    .patchDocument(rel + "?updateMask.fieldPaths=order",
-                                                   juce::var(f.get()));
-                            }
-
-                            // Reload on the message thread once all patches are done.
-                            juce::MessageManager::callAsync([venueId, safe]() mutable
-                            {
-                                if (safe != nullptr)
-                                    safe->reloadQueueFromFirestore(venueId);
+                                QueueRotation::stampDerivedRanks(rr, newAnchorId);
+                                QueueService::getInstance().persistSingerOrder(venueId, rr,
+                                    [venueId, safe](bool ok, juce::String err)
+                                    {
+                                        if (! ok)
+                                            DBG("[Queue] PlayNext persistSingerOrder failed: " << err);
+                                        if (safe != nullptr)
+                                            safe->reloadQueueFromFirestore(venueId);
+                                    });
                             });
-                        });
                     }
                     else if (safe != nullptr)
                     {
@@ -2135,9 +2108,14 @@ void MainComponent::setupUI()
             return;
 
         const auto venueId = activeVenueId_;
-        const auto singersSnapshot = queueBar->getSingers();
+        // queueBar->getSingers() is the DISPLAYED (anchor-rotated) order, not
+        // the stable RR -- recover the RR by sorting on each singer's own
+        // .order field (already correctly set by whichever caller triggered
+        // this, e.g. QueueBar::moveSinger via QueueRotation::remapFromDisplayDrag)
+        // before persisting, so we never write display position as RR order.
+        const auto rr = QueueRotation::sortByStableOrder(queueBar->getSingers());
 
-        QueueService::getInstance().persistSingerOrder(venueId, singersSnapshot,
+        QueueService::getInstance().persistSingerOrder(venueId, rr,
             [](bool ok, juce::String err)
             {
                 if (! ok)
@@ -2259,89 +2237,78 @@ void MainComponent::setupUI()
 
         auto singer = singers[(size_t) singerIndex];
         const bool singerHasQueuedSongs = ! singer.songs.empty();
-        auto singerForPlayback = singer;
-        QueueItem nowSingingItem;
 
-        if (singerHasQueuedSongs)
+        // Starting a performance never touches the Round Robin or the
+        // rotation anchor -- only finishing (handleSongFinished) or being
+        // skipped for having no songs (queueAndLoadNextSingerSong) does.
+        // If this row has nothing to play, only the front-of-queue (the
+        // anchor) can be meaningfully skipped/struck and advanced past;
+        // there's nothing sensible to do for a non-front row with no songs.
+        if (! singerHasQueuedSongs)
         {
-            nowSingingItem = singer.songs.front();
-            nowSingingItem.singerName = singer.name;
-            singerForPlayback.isNewlyAdded = false;
-            singer.isNewlyAdded = false;
-            singer.songs.erase(singer.songs.begin());
-        }
-
-        // Moving a singer into now-singing should also move them to the end
-        // of the round queue so the rotation stays fair.
-        if (! singer.isHost && singers.size() > 1)
-        {
-            const int fromIndex = singerIndex;
-
-            if (! singerHasQueuedSongs)
+            if (singerIndex == 0)
             {
-                const int currentStrikes = juce::jmax(0, singer.strikes);
-                singer.strikes = currentStrikes + 1;
-            }
-
-            singers.erase(singers.begin() + singerIndex);
-            singers.push_back(singer);
-
-            const int toIndex = (int) singers.size() - 1;
-
-            if (toIndex != fromIndex || ! singerHasQueuedSongs)
-            {
-                reindexQueueWithHostRoundAnchor(singers);
-                queueBar->setSingers(singers);
-
-                const auto venueId = activeVenueId_.trim();
-                if (venueId.isNotEmpty())
+                const bool autoStart = queueAutoStartRequested_;
+                queueAutoStartRequested_ = false;
+                const bool queued = queueAndLoadNextSingerSong(autoStart, true);
+                if (! queued)
                 {
-                    QueueService::getInstance().persistSingerOrder(venueId, singers,
-                        [](bool ok, juce::String err)
-                        {
-                            if (! ok)
-                                DBG("[Queue] onPlaySinger persistSingerOrder failed: " << err);
-                        });
+                    if (bottomBar != nullptr) bottomBar->setPlaying(false);
+                    if (queueBar != nullptr) queueBar->setPlaying(false);
                 }
             }
-
-            if (toIndex >= 0)
-                singer = singers[(size_t) toIndex];
+            return;
         }
 
-        // If we promoted a song into now-singing, remove it from the
-        // singer's persisted queue immediately so it does not remain queued.
-        if (singerHasQueuedSongs)
+        auto singerForPlayback = singer; // keeps the full songs list for loadSingerIntoNowPlaying
+        QueueItem nowSingingItem = singer.songs.front();
+        nowSingingItem.singerName = singer.name;
+        singerForPlayback.isNewlyAdded = false;
+
+        // Promoting a singer into Now Singing cycles the round robin
+        // immediately, so the top of the queue always shows the NEXT
+        // person to sing -- never whoever is currently performing. (The
+        // RR itself, i.e. `order`, is still untouched -- only the anchor
+        // advances past this singer's slot.)
+        auto rr = QueueRotation::sortByStableOrder(singers);
+        const int promotedOrder = singer.order;
+        const auto newAnchorId = QueueRotation::advanceAnchor(rr, promotedOrder);
+
+        for (auto& s : rr)
         {
-            const auto venueId = activeVenueId_.trim();
-            if (venueId.isNotEmpty())
+            if (s.order == promotedOrder)
             {
-                QueueService::getInstance().removeSong(venueId, nowSingingItem,
-                    [](bool ok, juce::String err)
-                    {
-                        if (! ok)
-                            DBG("[Queue] onPlaySinger removeSong failed: " << err);
-                    });
+                s.isNewlyAdded = false;
+                s.songs.erase(s.songs.begin());
+                break;
             }
+        }
+
+        QueueRotation::stampDerivedRanks(rr, newAnchorId);
+        queueBar->setSingers(QueueRotation::deriveDisplayQueue(rr, newAnchorId));
+
+        const auto venueId = activeVenueId_.trim();
+        if (venueId.isNotEmpty())
+        {
+            // Remove it from the singer's persisted queue immediately so
+            // it does not remain queued.
+            QueueService::getInstance().removeSong(venueId, nowSingingItem,
+                [](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Queue] onPlaySinger removeSong failed: " << err);
+                });
+
+            QueueService::getInstance().persistSingerOrder(venueId, rr,
+                [](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Queue] onPlaySinger persistSingerOrder failed: " << err);
+                });
         }
 
         const bool autoStartSelectedSinger = queueAutoStartRequested_;
         queueAutoStartRequested_ = false;
-
-        // Empty singer queue item means "skip" this singer and keep advancing
-        // until we find a singer with a queued song.
-        if (! singerHasQueuedSongs)
-        {
-            const bool queued = queueAndLoadNextSingerSong(autoStartSelectedSinger, true);
-            if (! queued)
-            {
-                if (bottomBar != nullptr)
-                    bottomBar->setPlaying(false);
-                if (queueBar != nullptr)
-                    queueBar->setPlaying(false);
-            }
-            return;
-        }
 
         juce::ignoreUnused(loadSingerIntoNowPlaying(singerForPlayback, autoStartSelectedSinger));
     };
@@ -2395,14 +2362,45 @@ void MainComponent::setupUI()
     queueBar->onRemoveSinger = [this](int singerIndex)
     {
         if (queueBar == nullptr) return;
-        const auto& singers = queueBar->getSingers();
+        const auto singers = queueBar->getSingers();
         if (singerIndex < 0 || singerIndex >= (int) singers.size()) return;
         if (singers[(size_t) singerIndex].isHost) return;
 
-        const juce::String docId   = juce::String(singers[(size_t) singerIndex].id);
+        const auto removedSinger  = singers[(size_t) singerIndex];
+        const juce::String docId  = juce::String(removedSinger.id);
         const juce::String venueId = activeVenueId_;
+        const bool wasAnchor = (singerIndex == 0); // display index 0 is always the anchor
 
         queueBar->removeSinger(singerIndex);
+
+        // If the removed singer was up next, advance the anchor to whoever
+        // comes after them in the RR and persist the restamped ranks for
+        // everyone who's left. If they weren't the anchor, nothing else
+        // needs to change -- gaps in `order` are harmless (display is
+        // always re-derived by sorting ascending), and the anchor is
+        // unaffected.
+        if (wasAnchor && ! venueId.isEmpty())
+        {
+            auto rr = QueueRotation::sortByStableOrder(singers); // pre-removal RR
+            const auto newAnchorId = QueueRotation::advanceAnchor(rr, removedSinger.order);
+
+            for (int i = 0; i < (int) rr.size(); ++i)
+            {
+                if (rr[(size_t) i].order == removedSinger.order)
+                {
+                    rr.erase(rr.begin() + i);
+                    break;
+                }
+            }
+
+            QueueRotation::stampDerivedRanks(rr, newAnchorId);
+            QueueService::getInstance().persistSingerOrder(venueId, rr,
+                [](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Queue] onRemoveSinger persistSingerOrder failed: " << err);
+                });
+        }
 
         if (venueId.isEmpty() || docId.isEmpty()) return;
         juce::Thread::launch([venueId, docId]()
@@ -2459,25 +2457,39 @@ void MainComponent::setupUI()
     clearLoadedPlaybackState();
 
         const auto venueId = activeVenueId_;
-        const juce::String docId = juce::String(cs.id);
 
-        // Re-insert locally at front or back
-        auto singers = queueBar->getSingers();
-        const int hostIndex = findHostIndexInQueue(singers);
-        if (toFront)
-            singers.insert(singers.begin() + (hostIndex >= 0 ? hostIndex + 1 : 0), cs);
-        else
-            singers.push_back(cs);
-        reindexQueueWithHostRoundAnchor(singers);
-        queueBar->setSingers(singers);
-
-        // Persist new order
-        if (queueBar->onReorder)
+        // The singer never left the RR (their slot, `order`, is untouched
+        // by starting a performance -- see onPlaySinger), so there's no
+        // re-insertion needed. The anchor already advanced past them the
+        // moment they were promoted to Now Singing, though, so: "Next"
+        // explicitly moves it back to them; "End" leaves it exactly where
+        // it already is (already past them -- advancing it again here
+        // would wrongly skip whoever's genuinely up next).
+        auto rr = QueueRotation::sortByStableOrder(queueBar->getSingers());
+        for (auto& s : rr)
         {
-            for (int i = 0; i < (int) singers.size(); ++i)
-                if (singers[(size_t) i].id == cs.id)
-                    { queueBar->onReorder(0, i); break; }
+            if (juce::String(s.id).trim() == juce::String(cs.id).trim()
+                || juce::String(s.name).trim().equalsIgnoreCase(juce::String(cs.name).trim()))
+            {
+                s.songs = cs.songs; // restore the full list -- they never actually sang it
+                break;
+            }
         }
+
+        const auto newAnchorId = toFront
+            ? juce::String(cs.id).trim()
+            : QueueRotation::findAnchorId(rr);
+
+        QueueRotation::stampDerivedRanks(rr, newAnchorId);
+        queueBar->setSingers(QueueRotation::deriveDisplayQueue(rr, newAnchorId));
+
+        if (! venueId.isEmpty())
+            QueueService::getInstance().persistSingerOrder(venueId, rr,
+                [](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Queue] returnCurrentToQueue persistSingerOrder failed: " << err);
+                });
     };
 
     queueBar->onReturnCurrentToQueueNext = [returnCurrentToQueue]()  { returnCurrentToQueue(true);  };
@@ -2521,7 +2533,15 @@ void MainComponent::setupUI()
                             newSinger.name         = name.toStdString();
                             newSinger.deviceId     = "local";
                             newSinger.isNewlyAdded = true;
-                            newSinger.order        = (int) queueBar->getSingers().size();
+
+                            // Bottom of the stable RR (max existing order + 1) --
+                            // NOT display-vector length, which can collide with an
+                            // existing order once gaps exist (e.g. after a removal).
+                            int maxOrder = -1;
+                            for (auto& s : queueBar->getSingers())
+                                maxOrder = juce::jmax(maxOrder, s.order);
+                            newSinger.order = maxOrder + 1;
+
                             queueBar->addSinger(newSinger);
                         }
                     }
@@ -3748,6 +3768,9 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         if (autoStart)
         {
             self->playStartTimeMs_ = juce::Time::currentTimeMillis();
+            // Fade out background music so it doesn't overlap karaoke.
+            if (self->bgPlayer_ != nullptr)
+                self->bgPlayer_->fadeOut (1.5f);
             self->writePlayingDocIfNeeded();
         }
 
@@ -3909,62 +3932,76 @@ bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad,
         return false;
     }
 
-    // Rotate past singers with no songs and stop at the first playable singer.
-    // Process from the actual top of queue so queue order stays in sync with
-    // round order, including host/empty singers being moved to the tail.
+    // Rotate past singers with no songs and stop at the first playable
+    // singer. This is a "turn ends without singing" primitive, just like a
+    // song finishing: the RR itself (`order`) is untouched -- only the
+    // rotation anchor advances (and the skipped singer is dropped from the
+    // RR entirely if they've now exhausted their strikes).
     const int maxAttempts = (int) current.size();
     for (int attempt = 0; attempt < maxAttempts; ++attempt)
     {
-        current = queueBar->getSingers();
-        if (current.empty())
+        auto rr = QueueRotation::sortByStableOrder(queueBar->getSingers());
+        if (rr.empty())
             return false;
 
-        const int frontIndex = 0;
+        auto anchorId = QueueRotation::findAnchorId(rr);
+        QueueRotation::stampDerivedRanks(rr, anchorId);
 
-        if (! current[(size_t) frontIndex].songs.empty())
+        int frontIdx = -1;
+        for (int i = 0; i < (int) rr.size(); ++i)
         {
+            if (rr[(size_t) i].rotationOrder == 0)
+            {
+                frontIdx = i;
+                break;
+            }
+        }
+        if (frontIdx < 0)
+            return false;
+
+        if (! rr[(size_t) frontIdx].songs.empty())
+        {
+            // The anchor is always display index 0 (see deriveDisplayQueue).
             queueAutoStartRequested_ = autoStartAfterLoad;
-            queueBar->onPlaySinger(frontIndex);
+            queueBar->onPlaySinger(0);
             return true;
         }
 
-        const int endIndex = (int) current.size() - 1;
-
-        auto rotated = current;
-        auto moved = rotated[(size_t) frontIndex];
-        rotated.erase(rotated.begin() + frontIndex);
-
+        auto& frontSinger = rr[(size_t) frontIdx];
+        const int frontOrder = frontSinger.order;
         bool removedForStrikes = false;
-        if (! moved.isHost)
+
+        if (! frontSinger.isHost)
         {
-            const int currentStrikes = juce::jmax(0, moved.strikes);
+            const int currentStrikes = juce::jmax(0, frontSinger.strikes);
             const int nextStrikes = currentStrikes + 1;
 
             if (activeVenueNumStrikes_ > 0 && nextStrikes >= activeVenueNumStrikes_)
             {
                 removedForStrikes = true;
                 if (! venueId.isEmpty())
-                {
-                    QueueService::getInstance().deleteSinger(
-                        venueId,
-                        juce::String(moved.name),
-                        nullptr);
-                }
+                    QueueService::getInstance().deleteSinger(venueId, juce::String(frontSinger.id), nullptr);
             }
             else
             {
-                moved.strikes = nextStrikes;
+                frontSinger.strikes = nextStrikes;
             }
         }
 
-        if (! removedForStrikes)
-            rotated.push_back(std::move(moved));
+        const auto newAnchorId = QueueRotation::advanceAnchor(rr, frontOrder);
+        if (removedForStrikes)
+            rr.erase(rr.begin() + frontIdx);
+        QueueRotation::stampDerivedRanks(rr, newAnchorId);
 
-        reindexQueueWithHostRoundAnchor(rotated);
+        queueBar->setSingers(QueueRotation::deriveDisplayQueue(rr, newAnchorId));
 
-        queueBar->setSingers(rotated);
-        if (queueBar->onReorder)
-            queueBar->onReorder(frontIndex, removedForStrikes ? frontIndex : endIndex);
+        if (! venueId.isEmpty())
+            QueueService::getInstance().persistSingerOrder(venueId, rr,
+                [](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Queue] queueAndLoadNextSingerSong persistSingerOrder failed: " << err);
+                });
     }
 
     queueAutoStartRequested_ = false;
@@ -4103,7 +4140,14 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
             s.isNewlyAdded = ! s.songs.empty();
     }
 
-    return merged;
+    // Derive the actual displayed Queue from the stable Round Robin: sort
+    // by RR position (host forced first), find who's currently "up next"
+    // (the anchor), and rotate to start there. This is read-only -- it does
+    // not persist anything back to Firestore; only genuine mutations
+    // (finish/remove/drag/move) do that, via QueueRotation + persistSingerOrder.
+    const auto rr = QueueRotation::sortByStableOrder(merged);
+    const auto anchorId = QueueRotation::findAnchorId(rr);
+    return QueueRotation::deriveDisplayQueue(rr, anchorId);
 }
 
 std::vector<LyricDisplayComponent::QueuePreviewEntry>
@@ -4812,9 +4856,15 @@ void MainComponent::applyCurrentIdentityToUi()
         const auto avatarUrl = juce::String(host.avatarUrl).trim();
         if (avatarUrl.isNotEmpty())
         {
-            auto avatarFile = resolveAssetFile(avatarUrl);
-            if (avatarFile.existsAsFile())
-                avatarImage = juce::ImageFileFormat::loadFrom(avatarFile);
+            avatarImage = ArtworkCache::getInstance().resolveAvatar(avatarUrl,
+                [safe = juce::Component::SafePointer<MainComponent>(this)]
+                {
+                    // Simplest safe way to pick up a just-finished avatar
+                    // download (now cached) is to re-run the whole identity
+                    // refresh -- it's cheap and idempotent.
+                    if (safe != nullptr)
+                        safe->applyCurrentIdentityToUi();
+                });
         }
     }
 
@@ -5630,10 +5680,29 @@ void MainComponent::writePlayingDocIfNeeded()
         return;
 
     playingDocWritten_ = true;
-    VenueService::getInstance().addCurrentSongPlaying (buildPlayingFromCurrentState(),
-        [](bool ok, juce::String err)
+    const auto venueId = activeVenueId_;
+    auto playing = buildPlayingFromCurrentState();
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    // Enforce "at most one playing doc, and only while someone is actually
+    // singing": always delete-then-create, sequenced (not fired in
+    // parallel), so a KJ jumping straight from one singer to another
+    // (without pressing Skip/Stop first) can never leave two playing docs
+    // stacked, and the delete can't race ahead of or behind the create.
+    // Skip/Stop/natural-finish's own clearPlayingDoc() calls become
+    // redundant-but-harmless backstops rather than the only cleanup.
+    VenueService::getInstance().removeAllCurrentSongPlaying(
+        [safe, venueId, playing](bool ok, juce::String err)
         {
-            if (! ok) DBG ("[Playing] addCurrentSongPlaying failed: " << err);
+            if (! ok) DBG ("[Playing] removeAllCurrentSongPlaying (pre-write) failed: " << err);
+            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                return;
+
+            VenueService::getInstance().addCurrentSongPlaying (playing,
+                [](bool ok2, juce::String err2)
+                {
+                    if (! ok2) DBG ("[Playing] addCurrentSongPlaying failed: " << err2);
+                });
         });
 }
 
@@ -5679,53 +5748,26 @@ void MainComponent::handleSongFinished()
     clearPlayingDoc();
 
     if (queueBar == nullptr) return;
-    const auto venueId = activeVenueId_;
 
-    // Remove the finished song from the singer's queue item now that it
-    // has actually completed, then move the singer to the end of the
-    // round with any remaining songs.
-    if (hasLocalNowPlaying_ && !localNowPlaying_.songs.empty())
+    // The round robin already cycled the moment this singer was promoted
+    // into Now Singing (see onPlaySinger -- it advances the anchor and
+    // removes the song from their queue right then, so the queue's top
+    // slot never shows the person currently performing). All that's left
+    // to do here is bump their completed-songs count; the RR/anchor and
+    // their songs[] list are untouched.
+    if (hasLocalNowPlaying_)
     {
         auto singers = queueBar->getSingers();
-        int singerIndex = -1;
-        for (int i = 0; i < (int) singers.size(); ++i)
+        for (auto& s : singers)
         {
-            if (juce::String(singers[(size_t) i].id).trim() == juce::String(localNowPlaying_.id).trim()
-                || juce::String(singers[(size_t) i].name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
+            if (juce::String(s.id).trim() == juce::String(localNowPlaying_.id).trim()
+                || juce::String(s.name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
             {
-                singerIndex = i;
+                s.songsPerformed += 1;
                 break;
             }
         }
-
-        if (singerIndex >= 0)
-        {
-            auto finishedSinger = singers[(size_t) singerIndex];
-            if (! finishedSinger.songs.empty())
-            {
-                QueueItem finishedItem;
-                finishedItem.id          = currentSong.id;
-                finishedItem.songId      = currentSong.id;
-                finishedItem.songName    = currentSong.songName;
-                finishedItem.songArtist  = currentSong.artistName;
-                finishedItem.singerName  = finishedSinger.name;
-                finishedItem.singerAvatar= finishedSinger.avatar;
-
-                finishedSinger.songs.erase(finishedSinger.songs.begin());
-                finishedSinger.songsPerformed += 1;
-
-                if (! venueId.isEmpty())
-                    QueueService::getInstance().removeSong(venueId, finishedItem, nullptr);
-            }
-
-            singers.erase(singers.begin() + singerIndex);
-            singers.push_back(finishedSinger);
-            reindexQueueWithHostRoundAnchor(singers);
-            queueBar->setSingers(singers);
-
-            if (queueBar->onReorder)
-                queueBar->onReorder(singerIndex, (int) singers.size() - 1);
-        }
+        queueBar->setSingers(singers);
     }
 
     if (bottomBar != nullptr)

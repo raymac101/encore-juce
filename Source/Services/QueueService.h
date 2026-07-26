@@ -61,12 +61,13 @@ public:
                     const QueueItem& item,
                     WriteCallback onDone = nullptr);
 
-    /** Delete the singer document under `venues/<venueId>/queue` whose
-        `singerName` matches (case-insensitive). Mirrors the Angular
-        `venueService.deleteSingerFromQueue` call used by the strikes-out
-        path in `moveSingerToEnd`. */
+    /** Delete the singer document under `venues/<venueId>/queue` matching
+        `singerNameOrDocId` -- tries an exact Firestore doc ID match first
+        (auth singers, e.g. `MainComponent::onRemoveSinger`), then falls
+        back to a case-insensitive display-name match (e.g. the strikes-out
+        path in `queueAndLoadNextSingerSong`). */
     void deleteSinger(const juce::String& venueId,
-                      const juce::String& singerName,
+                      const juce::String& singerNameOrDocId,
                       WriteCallback onDone = nullptr);
 
     /** PATCH a singer's `songs` array on `venues/<venueId>/queue` to exactly

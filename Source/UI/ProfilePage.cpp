@@ -266,7 +266,12 @@ public:
         roleValueLabel_.setText (AccessRightsUtil::userRoleToString (host.role), juce::dontSendNotification);
 
         selectedAvatarUrl_ = juce::String (host.avatarUrl);
-        const auto selectedFileName = selectedAvatarUrl_.fromLastOccurrenceOf ("/", false, false);
+        // "preset:<id>" (new TAGG) maps to "<id>.png" in the grid; a legacy
+        // relative path already ends in "<file>.png"; a custom-photo URL
+        // matches nothing here, which correctly leaves every tile unselected.
+        const auto selectedFileName = selectedAvatarUrl_.startsWithIgnoreCase ("preset:")
+            ? selectedAvatarUrl_.substring (7).trim() + ".png"
+            : selectedAvatarUrl_.fromLastOccurrenceOf ("/", false, false);
         for (auto& t : avatarTiles_)
             t->selected = (t->tileIndex >= 0
                            && t->tileIndex < (int) avatarFileNames_.size()

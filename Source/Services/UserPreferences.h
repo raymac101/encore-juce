@@ -95,6 +95,31 @@ public:
     int  getLyricVenueCodeBarHeightPercent() const;
     void setLyricVenueCodeBarHeightPercent(int percent);
 
+    //--- Lyric screen element scaling (Settings > Logo section sliders) -------
+    // All are percentages (50-200, default 100) applied on top of
+    // LyricDisplayComponent's existing size calculations, so 100% always
+    // reproduces today's look exactly.
+    int  getLyricLogoScalePercent() const;
+    void setLyricLogoScalePercent(int percent);
+
+    int  getLyricBrandTextScalePercent() const;
+    void setLyricBrandTextScalePercent(int percent);
+
+    int  getLyricNowSingingTextScalePercent() const;
+    void setLyricNowSingingTextScalePercent(int percent);
+
+    int  getLyricNowSingingInfoScalePercent() const;
+    void setLyricNowSingingInfoScalePercent(int percent);
+
+    int  getLyricUpNextTextScalePercent() const;
+    void setLyricUpNextTextScalePercent(int percent);
+
+    int  getLyricUpNextInfoScalePercent() const;
+    void setLyricUpNextInfoScalePercent(int percent);
+
+    int  getLyricBottomBarTextScalePercent() const;
+    void setLyricBottomBarTextScalePercent(int percent);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.
