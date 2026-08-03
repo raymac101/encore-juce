@@ -237,6 +237,22 @@ if(RUBBERBAND_LIBRARY_DIRS)
 endif()
 target_link_libraries(EncoreJUCE      PRIVATE ${RUBBERBAND_LIBRARIES})
 
+# Embed librubberband into the app bundle and repoint the executable at it
+# via @rpath, instead of leaving it linked against the absolute Homebrew
+# path found above. A hardened-runtime-signed build (required for
+# notarization, see packaging/macos/build_dmg.sh) enforces library
+# validation and refuses to load a dylib not signed with this project's
+# own Team ID -- Homebrew's rubberband build isn't, so without this the
+# signed/notarized app aborts at launch on every machine, including the
+# one it was built on. See packaging/macos/embed_rubberband.sh.
+if(APPLE)
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_SOURCE_DIR}/packaging/macos/embed_rubberband.sh
+            $<TARGET_FILE:EncoreJUCE>
+            $<TARGET_BUNDLE_CONTENT_DIR:EncoreJUCE>/Frameworks
+        COMMENT "Embedding librubberband into the app bundle for distribution")
+endif()
+
 target_include_directories(EncoreJUCE PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # SQLite3 — used by SongDatabase. macOS ships with system sqlite3.
