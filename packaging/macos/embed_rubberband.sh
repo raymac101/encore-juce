@@ -67,6 +67,18 @@ embed_one() {
         subname="$(basename "${subdep}")"
         install_name_tool -change "${subdep}" "@rpath/${subname}" "${dest}" 2>/dev/null || true
     done < <(homebrew_deps_of "${dep}")
+
+    # install_name_tool invalidates whatever signature the file had
+    # (Homebrew's own, in this case). Xcode's automatic CodeSign build
+    # phase only signs the top-level app bundle -- it does not re-sign
+    # loose dylibs sitting in Contents/Frameworks -- so without this the
+    # bundle fails codesign --verify --deep and macOS refuses to launch it
+    # at all (SIGKILL "Code Signature Invalid"), even for a plain ad-hoc
+    # Debug build with no hardened runtime. Ad-hoc self-sign here is enough
+    # to satisfy that; packaging/macos/build_dmg.sh's later `codesign
+    # --deep --sign <Developer ID>` overwrites this with the real identity
+    # for Release/notarized builds, so this doesn't conflict with that flow.
+    codesign --force --sign - "${dest}"
 }
 
 dep=""

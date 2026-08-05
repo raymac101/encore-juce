@@ -13,12 +13,42 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include <unordered_map>
 #include <vector>
 #include "../CDG/CDGDecoder.h"
 #include "../Models/Emoji.h"
 
 class AudioEngine;
+
+// Lyric screen visual theme, configurable in Settings alongside Color/Motion
+// Intensity. Stored in UserPreferences as a plain clamped int (0-7) so the
+// Services layer doesn't need to include this UI header.
+enum class LyricTheme
+{
+    Classic = 0,
+    NeonPulse,
+    ConfettiPop,
+    DiscoSweep,
+    RetroMarquee,
+    LaserGrid,
+    BubblegumPop,
+    VuMeterPulse
+};
+
+// Resolved, intensity-scaled colour set for one theme. accent/ink/etc. cover
+// every element that was previously a single hardcoded cyan/white/black
+// literal in paintIdle()/paintOverlay() -- see resolveLyricThemePalette().
+struct LyricThemePalette
+{
+    juce::Colour accent;
+    juce::Colour ink;
+    juce::Colour inkDim;
+    juce::Colour cardFill;
+    juce::Colour cardBorder;
+    juce::Colour avatarRing;
+    juce::Colour avatarFallback;
+};
 
 class LyricDisplayComponent  : public juce::Component,
                                private juce::Timer
@@ -148,6 +178,11 @@ private:
     void paintCdg     (juce::Graphics& g, juce::Rectangle<int> area);
     void paintAdPanel (juce::Graphics& g, juce::Rectangle<int> area, bool addFrame);
     void paintOverlay (juce::Graphics& g, juce::Rectangle<int> area);
+    void paintThemeBackdrop (juce::Graphics& g, juce::Rectangle<int> area, LyricTheme theme,
+                             const LyricThemePalette& palette, double animPhase, float motion01);
+    void paintNowCardDecoration (juce::Graphics& g, juce::Rectangle<int> nowCard, LyricTheme theme,
+                                 const LyricThemePalette& palette, double animPhase, float motion01);
+    void seedThemeAnimations();
     void updateEmojis (double dtSeconds);
     void paintEmojis  (juce::Graphics& g, juce::Rectangle<int> area);
     juce::Image getOrLoadEmojiSheet (const juce::String& emojiName, int& outTotalFrames);
@@ -220,6 +255,26 @@ private:
     double lastEmojiTickMs_ = 0.0;
     static constexpr int kMaxConcurrentEmojis = 40;
     static constexpr int kEmojiFrameSize = 480;
+
+    // Lyric screen theme animation (Settings: Theme / Color Intensity /
+    // Motion Intensity). animPhase_ is the single shared, motion-scaled,
+    // monotonically-advancing clock every theme's decoration reads from --
+    // see timerCallback() and paintThemeBackdrop(). Seed arrays are
+    // constructor-initialised once and never mutated, so switching themes
+    // needs no reset: every value is a pure function of animPhase_ plus a
+    // fixed per-element seed.
+    double animPhase_ = 0.0;
+    double lastThemeTickMs_ = 0.0;
+
+    struct ConfettiSeed    { float x0, fallSpeed, size, rotSpeed, rotOffset; int colourIdx; };
+    struct BubbleSeed      { float x0, y0, radius, bobSpeed, bobPhase, driftSpeed, driftPhase; };
+    struct MarqueeBulbSeed { float x; bool topEdge; float phaseOffset; };
+    struct VuBarSeed       { float x; float speedMul; float phaseOffset; };
+
+    std::array<ConfettiSeed, 24>    confettiSeeds_;
+    std::array<BubbleSeed, 6>       bubbleSeeds_;
+    std::array<MarqueeBulbSeed, 24> marqueeBulbSeeds_;
+    std::array<VuBarSeed, 20>       vuBarSeeds_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayComponent)
 };

@@ -167,6 +167,77 @@ namespace
     // ArtworkCache::resolveAvatar().
 }
 
+namespace
+{
+    // Scales saturation only (hue/brightness/alpha untouched) so Color
+    // Intensity mutes every theme's accent uniformly, including Classic's
+    // cyan -- at 100% (default) this is a no-op and Classic renders exactly
+    // as it always has.
+    juce::Colour scaleSaturation (juce::Colour c, float intensity01)
+    {
+        return c.withSaturation (c.getSaturation() * juce::jlimit (0.0f, 1.0f, intensity01));
+    }
+
+    // One "100% intensity" design value per theme, mirroring the CSS custom
+    // properties (--t-accent, --t-ink, --t-ink-dim, --t-card-bg, --t-card-line,
+    // --t-avatar) validated in the approved mockup. Confetti Pop and
+    // Bubblegum Pop intentionally use light cards + dark ink -- the opposite
+    // polarity from the other six -- which is why every card/text colour is
+    // palette-driven rather than just the accent.
+    const std::array<LyricThemePalette, 8>& lyricThemeBaseTable()
+    {
+        static const std::array<LyricThemePalette, 8> table = { {
+            // Classic -- matches today's app exactly at Color Intensity 100%.
+            { juce::Colour (0xff30daff), juce::Colours::white, juce::Colours::white.withAlpha (0.80f),
+              juce::Colours::black.withAlpha (0.35f), juce::Colour (0xff30daff).withAlpha (0.18f),
+              juce::Colour (0xff30daff).withAlpha (0.22f), juce::Colours::black.withAlpha (0.70f) },
+            // Neon Pulse -- magenta/purple/cyan.
+            { juce::Colour (0xffff2ec4), juce::Colours::white, juce::Colours::white.withAlpha (0.82f),
+              juce::Colour (0xff2a1240).withAlpha (0.55f), juce::Colour (0xffff2ec4).withAlpha (0.35f),
+              juce::Colour (0xff30daff).withAlpha (0.35f), juce::Colours::black.withAlpha (0.55f) },
+            // Confetti Pop -- light cream cards, dark ink (inverted).
+            { juce::Colour (0xffff3d81), juce::Colour (0xff3a2a1a), juce::Colour (0xff3a2a1a).withAlpha (0.75f),
+              juce::Colour (0xfffff3e6).withAlpha (0.92f), juce::Colour (0xffff3d81).withAlpha (0.45f),
+              juce::Colour (0xffff3d81).withAlpha (0.35f), juce::Colours::white.withAlpha (0.55f) },
+            // Disco Sweep -- near-black, warm gold accent.
+            { juce::Colour (0xffffc94d), juce::Colours::white, juce::Colours::white.withAlpha (0.78f),
+              juce::Colours::black.withAlpha (0.45f), juce::Colour (0xffffc94d).withAlpha (0.30f),
+              juce::Colour (0xffffc94d).withAlpha (0.30f), juce::Colours::black.withAlpha (0.65f) },
+            // Retro Marquee -- deep burgundy, warm gold accent.
+            { juce::Colour (0xffffcf70), juce::Colours::white, juce::Colours::white.withAlpha (0.80f),
+              juce::Colour (0xff2a0810).withAlpha (0.55f), juce::Colour (0xffffcf70).withAlpha (0.30f),
+              juce::Colour (0xffffcf70).withAlpha (0.30f), juce::Colours::black.withAlpha (0.55f) },
+            // Laser Grid -- synthwave purple/pink, hot pink accent.
+            { juce::Colour (0xffff4fd8), juce::Colours::white, juce::Colours::white.withAlpha (0.82f),
+              juce::Colour (0xff2a1250).withAlpha (0.55f), juce::Colour (0xff30daff).withAlpha (0.35f),
+              juce::Colour (0xffff4fd8).withAlpha (0.35f), juce::Colours::black.withAlpha (0.55f) },
+            // Bubblegum Pop -- pastel, light cards, dark ink (inverted).
+            { juce::Colour (0xffff6fb0), juce::Colour (0xff44304a), juce::Colour (0xff44304a).withAlpha (0.72f),
+              juce::Colour (0xfffff0f8).withAlpha (0.90f), juce::Colour (0xffff6fb0).withAlpha (0.40f),
+              juce::Colour (0xffff6fb0).withAlpha (0.35f), juce::Colours::white.withAlpha (0.55f) },
+            // VU Meter Pulse -- near-black, signal-green accent.
+            { juce::Colour (0xff39ff6a), juce::Colours::white, juce::Colours::white.withAlpha (0.78f),
+              juce::Colours::black.withAlpha (0.45f), juce::Colour (0xff39ff6a).withAlpha (0.30f),
+              juce::Colour (0xff39ff6a).withAlpha (0.30f), juce::Colours::black.withAlpha (0.65f) }
+        } };
+        return table;
+    }
+
+    LyricThemePalette resolveLyricThemePalette (LyricTheme theme, float colorIntensity01)
+    {
+        const auto& base = lyricThemeBaseTable()[(size_t) theme];
+        LyricThemePalette out = base;
+        out.accent         = scaleSaturation (base.accent,         colorIntensity01);
+        out.ink             = scaleSaturation (base.ink,             colorIntensity01);
+        out.inkDim          = scaleSaturation (base.inkDim,          colorIntensity01);
+        out.cardFill        = scaleSaturation (base.cardFill,        colorIntensity01);
+        out.cardBorder      = scaleSaturation (base.cardBorder,      colorIntensity01);
+        out.avatarRing      = scaleSaturation (base.avatarRing,      colorIntensity01);
+        out.avatarFallback  = scaleSaturation (base.avatarFallback,  colorIntensity01);
+        return out;
+    }
+}
+
 //==============================================================================
 LyricDisplayComponent::LyricDisplayComponent()
 {
@@ -185,7 +256,56 @@ LyricDisplayComponent::LyricDisplayComponent()
     // perceivable lyric motion is much slower.
     startTimerHz (30);
 
+    seedThemeAnimations();
     refreshAdsAsync (true);
+}
+
+void LyricDisplayComponent::seedThemeAnimations()
+{
+    juce::Random rng (juce::Time::currentTimeMillis());
+
+    for (auto& s : confettiSeeds_)
+    {
+        s.x0        = rng.nextFloat();
+        s.fallSpeed = 0.12f + rng.nextFloat() * 0.18f;
+        s.size      = 6.0f + rng.nextFloat() * 8.0f;
+        s.rotSpeed  = 0.5f + rng.nextFloat() * 1.5f;
+        s.rotOffset = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+        s.colourIdx = rng.nextInt (4);
+    }
+
+    for (auto& s : bubbleSeeds_)
+    {
+        s.x0          = rng.nextFloat();
+        s.y0          = rng.nextFloat();
+        s.radius      = 24.0f + rng.nextFloat() * 40.0f;
+        s.bobSpeed    = 0.4f + rng.nextFloat() * 0.5f;
+        s.bobPhase    = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+        s.driftSpeed  = 0.15f + rng.nextFloat() * 0.2f;
+        s.driftPhase  = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+    }
+
+    // Bulbs/bars read x as a fractional position across the strip -- lay
+    // them out evenly rather than randomly so the row reads as an
+    // intentional strip, not scattered noise.
+    const int halfBulbs = (int) marqueeBulbSeeds_.size() / 2;
+    for (int i = 0; i < (int) marqueeBulbSeeds_.size(); ++i)
+    {
+        auto& s = marqueeBulbSeeds_[(size_t) i];
+        const bool top = i < halfBulbs;
+        const int idxInRow = top ? i : (i - halfBulbs);
+        s.x           = (float) idxInRow / (float) (halfBulbs - 1);
+        s.topEdge     = top;
+        s.phaseOffset = (float) idxInRow * 0.35f;
+    }
+
+    for (int i = 0; i < (int) vuBarSeeds_.size(); ++i)
+    {
+        auto& s = vuBarSeeds_[(size_t) i];
+        s.x           = (float) i / (float) (vuBarSeeds_.size() - 1);
+        s.speedMul    = 0.8f + rng.nextFloat() * 1.6f;
+        s.phaseOffset = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+    }
 }
 
 LyricDisplayComponent::~LyricDisplayComponent()
@@ -432,6 +552,23 @@ void LyricDisplayComponent::timerCallback()
         updateEmojis (dt);
     }
 
+    // Advance the shared lyric-theme animation clock. Every themed
+    // decoration (particles, beams, chase bulbs, VU bars...) reads a value
+    // as a pure function of animPhase_ plus a fixed per-element seed -- see
+    // paintThemeBackdrop() -- so multiplying the phase advance by
+    // motion01 uniformly is enough to make Motion Intensity = 0 freeze
+    // every theme with no per-theme branching, and there is no simulation
+    // state to reset when the host switches themes.
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = (lastThemeTickMs_ > 0.0)
+                             ? juce::jlimit (0.0, 0.25, (nowMs - lastThemeTickMs_) / 1000.0)
+                             : (1.0 / 30.0);
+        lastThemeTickMs_ = nowMs;
+        const float motion01 = UserPreferences::getInstance().getLyricMotionIntensityPercent() / 100.0f;
+        animPhase_ += dt * motion01;
+    }
+
     if (forceIdleScreen_)
     {
         // The next song may be preloaded while transport is stopped. Keep the
@@ -575,20 +712,21 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
 
 void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> area)
 {
+    const auto fullArea = area;
     auto left = area.removeFromLeft (area.getWidth() / 2);
     auto right = area;
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4c4c4c),
-                                             (float) left.getX(), (float) left.getY(),
-                                             juce::Colour (0xff2b2b2b),
-                                             (float) left.getRight(), (float) left.getBottom(),
-                                             false));
-    g.fillRect (left);
+    auto& prefs = UserPreferences::getInstance();
+    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 7, prefs.getLyricThemeIndex()));
+    const float colorIntensity01  = prefs.getLyricColorIntensityPercent()  / 100.0f;
+    const float motionIntensity01 = prefs.getLyricMotionIntensityPercent() / 100.0f;
+    const auto pal = resolveLyricThemePalette (theme, colorIntensity01);
+
+    paintThemeBackdrop (g, fullArea, theme, pal, animPhase_, motionIntensity01);
 
     g.setColour (juce::Colours::black.withAlpha (0.22f));
     g.fillRect (right);
 
-    auto& prefs = UserPreferences::getInstance();
     const float logoScale         = prefs.getLyricLogoScalePercent()          / 100.0f;
     const float brandTextScale    = prefs.getLyricBrandTextScalePercent()     / 100.0f;
     const float nowTextScale      = prefs.getLyricNowSingingTextScalePercent() / 100.0f;
@@ -603,6 +741,21 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     if (logoImage_.isValid())
     {
         auto logoArea = brandArea.removeFromTop ((int) (brandArea.getHeight() * 0.56f * logoScale));
+
+        // The logo artwork has semi-transparent shading, so the busier/
+        // brighter theme backdrops show through it and wash it out. A soft
+        // dark halo behind it keeps it legible on top of any theme. Classic
+        // is left untouched (pixel parity with the pre-theme app).
+        if (theme != LyricTheme::Classic)
+        {
+            const auto glow = logoArea.toFloat().expanded (logoArea.getWidth() * 0.22f);
+            const auto centre = glow.getCentre();
+            juce::ColourGradient glowGrad (juce::Colours::black.withAlpha (0.55f), centre.x, centre.y,
+                                           juce::Colours::black.withAlpha (0.0f), glow.getRight(), centre.y, true);
+            g.setGradientFill (glowGrad);
+            g.fillEllipse (glow);
+        }
+
         // No onlyReduceInSize here (unlike the pre-scale-slider version) --
         // the slider needs to be able to grow the logo past its native
         // pixel size, not just shrink it.
@@ -610,21 +763,24 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     }
 
     const auto venueLabel = venueName_.isNotEmpty() ? venueName_ : juce::String ("Encore Karaoke");
-    g.setColour (juce::Colours::white);
+    g.setColour (pal.ink);
     g.setFont (juce::Font (juce::FontOptions().withHeight (juce::jmax (24.0f, brandArea.getHeight() * 0.16f) * brandTextScale)).boldened());
     g.drawFittedText (venueLabel, brandArea, juce::Justification::centredTop, 2);
 
     if (nowSingingName_.isNotEmpty())
     {
-        g.setColour (juce::Colour (0xff30daff));
+        g.setColour (pal.accent);
         g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * nowTextScale)).boldened());
         auto nowTitle = queueArea.removeFromTop ((int) (30 * nowTextScale));
         g.drawText ("Now Singing", nowTitle, juce::Justification::centredLeft, true);
 
         const int nowCardH = (int) (72 * juce::jmax (nowInfoScale, nowTextScale));
         auto nowCard = queueArea.removeFromTop (nowCardH).reduced (0, 6);
-        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.setColour (pal.cardFill);
         g.fillRoundedRectangle (nowCard.toFloat(), 8.0f);
+        g.setColour (pal.cardBorder);
+        g.drawRoundedRectangle (nowCard.toFloat().reduced (0.5f), 8.0f, 1.2f);
+        paintNowCardDecoration (g, nowCard, theme, pal, animPhase_, motionIntensity01);
 
         auto nowText = nowCard.reduced (12, 10);
         auto nowAvatarBox = nowText.removeFromLeft ((int) (48 * nowInfoScale));
@@ -654,7 +810,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
         const auto nowAvatar = getQueuePreviewAvatar (resolvedNowAvatarPath);
         if (! nowAvatar.isValid())
         {
-            g.setColour (juce::Colours::black.withAlpha (0.70f));
+            g.setColour (pal.avatarFallback);
             g.fillEllipse (nowAvatarArea.toFloat());
         }
 
@@ -666,11 +822,11 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             g.reduceClipRegion (clipPath);
             g.drawImage (nowAvatar, nowAvatarArea.toFloat(), juce::RectanglePlacement::fillDestination);
         }
-        g.setColour (juce::Colour (0xff30daff).withAlpha (0.22f));
+        g.setColour (pal.avatarRing);
         g.drawEllipse (nowAvatarArea.toFloat().reduced (0.5f), 1.2f);
 
         nowText.removeFromLeft (6);
-        g.setColour (juce::Colours::white);
+        g.setColour (pal.ink);
         g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * nowTextScale)).boldened());
         g.drawText (nowSingingName_, nowText.removeFromTop ((int) (24 * nowTextScale)), juce::Justification::centredLeft, true);
 
@@ -678,14 +834,14 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
         if (nowSingingArtist_.isNotEmpty())
             nowSongLine << " - " << nowSingingArtist_;
 
-        g.setColour (juce::Colours::white.withAlpha (0.80f));
+        g.setColour (pal.inkDim);
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * nowTextScale)));
         g.drawFittedText (nowSongLine, nowText, juce::Justification::centredLeft, 1);
 
         queueArea.removeFromTop (4);
     }
 
-    g.setColour (juce::Colour (0xff30daff));
+    g.setColour (pal.accent);
     g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f * upNextTextScale)).boldened());
     if (! queuePreview_.empty())
     {
@@ -695,7 +851,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
 
     if (queuePreview_.empty())
     {
-        g.setColour (juce::Colours::white.withAlpha (0.65f));
+        g.setColour (pal.inkDim);
         g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * upNextTextScale)));
         g.drawFittedText ("Queue is waiting for singers", queueArea, juce::Justification::centred, 2);
     }
@@ -711,11 +867,13 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
 
             auto row = queueArea.removeFromTop (rowH).reduced (0, 6);
 
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.setColour (pal.cardFill);
             g.fillRoundedRectangle (row.toFloat(), 8.0f);
+            g.setColour (pal.cardBorder);
+            g.drawRoundedRectangle (row.toFloat().reduced (0.5f), 8.0f, 1.0f);
 
             auto text = row.reduced (12, 10);
-            g.setColour (juce::Colour (0xff30daff));
+            g.setColour (pal.accent);
             g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * upNextTextScale)).boldened());
             g.drawText (juce::String (i + 1), text.removeFromLeft ((int) (26 * upNextTextScale)), juce::Justification::centred);
 
@@ -732,7 +890,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             // Keep real avatars un-tinted. Draw fallback backing only when missing.
             if (! avatar.isValid())
             {
-                g.setColour (juce::Colours::black.withAlpha (0.70f));
+                g.setColour (pal.avatarFallback);
                 g.fillEllipse (avatarArea.toFloat());
             }
 
@@ -746,13 +904,13 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             }
 
             // Subtle ring for separation from row background.
-            g.setColour (juce::Colour (0xff30daff).withAlpha (0.22f));
+            g.setColour (pal.avatarRing);
             g.drawEllipse (avatarArea.toFloat().reduced (0.5f), 1.2f);
 
             // Breathing room between avatar and singer name.
             text.removeFromLeft (8);
 
-            g.setColour (juce::Colours::white);
+            g.setColour (pal.ink);
             g.setFont (juce::Font (juce::FontOptions().withHeight (20.0f * upNextTextScale)).boldened());
             g.drawText (queuePreview_[(size_t) i].singerName, text.removeFromTop ((int) (24 * upNextTextScale)), juce::Justification::centredLeft, true);
 
@@ -760,7 +918,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
             if (queuePreview_[(size_t) i].artistName.isNotEmpty())
                 songLine << " - " << queuePreview_[(size_t) i].artistName;
 
-            g.setColour (juce::Colours::white.withAlpha (0.78f));
+            g.setColour (pal.inkDim);
             g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f * upNextTextScale)));
             g.drawFittedText (songLine, text, juce::Justification::centredLeft, 1);
         }
@@ -829,8 +987,236 @@ void LyricDisplayComponent::paintCdg (juce::Graphics& g, juce::Rectangle<int> ar
                  false);
 }
 
+void LyricDisplayComponent::paintThemeBackdrop (juce::Graphics& g, juce::Rectangle<int> area, LyricTheme theme,
+                                                const LyricThemePalette& pal, double animPhase, float motion01)
+{
+    juce::ignoreUnused (pal);
+
+    const float w  = (float) area.getWidth();
+    const float h  = (float) area.getHeight();
+    const float cx = (float) area.getCentreX();
+    const float cy = (float) area.getCentreY();
+
+    switch (theme)
+    {
+        case LyricTheme::Classic:
+        {
+            // Byte-identical to the pre-theme app -- guarantees true pixel
+            // parity at Color Intensity 100%.
+            auto left = area.removeFromLeft (area.getWidth() / 2);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4c4c4c),
+                                                     (float) left.getX(), (float) left.getY(),
+                                                     juce::Colour (0xff2b2b2b),
+                                                     (float) left.getRight(), (float) left.getBottom(),
+                                                     false));
+            g.fillRect (left);
+            break;
+        }
+
+        case LyricTheme::NeonPulse:
+        {
+            const float angle = (float) animPhase * 0.15f;
+            const float dx = std::cos (angle) * w * 0.5f;
+            const float dy = std::sin (angle) * h * 0.5f;
+            juce::ColourGradient grad (juce::Colour (0xffb400ff), cx - dx, cy - dy,
+                                       juce::Colour (0xff00e0ff), cx + dx, cy + dy, false);
+            grad.addColour (0.5, juce::Colour (0xff5a1fd0));
+            g.setGradientFill (grad);
+            g.fillRect (area);
+            break;
+        }
+
+        case LyricTheme::ConfettiPop:
+        {
+            juce::ColourGradient grad (juce::Colour (0xffffd23f), (float) area.getX(), (float) area.getY(),
+                                       juce::Colour (0xffff5e7e), (float) area.getRight(), (float) area.getBottom(), false);
+            grad.addColour (0.5, juce::Colour (0xffff9c3f));
+            g.setGradientFill (grad);
+            g.fillRect (area);
+
+            static const juce::Colour confettiColours[4] = {
+                juce::Colours::white, juce::Colour (0xff30daff),
+                juce::Colour (0xff39ff6a), juce::Colour (0xffffe14d)
+            };
+
+            for (const auto& s : confettiSeeds_)
+            {
+                const float yFrac = std::fmod ((float) animPhase * s.fallSpeed + s.x0 * 3.0f, 1.0f);
+                const float x = area.getX() + s.x0 * w;
+                const float y = area.getY() + yFrac * h;
+                const float rot = s.rotOffset + (float) animPhase * s.rotSpeed;
+
+                juce::Path quad;
+                quad.addRectangle (-s.size * 0.5f, -s.size * 0.35f, s.size, s.size * 0.7f);
+                quad.applyTransform (juce::AffineTransform::rotation (rot).translated (x, y));
+
+                g.setColour (confettiColours[(size_t) s.colourIdx].withAlpha (0.9f));
+                g.fillPath (quad);
+            }
+            break;
+        }
+
+        case LyricTheme::DiscoSweep:
+        {
+            g.setColour (juce::Colour (0xff0c0c10));
+            g.fillRect (area);
+
+            static const juce::Colour beamColours[3] = {
+                juce::Colour (0xffffc94d), juce::Colour (0xff30daff), juce::Colour (0xffff4fd8)
+            };
+
+            for (int i = 0; i < 3; ++i)
+            {
+                const float speed = 0.25f + (float) i * 0.12f;
+                const float angle = (float) animPhase * speed + (float) i * 2.1f;
+
+                juce::Path beam;
+                const float len = juce::jmax (w, h) * 1.4f;
+                beam.addRectangle (-len * 0.5f, -18.0f, len, 36.0f);
+                beam.applyTransform (juce::AffineTransform::rotation (angle).translated (cx, cy));
+
+                // No true "screen" blend mode in JUCE's 2D context -- modest
+                // alpha over near-black approximates the mockup's additive
+                // glow, though overlapping beams will darken/mix rather than
+                // truly brighten.
+                juce::ColourGradient beamGrad (beamColours[(size_t) i].withAlpha (0.28f), cx, cy,
+                                               beamColours[(size_t) i].withAlpha (0.0f), cx + len * 0.5f, cy, false);
+                g.setGradientFill (beamGrad);
+                g.fillPath (beam);
+            }
+            break;
+        }
+
+        case LyricTheme::RetroMarquee:
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a0812), (float) area.getX(), (float) area.getY(),
+                                                     juce::Colour (0xff1c0509), (float) area.getX(), (float) area.getBottom(), false));
+            g.fillRect (area);
+
+            const float edgeMargin = 14.0f;
+            for (const auto& s : marqueeBulbSeeds_)
+            {
+                const float x = area.getX() + s.x * w;
+                const float y = s.topEdge ? area.getY() + edgeMargin : area.getBottom() - edgeMargin;
+                // motion01 scales the chase amplitude directly so Motion=0
+                // settles every bulb to the same dim rest brightness instead
+                // of freezing on an arbitrary per-bulb phase.
+                const float brightness = 0.35f + 0.65f * motion01 * std::abs (std::sin ((float) animPhase * 2.2f + s.phaseOffset));
+
+                g.setColour (juce::Colour (0xffffcf70).withAlpha (brightness * 0.35f));
+                g.fillEllipse (x - 7.0f, y - 7.0f, 14.0f, 14.0f);
+                g.setColour (juce::Colour (0xffffe9b8).withAlpha (0.5f + brightness * 0.5f));
+                g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+            }
+            break;
+        }
+
+        case LyricTheme::LaserGrid:
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff230832), (float) area.getX(), (float) area.getY(),
+                                                     juce::Colour (0xff5e1a4a), (float) area.getX(), (float) area.getBottom(), false));
+            g.fillRect (area);
+
+            const float horizonY = area.getY() + h * 0.55f;
+            const float scroll = std::fmod ((float) animPhase * 0.35f, 1.0f);
+
+            // Horizontal perspective lines, spaced quadratically so they
+            // bunch up near the horizon like a receding floor grid.
+            for (int i = 0; i < 10; ++i)
+            {
+                const float t = ((float) i + scroll) / 10.0f;
+                const float y = horizonY + t * t * (area.getBottom() - horizonY);
+                const float alpha = juce::jmax (0.0f, 0.5f - t * 0.4f);
+                g.setColour (juce::Colour (0xff30daff).withAlpha (alpha * 0.35f));
+                g.drawLine ((float) area.getX(), y, (float) area.getRight(), y, 3.0f);
+                g.setColour (juce::Colour (0xffff4fd8).withAlpha (alpha));
+                g.drawLine ((float) area.getX(), y, (float) area.getRight(), y, 1.2f);
+            }
+
+            // Converging diagonals from the horizon out to the bottom edge.
+            for (int i = -5; i <= 5; ++i)
+            {
+                const float xTop = cx + (float) i * (w * 0.05f);
+                const float xBottom = cx + (float) i * (w * 0.5f);
+                g.setColour (juce::Colour (0xffff4fd8).withAlpha (0.25f));
+                g.drawLine (xTop, horizonY, xBottom, (float) area.getBottom(), 1.2f);
+            }
+            break;
+        }
+
+        case LyricTheme::BubblegumPop:
+        {
+            juce::ColourGradient grad (juce::Colour (0xffffd6ec), (float) area.getX(), (float) area.getY(),
+                                       juce::Colour (0xffd6ecff), (float) area.getRight(), (float) area.getBottom(), false);
+            grad.addColour (0.5, juce::Colour (0xffe9d6ff));
+            g.setGradientFill (grad);
+            g.fillRect (area);
+
+            // Radial gradient fill fakes a soft blur -- a true blur would
+            // need an offscreen image + convolution, unnecessary for v1.
+            for (const auto& s : bubbleSeeds_)
+            {
+                const float x = area.getX() + s.x0 * w + std::sin ((float) animPhase * s.driftSpeed + s.driftPhase) * 14.0f;
+                const float y = area.getY() + s.y0 * h + std::sin ((float) animPhase * s.bobSpeed + s.bobPhase) * 18.0f;
+
+                juce::ColourGradient bubbleGrad (juce::Colours::white.withAlpha (0.55f), x, y,
+                                                 juce::Colour (0xffff9fd0).withAlpha (0.05f), x + s.radius, y + s.radius, false);
+                g.setGradientFill (bubbleGrad);
+                g.fillEllipse (x - s.radius, y - s.radius, s.radius * 2.0f, s.radius * 2.0f);
+            }
+            break;
+        }
+
+        case LyricTheme::VuMeterPulse:
+        {
+            g.setColour (juce::Colour (0xff0a0a0a));
+            g.fillRect (area);
+
+            const float barAreaH = h * 0.4f;
+            const float barBaseY = (float) area.getBottom() - 8.0f;
+            const float barW = juce::jmax (3.0f, w / (float) vuBarSeeds_.size() * 0.6f);
+
+            for (const auto& s : vuBarSeeds_)
+            {
+                const float x = area.getX() + s.x * w;
+                const float level = std::abs (std::sin ((float) animPhase * s.speedMul + s.phaseOffset));
+                // motion01 scales the swing amplitude directly, so Motion=0
+                // settles every bar to the same flat rest height rather than
+                // freezing mid-bounce at an arbitrary per-bar phase.
+                const float barH = 6.0f + level * barAreaH * motion01;
+
+                g.setColour (juce::Colour (0xff39ff6a).withAlpha (0.85f));
+                g.fillRoundedRectangle (x - barW * 0.5f, barBaseY - barH, barW, barH, barW * 0.3f);
+            }
+            break;
+        }
+    }
+}
+
+void LyricDisplayComponent::paintNowCardDecoration (juce::Graphics& g, juce::Rectangle<int> nowCard, LyricTheme theme,
+                                                     const LyricThemePalette& pal, double animPhase, float motion01)
+{
+    // Only Neon Pulse gets a breathing glow around the Now Singing card;
+    // every other theme is a no-op here.
+    if (theme != LyricTheme::NeonPulse)
+        return;
+
+    const float pulse = 0.5f + 0.5f * motion01 * std::sin ((float) animPhase * 1.8f);
+    for (int ring = 0; ring < 3; ++ring)
+    {
+        const float expand = (float) ring * 3.0f + pulse * 4.0f;
+        g.setColour (pal.accent.withAlpha (0.20f - (float) ring * 0.06f));
+        g.drawRoundedRectangle (nowCard.toFloat().expanded (expand), 8.0f + expand, 1.5f);
+    }
+}
+
 void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int> area)
 {
+    auto& prefs = UserPreferences::getInstance();
+    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 7, prefs.getLyricThemeIndex()));
+    const float colorIntensity01 = prefs.getLyricColorIntensityPercent() / 100.0f;
+    const auto pal = resolveLyricThemePalette (theme, colorIntensity01);
+
     // --- Next singer banner (top-right) ---
     if (nextSinger_.isNotEmpty())
     {
@@ -842,12 +1228,12 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
 
         g.setColour (juce::Colour (0xdd000000));
         g.fillRoundedRectangle (banner.toFloat(), 8.0f);
-        g.setColour (juce::Colour (0xff30daff));
+        g.setColour (pal.accent);
         g.drawRoundedRectangle (banner.toFloat().reduced (0.5f), 8.0f, 1.5f);
 
         auto text = banner.reduced (14, 10);
 
-        g.setColour (juce::Colour (0xff30daff));
+        g.setColour (pal.accent);
         g.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
         g.drawText ("NEXT UP", text.removeFromTop (20),
                     juce::Justification::centredLeft);
@@ -896,7 +1282,7 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
             const float titleSize = juce::jmax (16.0f, leftHalf.getHeight() * 0.28f) * bottomBarTextScale;
             const float singerSize = juce::jmax (24.0f, leftHalf.getHeight() * 0.48f) * bottomBarTextScale;
 
-            g.setColour (juce::Colour (0xff30daff));
+            g.setColour (pal.accent);
             g.setFont (juce::Font (juce::FontOptions().withHeight (titleSize)).boldened());
             auto titleArea = leftHalf.removeFromTop ((int) (titleSize * 1.15f));
             g.drawFittedText ("Next Up", titleArea, juce::Justification::centredLeft, 1);
@@ -917,7 +1303,7 @@ void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int
             g.drawFittedText ("Enter this code to join the karaoke queue",
                               promptArea, juce::Justification::centred, 1);
 
-            g.setColour (juce::Colour (0xff30daff));
+            g.setColour (pal.accent);
             g.setFont (juce::Font (juce::FontOptions().withHeight (codeSize)).boldened());
             g.drawFittedText (venueCode_, rightHalf, juce::Justification::centred, 1);
         }

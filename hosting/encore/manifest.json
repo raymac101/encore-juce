@@ -1,5 +1,5 @@
 {
-  "latestVersion": "1.1.204",
+  "latestVersion": "1.1.206",
   "releaseNotesUrl": "",
   "platforms": {
     "windows": {
@@ -7,8 +7,8 @@
       "sha256": "776b8eb8a9278697639016bd4ac1b592d8e1f3d2a6dded52c347270f5092a984"
     },
     "macos": {
-      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-1.1.204-mac.dmg?alt=media",
-      "sha256": "9d01fe3b3e73c3de418459fd2ab45ebd8f9e67a3484f2b6794cc9e3c9c8b5e60"
+      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-1.1.206-mac.dmg?alt=media",
+      "sha256": "096eceb77b0cd2aab9d4cafd953240307c334266014560fa589f7b1eb16f9e8b"
     }
   }
 }

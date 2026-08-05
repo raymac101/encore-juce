@@ -435,6 +435,37 @@ public:
         // the lyric window updates live as the slider moves.
         auto& prefs = UserPreferences::getInstance();
 
+        // Theme + Color/Motion Intensity -- same live-apply pattern, placed
+        // first as the highest-impact control in this section.
+        initFieldLabel(lblLyricTheme_, lm.getText("settings.lbl_lyric_theme"));
+        initCombo(cbLyricTheme_);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_classic"),      1);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_neon_pulse"),   2);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_confetti_pop"), 3);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_disco_sweep"),  4);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_retro_marquee"),5);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_laser_grid"),   6);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_bubblegum_pop"),7);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_vu_meter"),     8);
+        cbLyricTheme_.setSelectedId(prefs.getLyricThemeIndex() + 1, juce::dontSendNotification);
+        cbLyricTheme_.onChange = [this]() {
+            UserPreferences::getInstance().setLyricThemeIndex(cbLyricTheme_.getSelectedId() - 1);
+        };
+
+        initFieldLabel(lblLyricColorIntensity_, lm.getText("settings.lbl_lyric_color_intensity"));
+        initSlider(sLyricColorIntensity_, 0, 100, 5, "%");
+        sLyricColorIntensity_.setValue(prefs.getLyricColorIntensityPercent(), juce::dontSendNotification);
+        sLyricColorIntensity_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricColorIntensityPercent((int) sLyricColorIntensity_.getValue());
+        };
+
+        initFieldLabel(lblLyricMotionIntensity_, lm.getText("settings.lbl_lyric_motion_intensity"));
+        initSlider(sLyricMotionIntensity_, 0, 100, 5, "%");
+        sLyricMotionIntensity_.setValue(prefs.getLyricMotionIntensityPercent(), juce::dontSendNotification);
+        sLyricMotionIntensity_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricMotionIntensityPercent((int) sLyricMotionIntensity_.getValue());
+        };
+
         initFieldLabel(lblLyricLogoScale_, lm.getText("settings.lbl_lyric_logo_scale"));
         initSlider(sLyricLogoScale_, 50, 200, 5, "%");
         sLyricLogoScale_.setValue(prefs.getLyricLogoScalePercent(), juce::dontSendNotification);
@@ -983,6 +1014,9 @@ public:
         btnSaveLogo_.setBounds(kPadX, y, 140, kRowH);
         btnDefaultLogo_.setBounds(kPadX + 148, y, 150, kRowH);
         y += kRowH + kFieldGap;
+        comboRow(lblLyricTheme_,           cbLyricTheme_);
+        sliderRow(lblLyricColorIntensity_,  sLyricColorIntensity_);
+        sliderRow(lblLyricMotionIntensity_, sLyricMotionIntensity_);
         sliderRow(lblLyricLogoScale_,          sLyricLogoScale_);
         sliderRow(lblLyricBrandTextScale_,     sLyricBrandTextScale_);
         sliderRow(lblLyricNowSingingTextScale_, sLyricNowSingingTextScale_);
@@ -1100,6 +1134,9 @@ public:
         btnBrowseLogo_.setButtonText(lm.getText("settings.btn_browse"));
         btnSaveLogo_.setButtonText(lm.getText("settings.btn_save_logo"));
         btnDefaultLogo_.setButtonText(lm.getText("settings.btn_default_logo"));
+        lblLyricTheme_.setText(lm.getText("settings.lbl_lyric_theme"), juce::dontSendNotification);
+        lblLyricColorIntensity_.setText(lm.getText("settings.lbl_lyric_color_intensity"), juce::dontSendNotification);
+        lblLyricMotionIntensity_.setText(lm.getText("settings.lbl_lyric_motion_intensity"), juce::dontSendNotification);
         lblLyricLogoScale_.setText(lm.getText("settings.lbl_lyric_logo_scale"), juce::dontSendNotification);
         lblLyricBrandTextScale_.setText(lm.getText("settings.lbl_lyric_brand_text_scale"), juce::dontSendNotification);
         lblLyricNowSingingTextScale_.setText(lm.getText("settings.lbl_lyric_now_singing_text_scale"), juce::dontSendNotification);
@@ -1169,6 +1206,12 @@ public:
             {"settings.bg_none",1},{"settings.bg_squares",2},{"settings.bg_lines",3},
             {"settings.bg_fading",4},{"settings.bg_circles",5},
             {"settings.bg_rotating",6},{"settings.bg_snow",7}
+        });
+        rebuildCombo(cbLyricTheme_, {
+            {"settings.lyric_theme_classic",1},      {"settings.lyric_theme_neon_pulse",2},
+            {"settings.lyric_theme_confetti_pop",3}, {"settings.lyric_theme_disco_sweep",4},
+            {"settings.lyric_theme_retro_marquee",5},{"settings.lyric_theme_laser_grid",6},
+            {"settings.lyric_theme_bubblegum_pop",7},{"settings.lyric_theme_vu_meter",8}
         });
     }
 
@@ -1358,6 +1401,13 @@ private:
     juce::TextButton btnBrowseLogo_, btnSaveLogo_, btnDefaultLogo_;
     juce::File       selectedLogoFile_;
     std::unique_ptr<juce::FileChooser> fc_;
+
+    // Lyric screen theme + Color/Motion Intensity (live preview, no Save
+    // button -- same UserPreferences-direct pattern as the size sliders
+    // below). Placed first since it's the highest-impact control.
+    juce::Label    lblLyricTheme_, lblLyricColorIntensity_, lblLyricMotionIntensity_;
+    juce::ComboBox cbLyricTheme_;
+    juce::Slider   sLyricColorIntensity_, sLyricMotionIntensity_;
 
     // Lyric screen sizing sliders (live preview on the lyric display,
     // no Save button -- same UserPreferences-direct pattern as the silence

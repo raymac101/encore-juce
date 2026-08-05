@@ -120,6 +120,23 @@ public:
     int  getLyricBottomBarTextScalePercent() const;
     void setLyricBottomBarTextScalePercent(int percent);
 
+    //--- Lyric screen theme (Settings > Lyric Screen section) -----------------
+    // Index into the LyricTheme enum (Source/UI/LyricDisplayComponent.h),
+    // 0-7, default 0 (Classic). Stored as a plain int here so this Services
+    // class doesn't need to include a UI header.
+    int  getLyricThemeIndex() const;
+    void setLyricThemeIndex(int index);
+
+    // 0-100, default 100. Scales every theme's accent/card saturation; at
+    // 100% every theme (including Classic) renders at full design colour.
+    int  getLyricColorIntensityPercent() const;
+    void setLyricColorIntensityPercent(int percent);
+
+    // 0-100, default 100. Scales every theme's animation speed/amplitude;
+    // at 0% every theme is fully static, with no per-theme floor.
+    int  getLyricMotionIntensityPercent() const;
+    void setLyricMotionIntensityPercent(int percent);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

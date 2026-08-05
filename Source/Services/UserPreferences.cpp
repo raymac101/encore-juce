@@ -458,6 +458,55 @@ void UserPreferences::setLyricBottomBarTextScalePercent(int percent)
 }
 
 //==============================================================================
+// Lyric screen theme -- a sibling 0-100 clamp helper (the size sliders above
+// use 50-200, which doesn't fit Color/Motion Intensity's 0-100 range), plus
+// a 0-7 clamp for the theme index.
+namespace
+{
+    int getPercent01to100(const juce::var& root, const juce::CriticalSection& lock, const char* key, int defaultValue)
+    {
+        const juce::ScopedLock sl(lock);
+        int p = (int) root.getProperty(key, juce::var(defaultValue));
+        return juce::jlimit(0, 100, p);
+    }
+}
+
+int UserPreferences::getLyricThemeIndex() const
+{
+    const juce::ScopedLock sl(lock_);
+    int idx = (int) root_.getProperty("lyricThemeIndex", juce::var(0));
+    return juce::jlimit(0, 7, idx);
+}
+void UserPreferences::setLyricThemeIndex(int index)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricThemeIndex", juce::jlimit(0, 7, index));
+    save();
+}
+
+int UserPreferences::getLyricColorIntensityPercent() const
+{
+    return getPercent01to100(root_, lock_, "lyricColorIntensityPercent", 100);
+}
+void UserPreferences::setLyricColorIntensityPercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricColorIntensityPercent", juce::jlimit(0, 100, percent));
+    save();
+}
+
+int UserPreferences::getLyricMotionIntensityPercent() const
+{
+    return getPercent01to100(root_, lock_, "lyricMotionIntensityPercent", 100);
+}
+void UserPreferences::setLyricMotionIntensityPercent(int percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricMotionIntensityPercent", juce::jlimit(0, 100, percent));
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);
