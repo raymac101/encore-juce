@@ -39,6 +39,7 @@ class BottomBar;
     Provides responsive layout and coordinates between all major subsystems.
 */
 class MainComponent : public ResponsiveLayout,
+                      public juce::DragAndDropContainer,
                       public juce::Timer
 {
 public:

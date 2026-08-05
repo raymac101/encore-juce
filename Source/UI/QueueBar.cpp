@@ -1378,12 +1378,40 @@ void QueueBar::updateAllText()
 //==============================================================================
 bool QueueBar::ListContent::isInterestedInDragSource (const SourceDetails& d)
 {
-    // Only accept drags coming from one of our SingerRow children.
-    return dynamic_cast<SingerRow*> (d.sourceComponent.get()) != nullptr;
+    // A SingerRow reorder drag.
+    if (dynamic_cast<SingerRow*> (d.sourceComponent.get()) != nullptr)
+        return true;
+
+    // A song dragged in from the Search results list encodes itself as a
+    // JSON object string (CdgSong::toJson(), see
+    // SearchPage::SongResultRow::mouseDrag) rather than a cross-module
+    // dynamic_cast to SearchPage's row type.
+    return d.description.isString() && d.description.toString().trim().startsWithChar ('{');
+}
+
+int QueueBar::ListContent::singerRowIndexAt (juce::Point<int> localPos) const
+{
+    for (int i = 0; i < owner.singerRows.size(); ++i)
+        if (owner.singerRows[i]->getBounds().contains (localPos))
+            return i;
+    return -1;
 }
 
 void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
 {
+    // Song dragged from Search results -- highlight the singer row under the
+    // cursor rather than computing a reorder-insertion index.
+    if (dynamic_cast<SingerRow*> (d.sourceComponent.get()) == nullptr)
+    {
+        const int idx = singerRowIndexAt (d.localPosition);
+        if (idx != songDropTargetIndex)
+        {
+            songDropTargetIndex = idx;
+            repaint();
+        }
+        return;
+    }
+
     if (owner.expandedMode)
     {
         const int rowsPerColumn = juce::jmax(1, (getHeight() - QueueBar::expandedCardGap)
@@ -1472,10 +1500,35 @@ void QueueBar::ListContent::itemDragExit (const SourceDetails&)
         dropIndicatorRect = {};
         repaint();
     }
+    if (songDropTargetIndex != -1)
+    {
+        songDropTargetIndex = -1;
+        repaint();
+    }
 }
 
 void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 {
+    // Song dragged from Search results -- add it to whichever singer row it
+    // landed on, rather than treating this as a SingerRow reorder.
+    if (dynamic_cast<SingerRow*> (d.sourceComponent.get()) == nullptr)
+    {
+        const int idx = singerRowIndexAt (d.localPosition);
+        songDropTargetIndex = -1;
+        repaint();
+
+        if (idx < 0 || idx >= (int) owner.singers.size())
+            return;
+
+        const auto song = CdgSong::fromJson (d.description.toString());
+        if (! song.isValid())
+            return;
+
+        if (owner.onSongDroppedOnSinger)
+            owner.onSongDroppedOnSinger (song, idx);
+        return;
+    }
+
     if (owner.expandedMode)
     {
         const int fromIndex = (int) d.description;
@@ -1544,6 +1597,13 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 
 void QueueBar::ListContent::paintOverChildren (juce::Graphics& g)
 {
+    if (songDropTargetIndex >= 0 && songDropTargetIndex < owner.singerRows.size())
+    {
+        g.setColour (juce::Colour (0xff30daff));
+        g.drawRoundedRectangle (owner.singerRows[songDropTargetIndex]->getBounds()
+                                     .toFloat().reduced (1.5f), 8.0f, 2.5f);
+    }
+
     if (dropIndicatorY < 0) return;
     g.setColour (juce::Colour (0xff30daff));
     if (! owner.expandedMode)

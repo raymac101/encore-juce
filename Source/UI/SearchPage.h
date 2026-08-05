@@ -50,17 +50,12 @@ public:
     std::function<void(const CdgSong& song)>  onSongClicked;
     std::function<void(const CdgSong& song)>  onSongEditClicked;
 
-private:
     //==============================================================================
-    // Filter mode enum
-    enum class FilterMode { All, Song, Artist, Year, Genre };
-
-    // Sort column enum
-    enum class SortColumn { None, Song, Artist, Version, Year, Genre };
-    enum class SortDir    { Asc, Desc };
-
-    //==============================================================================
-    // A single row in the results list
+    // A single row in the results list. Public (not private, despite being an
+    // implementation-detail row component) so QueueBar's drop target can
+    // dynamic_cast<SongResultRow*>(sourceComponent) to distinguish a
+    // dragged-in song from a SingerRow reorder drag -- see
+    // QueueBar::ListContent::isInterestedInDragSource().
     class SongResultRow : public juce::Component
     {
     public:
@@ -68,6 +63,7 @@ private:
         void paint(juce::Graphics& g) override;
         void mouseEnter(const juce::MouseEvent&) override { hovering = true;  repaint(); }
         void mouseExit(const juce::MouseEvent&) override  { hovering = false; repaint(); }
+        void mouseDrag(const juce::MouseEvent& e) override;
         void mouseUp(const juce::MouseEvent& e) override;
 
         CdgSong song;
@@ -86,8 +82,18 @@ private:
         void setImageUrl(const juce::String& url);
 
     private:
+        int getEditColumnStartX() const;
         juce::Image cachedImage;
     };
+
+private:
+    //==============================================================================
+    // Filter mode enum
+    enum class FilterMode { All, Song, Artist, Year, Genre };
+
+    // Sort column enum
+    enum class SortColumn { None, Song, Artist, Version, Year, Genre };
+    enum class SortDir    { Asc, Desc };
 
     //==============================================================================
     // UI sub-components

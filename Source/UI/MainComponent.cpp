@@ -2551,6 +2551,69 @@ void MainComponent::setupUI()
             true);
     };
 
+    // ── Song dropped from Search results onto a singer row ────────────────────
+    // Bypasses SongSelectionDialog entirely (no version/pitch picker) --
+    // defaults to the song's first version and no pitch shift, matching a
+    // quick drag-and-drop interaction. The target is an existing, already-
+    // loaded singer row, so (unlike onSongSelectionResult's typed-name path)
+    // there's no name-resolution guessing or ensureHostQueueDoc dance needed
+    // -- targetSinger.isHost tells us directly, and their doc already exists
+    // since they're already visible in the queue.
+    queueBar->onSongDroppedOnSinger = [this](const CdgSong& song, int singerIndex)
+    {
+        if (queueBar == nullptr) return;
+        const auto& singersList = queueBar->getSingers();
+        if (singerIndex < 0 || singerIndex >= (int) singersList.size()) return;
+
+        const auto targetSinger = singersList[(size_t) singerIndex];
+        const juce::String venueId = activeVenueId_;
+        if (venueId.isEmpty())
+        {
+            DBG ("[SongDrop] cannot add to queue: no active venue");
+            return;
+        }
+
+        const juce::String authUid = FirestoreClient::getInstance().getUserId().trim();
+        const juce::String versionLabel = ! song.version.empty()
+            ? juce::String (song.version[0]) : juce::String();
+
+        QueueItem item;
+        item.id          = juce::Uuid().toString().toStdString();
+        item.deviceId    = "local";
+        item.profileId   = targetSinger.isHost ? authUid.toStdString() : "";
+        item.singerName  = targetSinger.name;
+        item.songId      = song.id;
+        item.songName    = song.songName;
+        item.songArtist  = song.artistName;
+        item.songVersion = versionLabel.toStdString();
+        item.duration    = song.durationMS / 1000;
+        item.pitch       = 1.0f;
+        item.key         = 0;
+        item.status      = "queued";
+        item.dateAdded   = juce::Time::getCurrentTime().toMilliseconds();
+
+        DBG ("[SongDrop] AddToQueue singer='" << juce::String (targetSinger.name)
+             << "' song='" << juce::String (item.songName) << "'");
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        QueueService::getInstance().appendSong (venueId, item,
+            [safe, venueId] (bool ok, juce::String err)
+            {
+                if (! ok)
+                {
+                    DBG ("[SongDrop] appendSong FAILED: " << err);
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Could Not Add Song",
+                        "Failed to add the song to the queue: " + err);
+                    return;
+                }
+
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            });
+    };
+
     // ── Song-finished → auto-advance ──────────────────────────────────────────
     // Shared by AudioEngine's onSongFinished (audio/CDG) and the video
     // natural-end check in timerCallback() (MP4/M4V/MOV, which bypasses

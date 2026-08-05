@@ -143,13 +143,42 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
     g.drawHorizontalLine(bounds.getBottom() - 1, 0.f, (float)totalW);
 }
 
-void SearchPage::SongResultRow::mouseUp(const juce::MouseEvent& e)
+int SearchPage::SongResultRow::getEditColumnStartX() const
 {
     // Edit column starts where genre column ends.
     static const std::vector<float> defaults {0.06f, 0.23f, 0.23f, 0.16f, 0.08f, 0.16f, 0.08f};
     const auto& f = (columnFractions && columnFractions->size() == 7) ? *columnFractions : defaults;
-    int editStart = (int)(getWidth() * (f[0] + f[1] + f[2] + f[3] + f[4] + f[5]));
-    if (e.x >= editStart)
+    return (int)(getWidth() * (f[0] + f[1] + f[2] + f[3] + f[4] + f[5]));
+}
+
+void SearchPage::SongResultRow::mouseDrag(const juce::MouseEvent& e)
+{
+    // Don't start a drag from the edit-pencil column -- that's a click zone.
+    if (e.getMouseDownPosition().x >= getEditColumnStartX())
+        return;
+
+    if (auto* dnd = juce::DragAndDropContainer::findParentDragContainerFor(this))
+    {
+        if (! dnd->isDragAndDropActive())
+        {
+            // The whole song is serialized to JSON as the drag description
+            // (CdgSong already has toJson()/fromJson()) so the drop target
+            // (QueueBar::ListContent) doesn't need to know about SearchPage
+            // or reach back into displaySongs -- see
+            // QueueBar::ListContent::itemDropped().
+            auto img = createComponentSnapshot(getLocalBounds(), true);
+            dnd->startDragging(song.toJson(), this, juce::ScaledImage(img),
+                               /*allowDraggingToOtherWindows*/ false);
+        }
+    }
+}
+
+void SearchPage::SongResultRow::mouseUp(const juce::MouseEvent& e)
+{
+    if (e.mouseWasDraggedSinceMouseDown())
+        return;
+
+    if (e.x >= getEditColumnStartX())
     {
         if (onEditClicked) onEditClicked(index);
     }

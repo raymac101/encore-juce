@@ -22,6 +22,7 @@
 #include <JuceHeader.h>
 #include "../Models/Singers.h"
 #include "../Models/QueueItem.h"
+#include "../Models/CdgSong.h"
 #include "../Localization/LocalizationManager.h"
 #include <vector>
 #include <functional>
@@ -123,6 +124,12 @@ public:
     std::function<void()>                 onSkipCurrentSinger;        // skip + clear now-playing
     std::function<void()>                 onCountdownFinished;        // delay countdown elapsed
     std::function<void()>                 onAddSinger;        // KJ manually adds a singer
+
+    // A song was dragged from the Search results list and dropped onto a
+    // singer's row -- add it to that singer's queue. Wired by MainComponent
+    // (owns activeVenueId_ / QueueService access), mirroring the other
+    // context-menu callbacks above.
+    std::function<void(const CdgSong& song, int singerIndex)> onSongDroppedOnSinger;
 
 private:
     class ExpandArrowButton : public juce::Button,
@@ -228,6 +235,12 @@ private:
         QueueBar& owner;
         int      dropIndicatorY = -1;     // legacy line indicator (collapsed mode)
         juce::Rectangle<int> dropIndicatorRect;
+
+        // Highlight state while dragging a song (from Search results) over a
+        // singer row -- a distinct indicator from dropIndicatorY/Rect above,
+        // which are only for SingerRow reorder drags.
+        int songDropTargetIndex = -1;
+        int singerRowIndexAt (juce::Point<int> localPos) const;
     };
 
     //==============================================================================
