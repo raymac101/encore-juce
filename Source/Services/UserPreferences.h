@@ -137,6 +137,22 @@ public:
     int  getLyricMotionIntensityPercent() const;
     void setLyricMotionIntensityPercent(int percent);
 
+    //--- Device identity / per-device venue confirmation ------------------------
+    // A random ID generated once and persisted forever, identifying THIS
+    // install (not tied to hardware). Used so the app can tell "the same PC
+    // reopening a venue" apart from "a different PC opening it for the first
+    // time" -- see LoginWindow's venue-confirmation screen and
+    // VenueSessionService's session heartbeat.
+    // Not const: lazily generates and persists the ID on first call.
+    juce::String getDeviceId();
+
+    // Tracks which venues THIS PC has already shown the "you're logging
+    // into venue {name}" confirmation screen for, so a returning host on
+    // their regular show machine only ever sees it once per venue, not on
+    // every login.
+    bool hasConfirmedVenueOnThisDevice(const juce::String& venueId) const;
+    void markVenueConfirmedOnThisDevice(const juce::String& venueId);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

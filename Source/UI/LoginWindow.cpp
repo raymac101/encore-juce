@@ -17,6 +17,7 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/VenueService.h"
+#include "../Services/VenueSessionService.h"
 #include "../Services/ImageCache.h"
 #include "../Models/VenueItem.h"
 #include "../Models/UserVenueAssociation.h"
@@ -204,7 +205,12 @@ public:
                     setBusy(false, {});
                     if (ok)
                     {
-                        if (onComplete_) onComplete_(venueId, initialScan);
+                        // This is the multi-association picker path -- the
+                        // device-confirmation screen is specifically for the
+                        // single-association auto-load case (Idea #1), so
+                        // only the live-elsewhere check applies here, not the
+                        // "you're logging into venue X" confirmation.
+                        checkLiveElsewhereThenComplete(venueId, initialScan);
                     }
                     else
                     {
@@ -771,7 +777,7 @@ private:
                 switch (flowResult_.outcome)
                 {
                     case O::VenueLoaded:
-                        if (onComplete_) onComplete_(flowResult_.venueId, false);
+                        proceedToVenueAfterChecks(flowResult_.venueId, flowResult_.venueName, false);
                         return;
                     case O::PickVenue:
                         page_ = Page::SelectVenue;
@@ -812,6 +818,86 @@ private:
         FirestoreClient::getInstance().signOut();
         page_ = Page::Login;
         applyPage();
+    }
+
+    // Single hand-off point for BOTH places a venue can actually be opened
+    // (the single-association auto-load in runFlow(), and the multi-venue
+    // picker's venueListModelOnSelected_) -- runs the two collision-
+    // prevention checks in sequence, then calls onComplete_ exactly like
+    // both call sites used to do directly. Deliberately NOT wired into the
+    // ENCORE_DEV_SKIP_LOGIN shortcut above, which exists specifically to
+    // bypass friction during development.
+    //
+    // 1) New-device confirmation ("you're logging into venue {name}"),
+    //    shown once per venue per PC (UserPreferences tracks which venues
+    //    this install has already confirmed) -- Idea #1 from the plan.
+    // 2) Live-elsewhere warning, checked every time (not remembered, since
+    //    "is someone else live right now" is time-sensitive) -- Idea #2.
+    void proceedToVenueAfterChecks(const juce::String& venueId, const juce::String& venueName, bool initialScan)
+    {
+        auto& prefs = UserPreferences::getInstance();
+        if (! prefs.hasConfirmedVenueOnThisDevice(venueId))
+        {
+            auto& lm = LocalizationManager::getInstance();
+            juce::AlertWindow::showOkCancelBox(
+                juce::AlertWindow::InfoIcon,
+                lm.getTextWithParams("login.confirm_venue.title", { venueName.isNotEmpty() ? venueName : venueId }),
+                lm.getText("login.confirm_venue.body"),
+                lm.getText("login.confirm_venue.btn_continue"),
+                lm.getText("login.confirm_venue.btn_create_new"),
+                nullptr,
+                juce::ModalCallbackFunction::create([this, venueId, initialScan](int result)
+                {
+                    if (result == 1)
+                    {
+                        UserPreferences::getInstance().markVenueConfirmedOnThisDevice(venueId);
+                        checkLiveElsewhereThenComplete(venueId, initialScan);
+                    }
+                    else
+                    {
+                        // "Create a New Venue" -- leaves the pending venue
+                        // open/unconfirmed; the wizard's own completion re-runs
+                        // runFlow(), which naturally re-resolves into whichever
+                        // venue is now correct (see its existing comment above).
+                        launchOnboardingWizard(OnboardingWizard::StartStep::AccountType);
+                    }
+                }));
+            return;
+        }
+
+        checkLiveElsewhereThenComplete(venueId, initialScan);
+    }
+
+    void checkLiveElsewhereThenComplete(const juce::String& venueId, bool initialScan)
+    {
+        VenueSessionService::getInstance().checkForOtherActiveSessions(venueId,
+            [this, venueId, initialScan](bool otherActive, juce::String otherDeviceLabel, juce::String /*error*/)
+            {
+                if (! otherActive)
+                {
+                    if (onComplete_) onComplete_(venueId, initialScan);
+                    return;
+                }
+
+                auto& lm = LocalizationManager::getInstance();
+                const auto label = otherDeviceLabel.isNotEmpty()
+                    ? otherDeviceLabel
+                    : lm.getText("login.live_elsewhere.unknown_device");
+
+                juce::AlertWindow::showOkCancelBox(
+                    juce::AlertWindow::WarningIcon,
+                    lm.getText("login.live_elsewhere.title"),
+                    lm.getTextWithParams("login.live_elsewhere.body", { label }),
+                    lm.getText("login.live_elsewhere.btn_open_anyway"),
+                    lm.getText("login.live_elsewhere.btn_cancel"),
+                    nullptr,
+                    juce::ModalCallbackFunction::create([this, venueId, initialScan](int result)
+                    {
+                        if (result == 1 && onComplete_)
+                            onComplete_(venueId, initialScan);
+                        // Cancel: stay on the current page, do nothing.
+                    }));
+            });
     }
 
     // Launches the first-run onboarding wizard. `CreateAccount` is the

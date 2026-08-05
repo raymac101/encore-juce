@@ -24,6 +24,7 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/SongbookStorageService.h"
 #include "../Services/ArchiveService.h"
+#include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
 #include "EditSingerModal.h"
@@ -3057,6 +3058,32 @@ void MainComponent::checkSongbookSyncAndPromptIfNeeded(const juce::String& venue
 {
     auto safe = juce::Component::SafePointer<MainComponent>(this);
 
+    // Never invite a local overwrite of a venue's live songbook from a
+    // second machine -- if another device's session heartbeat is still
+    // fresh, skip the out-of-sync prompt entirely (silently, matching this
+    // feature's existing fail-safe style) rather than warn-and-allow, since
+    // there's no urgent need for this PC to sync while someone else is live.
+    VenueSessionService::getInstance().checkForOtherActiveSessions(venueId,
+        [safe, venueId](bool otherActive, juce::String otherDeviceLabel, juce::String /*error*/)
+        {
+            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                return;
+
+            if (otherActive)
+            {
+                DBG("[Songbook] Skipping out-of-sync check for venue " << venueId
+                     << " -- appears live on " << otherDeviceLabel);
+                return;
+            }
+
+            safe->runSongbookSyncCheck(venueId);
+        });
+}
+
+void MainComponent::runSongbookSyncCheck(const juce::String& venueId)
+{
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+
     SongbookStorageService::getInstance().checkSongbookInSync(venueId,
         [safe, venueId](bool inSync, juce::String error)
         {
@@ -4609,6 +4636,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
         if (lyricWindow_ != nullptr)
             lyricWindow_->setVenueContext ({}, {});
         ArchiveService::getInstance().stopNightlyCleanup();
+        VenueSessionService::getInstance().stopHeartbeat();
         hideLoadingOverlay();
         return;
     }
@@ -4733,6 +4761,13 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
             // each minute, so a settings change takes effect immediately.
             ArchiveService::getInstance().startNightlyCleanup(
                 juce::String(v.id), juce::String(v.name));
+
+            // Presence heartbeat so other devices logging into this same
+            // venue can be warned "this appears to be live elsewhere" --
+            // see VenueSessionService and the login-time checks in
+            // LoginWindow.cpp. startHeartbeat() stops any previous venue's
+            // heartbeat internally, so this is safe on every venue switch.
+            VenueSessionService::getInstance().startHeartbeat(venueId);
 
             // Fetch the venue logo asynchronously and push it into the lyric
             // display once it arrives. ArtworkCache invokes the callback on

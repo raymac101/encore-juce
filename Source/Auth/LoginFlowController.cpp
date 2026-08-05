@@ -215,8 +215,9 @@ namespace
 
         if (valid)
         {
-            result.outcome = LoginFlowController::Outcome::VenueLoaded;
-            result.venueId = venueId;
+            result.outcome   = LoginFlowController::Outcome::VenueLoaded;
+            result.venueId   = venueId;
+            result.venueName = venueName;
         }
         else
         {

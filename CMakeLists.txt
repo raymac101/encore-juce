@@ -112,6 +112,7 @@ target_sources(EncoreJUCE
         Source/Services/WaveformGenerator.cpp
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
+        Source/Services/VenueSessionService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
         Source/Services/QueueRotation.cpp

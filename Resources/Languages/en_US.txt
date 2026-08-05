@@ -706,6 +706,20 @@ login.select_venue.switch_dialog_body=This PC is currently configured for a diff
 login.select_venue.switch_dialog_confirm=Switch Venue
 login.select_venue.switch_dialog_cancel=Cancel
 
+# New-device confirmation (shown once per venue per PC on the single-venue
+# auto-load path) and the live-elsewhere warning (shown every time a venue
+# is opened, single- or multi-venue, if another device's session heartbeat
+# is still fresh).
+login.confirm_venue.title=You're logging into venue: {0}
+login.confirm_venue.body=If this isn't the venue you meant to open (e.g. you're testing at home), you can create a separate venue instead.
+login.confirm_venue.btn_continue=Continue
+login.confirm_venue.btn_create_new=Create a New Venue
+login.live_elsewhere.title=Venue May Be Live Elsewhere
+login.live_elsewhere.body=This venue appears to be live on {0} right now. Opening it here may disrupt that show.
+login.live_elsewhere.btn_open_anyway=Open Anyway
+login.live_elsewhere.btn_cancel=Cancel
+login.live_elsewhere.unknown_device=another device
+
 login.awaiting.heading=Awaiting Invitation
 login.awaiting.status_no_invitations=You don't have any pending venue invitations yet.
 login.awaiting.status_has_invitations=You have pending venue invitations below.

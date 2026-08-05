@@ -507,6 +507,51 @@ void UserPreferences::setLyricMotionIntensityPercent(int percent)
 }
 
 //==============================================================================
+juce::String UserPreferences::getDeviceId()
+{
+    const juce::ScopedLock sl(lock_);
+    auto existing = root_.getProperty("deviceId", juce::var()).toString();
+    if (existing.isNotEmpty())
+        return existing;
+
+    // Generated lazily, once, and persisted forever after -- not tied to
+    // hardware, just needs to be stable for the lifetime of this install.
+    const auto fresh = juce::Uuid().toString();
+    asObj(root_)->setProperty("deviceId", fresh);
+    save();
+    return fresh;
+}
+
+bool UserPreferences::hasConfirmedVenueOnThisDevice(const juce::String& venueId) const
+{
+    const juce::ScopedLock sl(lock_);
+    auto arr = root_.getProperty("confirmedVenueIds", juce::var());
+    if (! arr.isArray())
+        return false;
+
+    for (int i = 0; i < arr.size(); ++i)
+        if (arr[i].toString() == venueId)
+            return true;
+    return false;
+}
+
+void UserPreferences::markVenueConfirmedOnThisDevice(const juce::String& venueId)
+{
+    const juce::ScopedLock sl(lock_);
+    if (hasConfirmedVenueOnThisDevice(venueId))
+        return;
+
+    auto existing = root_.getProperty("confirmedVenueIds", juce::var());
+    juce::Array<juce::var> arr;
+    if (existing.isArray())
+        arr = *existing.getArray();
+    arr.add(venueId);
+
+    asObj(root_)->setProperty("confirmedVenueIds", arr);
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);
