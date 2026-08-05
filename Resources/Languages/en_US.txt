@@ -633,6 +633,16 @@ update.btn_close=Close
 update.dialog_failed_title=Update Failed
 update.dialog_failed_body=The update could not be downloaded. Please check your internet connection and try again.
 
+# Songbook sync check (on login / venue load)
+songbook.sync_title=Songbook Out of Sync
+songbook.sync_body=This computer's song library doesn't match what's stored online for this venue. TAGG uses the online copy to know what singers can request -- if they're out of sync, TAGG may offer songs that aren't actually available, or miss ones that are. Sync now?
+songbook.btn_sync_now=Sync Now
+songbook.btn_not_now=Not Now
+songbook.syncing_toast=Syncing songbook...
+songbook.sync_success_toast=Songbook synced.
+songbook.sync_failed_title=Sync Failed
+songbook.sync_failed_body=Could not upload the songbook. Please check your internet connection and try again.
+
 # Misc labels that were missing (audio feedback, mixer, company admin, settings)
 audio.feedback.starting=Starting audio engine...
 audio.feedback.ready=Audio ready

@@ -51,6 +51,22 @@ public:
     void seedEmptySongbook(const juce::String& venueId,
                             std::function<void(bool ok, juce::String error)> onDone = nullptr);
 
+    /** Compares this PC's local songbook.json (LibraryScanner's default
+        app-data location) byte-for-byte against "venues/{venueId}/
+        songbook.json" in Storage. TAGG reads the Storage copy directly, so
+        any drift (e.g. a library scan done on a different PC, or a scan
+        that failed to upload) means TAGG is offering songs this PC's queue
+        doesn't actually have, or vice versa.
+
+        Calls onDone(true, {}) if they match OR if there's nothing local to
+        compare (nothing to flag) OR if the check itself couldn't complete
+        (network down, etc. -- fails safe, same philosophy as the rest of
+        this service: never surface a false "out of sync" from a connectivity
+        hiccup). Calls onDone(false, {}) only when both files were
+        successfully read and their contents differ. */
+    void checkSongbookInSync(const juce::String& venueId,
+                              std::function<void(bool inSync, juce::String error)> onDone);
+
 private:
     SongbookStorageService() = default;
     ~SongbookStorageService() = default;

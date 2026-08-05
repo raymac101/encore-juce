@@ -3053,6 +3053,57 @@ void MainComponent::showMaintenanceToast(const juce::String& message)
     });
 }
 
+void MainComponent::checkSongbookSyncAndPromptIfNeeded(const juce::String& venueId)
+{
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+
+    SongbookStorageService::getInstance().checkSongbookInSync(venueId,
+        [safe, venueId](bool inSync, juce::String error)
+        {
+            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                return;
+
+            if (inSync)
+            {
+                if (error.isNotEmpty())
+                    DBG("[Songbook] Sync check couldn't complete for venue " << venueId << " (" << error << ") -- skipping");
+                return;
+            }
+
+            auto& lm = LocalizationManager::getInstance();
+            juce::AlertWindow::showOkCancelBox(
+                juce::AlertWindow::WarningIcon,
+                lm.getText("songbook.sync_title"),
+                lm.getText("songbook.sync_body"),
+                lm.getText("songbook.btn_sync_now"),
+                lm.getText("songbook.btn_not_now"),
+                safe.getComponent(),
+                juce::ModalCallbackFunction::create([safe, venueId](int result)
+                {
+                    if (safe == nullptr || result != 1 || safe->activeVenueId_ != venueId)
+                        return;
+
+                    safe->showMaintenanceToast(LocalizationManager::getInstance().getText("songbook.syncing_toast"));
+
+                    SongbookStorageService::getInstance().uploadLocalSongbook(venueId,
+                        [safe, venueId](bool ok, juce::String uploadError)
+                        {
+                            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                                return;
+
+                            auto& lm2 = LocalizationManager::getInstance();
+                            if (ok)
+                                safe->showMaintenanceToast(lm2.getText("songbook.sync_success_toast"));
+                            else
+                                juce::AlertWindow::showMessageBoxAsync(
+                                    juce::AlertWindow::WarningIcon,
+                                    lm2.getText("songbook.sync_failed_title"),
+                                    lm2.getText("songbook.sync_failed_body") + " " + uploadError);
+                        });
+                }));
+        });
+}
+
 void MainComponent::showUpdateAvailableBanner(const juce::String& version)
 {
     if (updateBanner_ == nullptr)
@@ -4646,7 +4697,11 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                             return;
 
                         if (justUploaded)
+                        {
+                            // We just uploaded the local file as-is, so it's
+                            // definitionally in sync -- no need to check.
                             DBG ("[Songbook] Uploaded local songbook.json to Storage for venue " << venueId);
+                        }
                         else if (! exists)
                         {
                             DBG ("[Songbook] No songbook.json in Storage and nothing local to fall back on"
@@ -4654,6 +4709,17 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                                  << " -- starting initial scan for venue " << venueId);
                             if (safe->mainArea != nullptr)
                                 safe->mainArea->triggerInitialSongLoad();
+                        }
+                        else
+                        {
+                            // Storage already had a songbook untouched by the
+                            // call above -- verify it actually matches what
+                            // this PC has scanned locally. TAGG reads the
+                            // Storage copy directly to know what it can
+                            // request, so drift here means TAGG can offer
+                            // songs the queue doesn't have (or miss ones it
+                            // does), silently, until someone notices.
+                            safe->checkSongbookSyncAndPromptIfNeeded (venueId);
                         }
                     });
             }

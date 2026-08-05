@@ -53,6 +53,32 @@ namespace
         return status;
     }
 
+    // GET the object's actual content (?alt=media). Returns false (leaving
+    // outData untouched) on anything but a clean 200 -- missing, network
+    // failure, auth hiccup are all treated identically by the caller.
+    bool downloadJsonFromStorage(const juce::String& objectPath, juce::MemoryBlock& outData)
+    {
+        auto url = juce::URL("https://firebasestorage.googleapis.com/v0/b/" + FirebaseConfig::storageBucket
+                              + "/o/" + juce::URL::addEscapeChars(objectPath, true) + "?alt=media");
+
+        int status = 0;
+        const auto headers = "Authorization: Bearer " + FirestoreClient::getInstance().getFreshIdToken() + "\r\n"
+                             + "Accept: application/json";
+
+        auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+            .withConnectionTimeoutMs(20000)
+            .withExtraHeaders(headers)
+            .withHttpRequestCmd("GET")
+            .withStatusCode(&status);
+
+        auto stream = std::unique_ptr<juce::InputStream>(url.createInputStream(opts));
+        if (stream == nullptr || status != 200)
+            return false;
+
+        stream->readIntoMemoryBlock(outData);
+        return true;
+    }
+
     bool uploadJsonToStorage(const juce::String& objectPath, const juce::MemoryBlock& data, juce::String& outError)
     {
         auto url = juce::URL("https://firebasestorage.googleapis.com/v0/b/" + FirebaseConfig::storageBucket
@@ -170,5 +196,41 @@ void SongbookStorageService::ensureSongbookExists(const juce::String& venueId,
 
         if (onDone)
             juce::MessageManager::callAsync([onDone, uploaded, error] { onDone(uploaded, uploaded, error); });
+    });
+}
+
+void SongbookStorageService::checkSongbookInSync(const juce::String& venueId,
+                                                   std::function<void(bool inSync, juce::String error)> onDone)
+{
+    const auto objectPath = storageObjectPath(venueId);
+
+    juce::Thread::launch([objectPath, onDone]
+    {
+        const auto localFile = LibraryScanner::getDefaultSongbookFile();
+        juce::MemoryBlock localData;
+        if (! localFile.existsAsFile() || ! localFile.loadFileAsData(localData))
+        {
+            // Nothing local to compare -- this PC just hasn't scanned a
+            // library, which ensureSongbookExists() already handles
+            // separately. Not a sync problem to flag here.
+            if (onDone)
+                juce::MessageManager::callAsync([onDone] { onDone(true, {}); });
+            return;
+        }
+
+        juce::MemoryBlock cloudData;
+        if (! downloadJsonFromStorage(objectPath, cloudData))
+        {
+            if (onDone)
+                juce::MessageManager::callAsync([onDone]
+                {
+                    onDone(true, "Could not reach Firebase Storage to check songbook sync.");
+                });
+            return;
+        }
+
+        const bool inSync = (localData == cloudData);
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, inSync] { onDone(inSync, {}); });
     });
 }

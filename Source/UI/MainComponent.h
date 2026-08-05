@@ -269,6 +269,13 @@ private:
     void refreshSettingsSessionStats();
     void showMaintenanceToast(const juce::String& message);
 
+    /** Compares this PC's local songbook.json against the copy already in
+        Firebase Storage for `venueId` (see SongbookStorageService::
+        checkSongbookInSync()) and, if they differ, asks the host whether to
+        overwrite Storage with the local copy. No-op (silently) if they
+        match or the check itself couldn't complete. */
+    void checkSongbookSyncAndPromptIfNeeded(const juce::String& venueId);
+
     /** Write a play-history entry if the song played long enough (>30 s).
         Pass `naturalEnd=true` when the audio finished on its own (always
         qualifies); `false` when the KJ skipped — checked against the 30 s
