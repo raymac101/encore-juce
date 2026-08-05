@@ -410,6 +410,7 @@ settings.archive_history_body=Archive history viewer coming soon.
 
 # ── Application menu bar ─────────────────────────────────────────────────────
 menu.file=File
+menu.file.check_for_updates=Check for Updates...
 menu.file.exit=Exit
 menu.window=Window
 menu.window.fullscreen=Fullscreen
@@ -621,6 +622,16 @@ settings.plugin_scan_never=No scan yet — click Rescan Plugins.
 update.banner_available=Update available:
 update.btn_restart_now=Restart Now
 update.btn_later=Later
+
+# Manual "Check for Updates" (File menu)
+update.dialog_available_title=Update Available
+update.dialog_available_body=A new version is available:
+update.btn_update_now=Update Now
+update.dialog_uptodate_title=No Updates Available
+update.dialog_uptodate_body=You are at the latest version.
+update.btn_close=Close
+update.dialog_failed_title=Update Failed
+update.dialog_failed_body=The update could not be downloaded. Please check your internet connection and try again.
 
 # Misc labels that were missing (audio feedback, mixer, company admin, settings)
 audio.feedback.starting=Starting audio engine...

@@ -147,6 +147,7 @@ public:
         cmdFullscreen          = 0x3001,
         cmdResetScreenPosition = 0x3002,
         cmdShowTitleBar        = 0x3003,
+        cmdCheckForUpdates     = 0x3004,
 
         // Dynamic language items use IDs starting at this base.
         cmdLanguageBase        = 0x3100,
@@ -166,6 +167,8 @@ public:
 
         if (topLevelMenuIndex == 0)
         {
+            menu.addItem (cmdCheckForUpdates, lm.getText ("menu.file.check_for_updates"));
+            menu.addSeparator();
             menu.addItem (cmdExit, lm.getText ("menu.file.exit"));
         }
         else if (topLevelMenuIndex == 1)
@@ -228,8 +231,67 @@ public:
             case cmdFullscreen:          toggleMainFullscreen();  break;
             case cmdResetScreenPosition: resetScreenPositions();  break;
             case cmdShowTitleBar:        toggleTitleBars();       break;
+            case cmdCheckForUpdates:     checkForUpdatesManually(); break;
             default: break;
         }
+    }
+
+    //==============================================================================
+    /** "File > Check for Updates" -- an explicit, user-initiated check, as
+        opposed to the silent launch-time-only one in initialise() above.
+        Unlike that one, this always reports a result: an "update available"
+        dialog with a button that downloads + verifies the installer before
+        handing off to UpdateService::restartAndInstall(), or a plain
+        "you're up to date" dialog. Dialogs are shown unattached to any
+        window (nullptr associated component) since the download step in
+        between can take a while for a large installer, and this must stay
+        correct even if the main window is closed/torn down (sign-out, etc.)
+        during that gap. */
+    void checkForUpdatesManually()
+    {
+        UpdateService::getInstance().checkForUpdatesManual ([] (bool hasUpdate, juce::String version, juce::String releaseNotesUrl)
+        {
+            juce::ignoreUnused (releaseNotesUrl);
+            auto& lm = LocalizationManager::getInstance();
+
+            if (! hasUpdate)
+            {
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::AlertWindow::InfoIcon,
+                    lm.getText ("update.dialog_uptodate_title"),
+                    lm.getText ("update.dialog_uptodate_body"),
+                    lm.getText ("update.btn_close"));
+                return;
+            }
+
+            juce::AlertWindow::showOkCancelBox (
+                juce::AlertWindow::InfoIcon,
+                lm.getText ("update.dialog_available_title"),
+                lm.getText ("update.dialog_available_body") + " " + version,
+                lm.getText ("update.btn_update_now"),
+                lm.getText ("update.btn_later"),
+                nullptr,
+                juce::ModalCallbackFunction::create ([] (int result)
+                {
+                    if (result != 1)
+                        return;
+
+                    UpdateService::getInstance().downloadUpdateNow ([] (bool success)
+                    {
+                        if (success)
+                        {
+                            UpdateService::getInstance().restartAndInstall();
+                            return;
+                        }
+
+                        auto& lm2 = LocalizationManager::getInstance();
+                        juce::AlertWindow::showMessageBoxAsync (
+                            juce::AlertWindow::WarningIcon,
+                            lm2.getText ("update.dialog_failed_title"),
+                            lm2.getText ("update.dialog_failed_body"));
+                    });
+                }));
+        });
     }
 
     //==============================================================================

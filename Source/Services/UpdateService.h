@@ -40,6 +40,23 @@ public:
         and never delays the caller. */
     void checkForUpdates (ReadyCallback onReady);
 
+    /** Called on the message thread once the manifest has been checked,
+        exactly once per call -- unlike checkForUpdates(), which stays
+        silent when there's nothing newer. Does not download anything;
+        follow a "true" result with downloadUpdateNow() before offering to
+        restart. Used by the menu's manual "Check for Updates" action. */
+    using ManifestCheckCallback = std::function<void (bool hasUpdate, juce::String version, juce::String releaseNotesUrl)>;
+    void checkForUpdatesManual (ManifestCheckCallback onResult);
+
+    /** Downloads and sha256-verifies the update most recently found by
+        checkForUpdatesManual(). Calls onDone(true) once
+        isUpdateReadyToInstall() is safe to act on (i.e. restartAndInstall()
+        can be called), onDone(false) on any failure (network, checksum
+        mismatch, no prior successful manual check). Runs on a background
+        thread; onDone is always called back on the message thread. */
+    using DownloadCallback = std::function<void (bool success)>;
+    void downloadUpdateNow (DownloadCallback onDone);
+
     bool isUpdateReadyToInstall() const noexcept { return readyToInstall_.load(); }
     juce::String getPendingVersion() const { return pendingVersion_; }
 
@@ -58,7 +75,29 @@ private:
     static bool isRemoteVersionNewer (const juce::String& remoteVersion, const juce::String& localVersion);
     static juce::File getUpdatesDirectory();
 
-    void downloadAndVerify (const juce::URL& fileUrl,
+    /** Shared by checkForUpdates() and checkForUpdatesManual(): fetches and
+        parses the manifest, and fills `out` if a newer build is available
+        for this platform. Returns false (leaving `out` untouched) for
+        anything unparsable/missing/not-newer -- callers must treat that as
+        "nothing to offer," never as an error. Runs synchronously; callers
+        are responsible for calling it from a background thread. */
+    struct ManifestUpdateInfo
+    {
+        juce::URL fileUrl;
+        juce::String sha256Hex;
+        juce::String version;
+        juce::String releaseNotesUrl;
+    };
+    static bool fetchManifestUpdateInfo (ManifestUpdateInfo& out);
+
+    /** Downloads fileUrl, verifies it against expectedSha256Hex, and on
+        success marks it ready to install (readyToInstall_/
+        pendingInstallerFile_/pendingVersion_) and -- if onReady is set --
+        invokes it on the message thread. Returns true on success, false on
+        any failure (every failure path is a silent false: network hiccup,
+        malformed download, checksum mismatch). Runs synchronously; callers
+        are responsible for calling it from a background thread. */
+    bool downloadAndVerify (const juce::URL& fileUrl,
                             const juce::String& expectedSha256Hex,
                             const juce::String& version,
                             const juce::String& releaseNotesUrl,
@@ -67,6 +106,15 @@ private:
     std::atomic<bool> readyToInstall_ { false };
     juce::File pendingInstallerFile_;
     juce::String pendingVersion_;
+
+    // Set by a successful checkForUpdatesManual() call; consumed by
+    // downloadUpdateNow(). Both only ever run one at a time in practice
+    // (gated by the user dismissing/acting on the "Check for Updates"
+    // dialog before triggering the next step), so no extra locking here.
+    juce::URL    pendingCheckedFileUrl_;
+    juce::String pendingCheckedSha256_;
+    juce::String pendingCheckedVersion_;
+    juce::String pendingCheckedReleaseNotesUrl_;
 
     JUCE_DECLARE_NON_COPYABLE (UpdateService)
 };

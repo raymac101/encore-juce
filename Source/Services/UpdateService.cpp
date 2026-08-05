@@ -86,76 +86,137 @@ juce::File UpdateService::getUpdatesDirectory()
     return dir;
 }
 
+bool UpdateService::fetchManifestUpdateInfo (ManifestUpdateInfo& out)
+{
+    // Every early-return below is a deliberate silent false: the automatic
+    // caller runs this unconditionally on every launch, so a network
+    // hiccup, a malformed manifest, or a slow server must never surface as
+    // an error or delay getting into the app. The manual "Check for
+    // Updates" caller treats false the same way -- as "nothing available,"
+    // never as an error to report differently.
+    const juce::URL manifestUrl (kManifestUrl);
+
+    int statusCode = 0;
+    auto stream = manifestUrl.createInputStream (
+        juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+            .withConnectionTimeoutMs (kConnectionTimeoutMs)
+            .withStatusCode (&statusCode));
+
+    if (stream == nullptr || statusCode != 200)
+        return false;
+
+    const auto manifestText = stream->readEntireStreamAsString();
+    const auto parsed = juce::JSON::parse (manifestText);
+    if (! parsed.isObject())
+        return false;
+
+    const auto latestVersion = parsed.getProperty ("latestVersion", "").toString();
+    if (latestVersion.isEmpty())
+        return false;
+
+    const juce::String localVersion = ProjectInfo::versionString;
+    if (! isRemoteVersionNewer (latestVersion, localVersion))
+        return false;
+
+    juce::String platformKey;
+   #if JUCE_WINDOWS
+    platformKey = "windows";
+   #elif JUCE_MAC
+    platformKey = "macos";
+   #endif
+    if (platformKey.isEmpty())
+        return false; // no installer story for this platform
+
+    const auto platforms = parsed.getProperty ("platforms", {});
+    if (! platforms.isObject())
+        return false;
+
+    const auto platformEntry = platforms.getProperty (platformKey, {});
+    if (! platformEntry.isObject())
+        return false;
+
+    const auto fileUrlString  = platformEntry.getProperty ("url", "").toString();
+    const auto expectedSha256 = platformEntry.getProperty ("sha256", "").toString();
+    if (fileUrlString.isEmpty() || expectedSha256.isEmpty())
+        return false;
+
+    const juce::URL fileUrl (fileUrlString);
+    if (! fileUrl.getScheme().equalsIgnoreCase ("https"))
+        return false; // HTTPS only, no exceptions -- manifest and installer alike
+
+    out.fileUrl = fileUrl;
+    out.sha256Hex = expectedSha256;
+    out.version = latestVersion;
+    out.releaseNotesUrl = parsed.getProperty ("releaseNotesUrl", "").toString();
+    return true;
+}
+
 void UpdateService::checkForUpdates (ReadyCallback onReady)
 {
     juce::Thread::launch ([this, onReady]
     {
-        // Every early-return below is a deliberate silent no-op: this runs
-        // unconditionally on every launch, so a network hiccup, a malformed
-        // manifest, or a slow server must never surface as an error or delay
-        // getting into the app.
-        const juce::URL manifestUrl (kManifestUrl);
-
-        int statusCode = 0;
-        auto stream = manifestUrl.createInputStream (
-            juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                .withConnectionTimeoutMs (kConnectionTimeoutMs)
-                .withStatusCode (&statusCode));
-
-        if (stream == nullptr || statusCode != 200)
+        ManifestUpdateInfo info;
+        if (! fetchManifestUpdateInfo (info))
             return;
 
-        const auto manifestText = stream->readEntireStreamAsString();
-        const auto parsed = juce::JSON::parse (manifestText);
-        if (! parsed.isObject())
-            return;
-
-        const auto latestVersion = parsed.getProperty ("latestVersion", "").toString();
-        if (latestVersion.isEmpty())
-            return;
-
-        const juce::String localVersion = ProjectInfo::versionString;
-        if (! isRemoteVersionNewer (latestVersion, localVersion))
-            return;
-
-        juce::String platformKey;
-       #if JUCE_WINDOWS
-        platformKey = "windows";
-       #elif JUCE_MAC
-        platformKey = "macos";
-       #endif
-        if (platformKey.isEmpty())
-            return; // no installer story for this platform
-
-        const auto platforms = parsed.getProperty ("platforms", {});
-        if (! platforms.isObject())
-            return;
-
-        const auto platformEntry = platforms.getProperty (platformKey, {});
-        if (! platformEntry.isObject())
-            return;
-
-        const auto fileUrlString  = platformEntry.getProperty ("url", "").toString();
-        const auto expectedSha256 = platformEntry.getProperty ("sha256", "").toString();
-        if (fileUrlString.isEmpty() || expectedSha256.isEmpty())
-            return;
-
-        const juce::URL fileUrl (fileUrlString);
-        if (! fileUrl.getScheme().equalsIgnoreCase ("https"))
-            return; // HTTPS only, no exceptions -- manifest and installer alike
-
-        const auto releaseNotesUrl = parsed.getProperty ("releaseNotesUrl", "").toString();
-        downloadAndVerify (fileUrl, expectedSha256, latestVersion, releaseNotesUrl, onReady);
+        downloadAndVerify (info.fileUrl, info.sha256Hex, info.version, info.releaseNotesUrl, onReady);
     });
 }
 
-void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
+void UpdateService::checkForUpdatesManual (ManifestCheckCallback onResult)
+{
+    juce::Thread::launch ([this, onResult]
+    {
+        ManifestUpdateInfo info;
+        const bool hasUpdate = fetchManifestUpdateInfo (info);
+
+        if (hasUpdate)
+        {
+            pendingCheckedFileUrl_ = info.fileUrl;
+            pendingCheckedSha256_ = info.sha256Hex;
+            pendingCheckedVersion_ = info.version;
+            pendingCheckedReleaseNotesUrl_ = info.releaseNotesUrl;
+        }
+
+        if (onResult)
+            juce::MessageManager::callAsync ([onResult, hasUpdate, info]
+            {
+                onResult (hasUpdate, info.version, info.releaseNotesUrl);
+            });
+    });
+}
+
+void UpdateService::downloadUpdateNow (DownloadCallback onDone)
+{
+    juce::Thread::launch ([this, onDone]
+    {
+        const auto fileUrl = pendingCheckedFileUrl_;
+        const auto sha256  = pendingCheckedSha256_;
+        const auto version = pendingCheckedVersion_;
+        const auto notes   = pendingCheckedReleaseNotesUrl_;
+
+        // No prior successful checkForUpdatesManual() call to act on.
+        if (fileUrl.toString (false).isEmpty() || sha256.isEmpty())
+        {
+            if (onDone)
+                juce::MessageManager::callAsync ([onDone] { onDone (false); });
+            return;
+        }
+
+        const bool ok = downloadAndVerify (fileUrl, sha256, version, notes, nullptr);
+        if (onDone)
+            juce::MessageManager::callAsync ([onDone, ok] { onDone (ok); });
+    });
+}
+
+bool UpdateService::downloadAndVerify (const juce::URL& fileUrl,
                                         const juce::String& expectedSha256Hex,
                                         const juce::String& version,
                                         const juce::String& releaseNotesUrl,
                                         ReadyCallback onReady)
 {
-    // Still running on checkForUpdates' background thread.
+    // Runs on whichever background thread the caller launched (checkForUpdates'
+    // own thread, or downloadUpdateNow's).
     int statusCode = 0;
     auto stream = fileUrl.createInputStream (
         juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
@@ -163,7 +224,7 @@ void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
             .withStatusCode (&statusCode));
 
     if (stream == nullptr || statusCode != 200)
-        return;
+        return false;
 
     const auto destDir = getUpdatesDirectory();
     const auto fileName = fileUrl.getFileName();
@@ -174,7 +235,7 @@ void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
     {
         juce::FileOutputStream out (destFile);
         if (! out.openedOk())
-            return;
+            return false;
 
         juce::HeapBlock<char> buffer (1 << 16);
         for (;;)
@@ -188,7 +249,7 @@ void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
     }
 
     if (! destFile.existsAsFile())
-        return;
+        return false;
 
     // Verify before ever trusting this file -- a corrupted or tampered
     // download must never reach the "ready to install" state.
@@ -196,7 +257,7 @@ void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
     if (! actualHash.toHexString().equalsIgnoreCase (expectedSha256Hex))
     {
         destFile.deleteFile();
-        return;
+        return false;
     }
 
     pendingInstallerFile_ = destFile;
@@ -208,6 +269,8 @@ void UpdateService::downloadAndVerify (const juce::URL& fileUrl,
         {
             onReady (version, releaseNotesUrl);
         });
+
+    return true;
 }
 
 void UpdateService::restartAndInstall()
