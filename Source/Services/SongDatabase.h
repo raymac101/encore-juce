@@ -88,6 +88,20 @@ public:
         found. */
     CdgSong getById(const juce::String& songId) const;
 
+    /** Exact (case-insensitive) song_name + artist_name lookup, via the
+        existing COLLATE NOCASE indices on those columns -- unlike
+        search()/searchPrefix() below, this does NOT depend on FTS5, so it
+        works even when SQLite was built without it (the vcpkg `sqlite3`
+        port used by the Windows build does NOT enable FTS5 unless the
+        `fts5` feature is explicitly requested -- confirmed by inspecting
+        the shipped sqlite3.dll's compile options, which is why
+        search()/searchPrefix() silently return zero results on Windows
+        today; see MainComponent::loadSingerIntoNowPlaying and
+        EditSingerModal::findFullSongRecord, the two places that used to
+        rely on searchPrefix() as a library-lookup fallback). Returns an
+        invalid CdgSong (id empty) if no exact match exists. */
+    CdgSong findByNameAndArtist(const juce::String& songName, const juce::String& artistName) const;
+
     /** Full-text search on song_name + artist_name using FTS5 MATCH.
         The query string may include FTS5 operators ("rolling NEAR stones").
         Results are returned ranked by relevance (BM25). */

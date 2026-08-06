@@ -721,6 +721,7 @@ private:
         // Identity Toolkit returns codes like "EMAIL_NOT_FOUND",
         // "INVALID_PASSWORD", "EMAIL_EXISTS", "WEAK_PASSWORD : Password should be at least 6 characters".
         auto& lm = LocalizationManager::getInstance();
+        if (code.contains("NO_CONNECTION"))       return lm.getText("login.error_no_connection");
         if (code.contains("EMAIL_NOT_FOUND"))     return lm.getText("login.error_user_not_found");
         if (code.contains("INVALID_PASSWORD"))    return lm.getText("login.error_password_incorrect");
         if (code.contains("INVALID_LOGIN_CREDENTIALS")) return lm.getText("login.error_invalid_credentials");

@@ -611,12 +611,39 @@ void MainComponent::setupUI()
         const juce::String wantArtist = juce::String(firstSong.songArtist).trim().toLowerCase();
 
         const CdgSong* match = nullptr;
+
+        // Exact name+artist match first, preferring whichever library row has
+        // the most manufacturer versions. The library can contain duplicate
+        // rows for the same song/artist when a scan didn't merge every
+        // version into one record (seen with "House Of The Rising Sun" --
+        // one row left with only ["Unknown"], another with 12 real
+        // versions). Matching on the queue item's stored songId first (as
+        // this used to) can land on the thin row and hide every other
+        // version, so the grouping key (name+artist) takes priority.
         for (const auto& s : library)
         {
-            if (! wantId.isEmpty() && juce::String(s.id).trim() == wantId)
+            const juce::String libName = juce::String(s.songName).trim().toLowerCase();
+            const juce::String libArtist = juce::String(s.artistName).trim().toLowerCase();
+
+            const bool nameMatches = (libName == wantName);
+            const bool artistMatches = wantArtist.isEmpty() || (libArtist == wantArtist);
+
+            if (nameMatches && artistMatches)
             {
-                match = &s;
-                break;
+                if (match == nullptr || s.version.size() > match->version.size())
+                    match = &s;
+            }
+        }
+
+        if (match == nullptr && wantId.isNotEmpty())
+        {
+            for (const auto& s : library)
+            {
+                if (juce::String(s.id).trim() == wantId)
+                {
+                    match = &s;
+                    break;
+                }
             }
         }
 
@@ -634,24 +661,6 @@ void MainComponent::setupUI()
                 }
                 if (match != nullptr)
                     break;
-            }
-        }
-
-        if (match == nullptr)
-        {
-            for (const auto& s : library)
-            {
-                const juce::String libName = juce::String(s.songName).trim().toLowerCase();
-                const juce::String libArtist = juce::String(s.artistName).trim().toLowerCase();
-
-                const bool nameMatches = (libName == wantName);
-                const bool artistMatches = wantArtist.isEmpty() || (libArtist == wantArtist);
-
-                if (nameMatches && artistMatches)
-                {
-                    match = &s;
-                    break;
-                }
             }
         }
 
@@ -674,19 +683,20 @@ void MainComponent::setupUI()
             SongDatabase db;
             if (db.open())
             {
-                if (wantId.isNotEmpty())
+                // findByNameAndArtist() first, not searchPrefix() -- searchPrefix()
+                // depends on the songs_fts FTS5 virtual table, which silently
+                // fails to get created on Windows (the vcpkg sqlite3 port
+                // doesn't enable FTS5 by default), so it always returned zero
+                // hits here. See SongDatabase::findByNameAndArtist()'s doc
+                // comment for the full story. It's also already the "richest"
+                // duplicate row (ORDER BY LENGTH(versions) DESC), so try it
+                // before falling back to a raw id match that could land on a
+                // thin duplicate row.
+                if (wantName.isNotEmpty())
+                    dbMatch = db.findByNameAndArtist(wantName, wantArtist);
+
+                if (dbMatch.id.empty() && wantId.isNotEmpty())
                     dbMatch = db.getById(wantId);
-
-                if (dbMatch.id.empty() && wantName.isNotEmpty())
-                {
-                    const juce::String query = wantArtist.isNotEmpty()
-                        ? (wantName + " " + wantArtist)
-                        : wantName;
-
-                    auto hits = db.searchPrefix(query, 40);
-                    if (!hits.empty())
-                        dbMatch = hits.front();
-                }
             }
 
             if (!dbMatch.id.empty())

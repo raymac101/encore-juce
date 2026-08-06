@@ -323,30 +323,25 @@ CdgSong EditSingerModal::findFullSongRecord (const QueueItem& item) const
     if (! db.open())
         return {};
 
-    const juce::String wantId = juce::String (item.songId).trim();
-    if (wantId.isNotEmpty())
-    {
-        auto byId = db.getById (wantId);
-        if (! byId.id.empty())
-            return byId;
-    }
-
     const juce::String wantName   = juce::String (item.songName).trim();
     const juce::String wantArtist = juce::String (item.songArtist).trim();
-    if (wantName.isEmpty())
-        return {};
 
-    const juce::String query = wantArtist.isNotEmpty() ? (wantName + " " + wantArtist) : wantName;
-    auto hits = db.searchPrefix (query, 40);
+    CdgSong byNameArtist;
+    if (wantName.isNotEmpty())
+        byNameArtist = db.findByNameAndArtist (wantName, wantArtist);
 
-    for (auto& hit : hits)
-    {
-        if (juce::String (hit.songName).trim().equalsIgnoreCase (wantName)
-            && (wantArtist.isEmpty() || juce::String (hit.artistName).trim().equalsIgnoreCase (wantArtist)))
-            return hit;
-    }
+    const juce::String wantId = juce::String (item.songId).trim();
+    CdgSong byId;
+    if (wantId.isNotEmpty())
+        byId = db.getById (wantId);
 
-    return hits.empty() ? CdgSong{} : hits.front();
+    // The library can contain duplicate rows for the same song/artist when
+    // a scan didn't merge every manufacturer version into one record (seen
+    // with "House Of The Rising Sun" -- one row left with only ["Unknown"],
+    // another with 12 real versions). Trusting the queue item's stored
+    // songId can land on the thin row and hide every other version, so
+    // prefer whichever record actually has more versions listed.
+    return (byNameArtist.version.size() > byId.version.size()) ? byNameArtist : byId;
 }
 
 void EditSingerModal::showVersionPickerFor (int songIndex, juce::Component* anchor)
@@ -357,9 +352,19 @@ void EditSingerModal::showVersionPickerFor (int songIndex, juce::Component* anch
     const auto fullSong = findFullSongRecord (songs[(size_t) songIndex]);
     if (fullSong.version.empty())
     {
+        const auto& item = songs[(size_t) songIndex];
+        SongDatabase diagDb;
+        const bool diagOpened = diagDb.open();
+        juce::String diag;
+        diag << "No other manufacturer versions of this song were found in the library.\n\n"
+             << "[diagnostic]\n"
+             << "songId: '" << juce::String (item.songId) << "'\n"
+             << "songName: '" << juce::String (item.songName) << "'\n"
+             << "songArtist: '" << juce::String (item.songArtist) << "'\n"
+             << "db opened: " << (diagOpened ? "yes" : "NO") << "\n"
+             << "db file: " << diagDb.getFile().getFullPathName();
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-            "No Other Versions",
-            "No other manufacturer versions of this song were found in the library.");
+            "No Other Versions", diag);
         return;
     }
 

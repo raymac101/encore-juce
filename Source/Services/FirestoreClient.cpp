@@ -182,10 +182,28 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
 
 //==============================================================================
 // Auth
-static FirestoreClient::AuthResult parseAuthError(const juce::var& v)
+
+// httpJson()/httpJsonRaw() leave `status` at its initial 0 when
+// createInputStream() never got a response at all (DNS/TCP/TLS failure --
+// the strongest available signal that there's no network path to Firebase,
+// as opposed to a real HTTP response carrying an auth error). status==0
+// results in JSON parsing never even running, so `resp` here is always an
+// empty/unparseable var in that case too -- callers pass `status` through
+// so this can tell "no connection" apart from "connected, but Firebase
+// returned something unparseable" (Firebase always returns a JSON error
+// body for real API errors, so the latter is the truly unusual case).
+static FirestoreClient::AuthResult parseAuthError(const juce::var& v, int status)
 {
     FirestoreClient::AuthResult r;
     r.ok = false;
+
+    if (status == 0)
+    {
+        r.errorCode    = "NO_CONNECTION";
+        r.errorMessage = "NO_CONNECTION";
+        return r;
+    }
+
     if (auto* err = v.getProperty("error", juce::var()).getDynamicObject())
     {
         r.errorCode    = err->getProperty("message").toString();
@@ -224,7 +242,7 @@ FirestoreClient::AuthResult FirestoreClient::signInWithEmailPassword(const juce:
         tokenLifetimeSeconds_ = (int) resp.getProperty("expiresIn", 3600);
         return { true, false, {}, {} };
     }
-    return parseAuthError(resp);
+    return parseAuthError(resp, status);
 }
 
 FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce::String& email,
@@ -253,7 +271,7 @@ FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce:
         tokenLifetimeSeconds_ = (int) resp.getProperty("expiresIn", 3600);
         return { true, true, {}, {} };
     }
-    return parseAuthError(resp);
+    return parseAuthError(resp, status);
 }
 
 FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::String& email)
@@ -271,7 +289,7 @@ FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::
     if (status >= 200 && status < 300 && resp.isObject())
         return { true, false, {}, {} };
 
-    return parseAuthError(resp);
+    return parseAuthError(resp, status);
 }
 
 bool FirestoreClient::deleteCurrentAccount()

@@ -127,6 +127,29 @@ SELECT id, song_name, artist_name, image_url, key_signature,
 FROM songs WHERE id = ?;
 )SQL";
 
+// Plain indexed lookup (idx_songs_name / idx_songs_artist, both COLLATE
+// NOCASE) -- deliberately does NOT go through songs_fts, see
+// findByNameAndArtist()'s doc comment in the header for why.
+//
+// Library scans can leave more than one row for the same (song, artist) --
+// e.g. an older, poorly-grouped scan that only captured one manufacturer
+// alongside a later, properly-grouped rescan with many -- since re-scans
+// upsert by id, not by (name, artist), so a stale row never gets cleaned
+// up automatically. ORDER BY LENGTH(versions) DESC is a cheap, effective
+// tie-breaker: the row with the most manufacturer versions will always have
+// the longest JSON array text, so this reliably prefers the richer record
+// over a stale single-version leftover instead of picking whichever the
+// query planner happens to return first.
+static const char* kSelectByNameArtist = R"SQL(
+SELECT id, song_name, artist_name, image_url, key_signature,
+       tempo, duration_ms, release_date, file_date, file_size,
+       full_paths, file_names, file_paths, file_types,
+       genres, versions, codes, ratings, added_at
+FROM songs WHERE song_name = ?1 COLLATE NOCASE AND artist_name = ?2 COLLATE NOCASE
+ORDER BY LENGTH(versions) DESC
+LIMIT 1;
+)SQL";
+
 // FTS5 MATCH — ranks by BM25 (lower rank = better match).
 static const char* kSearchFts = R"SQL(
 SELECT s.id, s.song_name, s.artist_name, s.image_url, s.key_signature,
@@ -462,6 +485,26 @@ CdgSong SongDatabase::getById(const juce::String& songId) const
         return {};
 
     sqlite3_bind_text(stmt, 1, songId.toRawUTF8(), -1, SQLITE_TRANSIENT);
+
+    CdgSong result;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = rowToSong(stmt);
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+CdgSong SongDatabase::findByNameAndArtist(const juce::String& songName, const juce::String& artistName) const
+{
+    juce::ScopedReadLock rl(lock_);
+    if (!isOpen()) return {};
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, kSelectByNameArtist, -1, &stmt, nullptr) != SQLITE_OK)
+        return {};
+
+    sqlite3_bind_text(stmt, 1, songName.toRawUTF8(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, artistName.toRawUTF8(), -1, SQLITE_TRANSIENT);
 
     CdgSong result;
     if (sqlite3_step(stmt) == SQLITE_ROW)
