@@ -114,7 +114,7 @@ namespace
         q.duration     = valueAsInt   (fieldByName(fields, "duration"));
         q.order        = valueAsInt   (fieldByName(fields, "order"));
         q.songOrder    = valueAsInt   (fieldByName(fields, "songOrder"));
-        q.pitch        = (float) valueAsDouble(fieldByName(fields, "pitch"), 1.0);
+        q.pitch        = (float) valueAsDouble(fieldByName(fields, "pitch"), 0.0); // semitones, 0.0 = normal
         q.status       = valueAsString(fieldByName(fields, "status")).toStdString();
         q.time         = valueAsString(fieldByName(fields, "time")).toStdString();
         q.alerts       = valueAsBool  (fieldByName(fields, "addedAlert"))

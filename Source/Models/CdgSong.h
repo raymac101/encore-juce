@@ -39,7 +39,11 @@ struct CdgSong
     int64_t addedAt   = 0;                  // Epoch ms when first added to the local library (0 = unknown)
     std::string releaseDate;
     std::vector<std::string> genres;
-    std::vector<std::string> version;       // e.g. "Male", "Female", "Duet"
+    std::vector<std::string> version;       // Manufacturer/label for this release, e.g. "Sunfly",
+                                             // "Zoom Karaoke" -- at import, files for the same
+                                             // song+artist from different manufacturers are grouped
+                                             // into one CdgSong record, one entry per manufacturer
+                                             // here (parallel to fullPath[]/code[]/etc. by index).
     std::vector<std::string> code;          // Disc/track codes
     std::vector<double> rating;             // Quality ratings per version (0.0–5.0)
 
@@ -49,4 +53,17 @@ struct CdgSong
     static CdgSong fromJsonObject(juce::DynamicObject* obj);
     bool isValid() const;
     juce::String getFormattedDuration() const;
+
+    /** Indices into version[]/code[]/rating[] etc., ordered by rating
+        descending (highest-rated manufacturer's version first). Versions
+        with no recorded rating sort as 0.0, i.e. last. Ties keep their
+        original relative order. Shared by every "change version" picker
+        (EditSingerModal, Now Playing) so they always agree on order. */
+    std::vector<int> getVersionIndicesByRating() const;
+
+    /** Human-readable label for versionIndex, e.g. "SF123 - Sunfly (4.5)".
+        Falls back to whichever of code[]/version[] is present, then to
+        "Version N" if neither is. Omits the "(rating)" suffix when that
+        version has no rating recorded. Returns {} for an out-of-range index. */
+    juce::String getVersionLabel (int versionIndex) const;
 };

@@ -131,6 +131,11 @@ public:
     // context-menu callbacks above.
     std::function<void(const CdgSong& song, int singerIndex)> onSongDroppedOnSinger;
 
+    // The song text on the Now Playing card was clicked -- show a version
+    // picker for the currently-playing song. Wired by MainComponent (owns
+    // currentSong / loadAndPlaySong).
+    std::function<void()> onNowPlayingSongClicked;
+
 private:
     class ExpandArrowButton : public juce::Button,
                               private juce::Timer
@@ -194,7 +199,7 @@ private:
         NowPlayingCard();
         void paint(juce::Graphics& g) override;
         void mouseEnter(const juce::MouseEvent&) override { hovering = true;  repaint(); }
-        void mouseExit (const juce::MouseEvent&) override { hovering = false; hoverMenu = false; repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { hovering = false; hoverMenu = false; hoverSongInfo = false; repaint(); }
         void mouseMove (const juce::MouseEvent& e) override;
         void mouseDown (const juce::MouseEvent& e) override;
         void mouseUp   (const juce::MouseEvent& e) override;
@@ -203,17 +208,26 @@ private:
         bool    isPlaying = false;
         bool    hovering = false;
         bool    hoverMenu = false;   // cursor/touch over 3-dot button
+        bool    hoverSongInfo = false; // cursor/touch over the song text (change-version zone)
         bool    hasSinger = false;
         juce::Image avatarImage;
 
         juce::Rectangle<int> getMenuButtonRect() const;
         bool isOverMenuButton(juce::Point<int> p) const;
 
+        // The artist/song text area (bottom half of the card, below the
+        // singer's name) -- clicking it changes the playing song's version
+        // rather than toggling play/pause. Mirrors the layout math in
+        // paint(); keep the two in sync if that layout ever changes.
+        juce::Rectangle<int> getSongInfoRect() const;
+        bool isOverSongInfo(juce::Point<int> p) const;
+
         std::function<void()> onPlayClicked;
         std::function<void()> onPauseClicked;
         std::function<void()> onReturnToQueueNext;
         std::function<void()> onReturnToQueueEnd;
         std::function<void()> onSkipAndRemove;
+        std::function<void()> onSongClicked;
     };
 
     //==============================================================================

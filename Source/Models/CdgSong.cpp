@@ -11,6 +11,7 @@
 */
 
 #include "CdgSong.h"
+#include <algorithm>
 
 //==============================================================================
 static juce::Array<juce::var> strVecToVar(const std::vector<std::string>& v)
@@ -120,4 +121,40 @@ juce::String CdgSong::getFormattedDuration() const
 {
     int totalSeconds = durationMS / 1000;
     return juce::String::formatted("%d:%02d", totalSeconds / 60, totalSeconds % 60);
+}
+
+std::vector<int> CdgSong::getVersionIndicesByRating() const
+{
+    std::vector<int> indices (version.size());
+    for (size_t i = 0; i < indices.size(); ++i)
+        indices[i] = (int) i;
+
+    std::stable_sort (indices.begin(), indices.end(), [this] (int a, int b)
+    {
+        const double ra = (a >= 0 && (size_t) a < rating.size()) ? rating[(size_t) a] : 0.0;
+        const double rb = (b >= 0 && (size_t) b < rating.size()) ? rating[(size_t) b] : 0.0;
+        return ra > rb; // descending -- highest-rated first
+    });
+
+    return indices;
+}
+
+juce::String CdgSong::getVersionLabel (int versionIndex) const
+{
+    if (versionIndex < 0 || (size_t) versionIndex >= version.size())
+        return {};
+
+    const juce::String codeStr = (size_t) versionIndex < code.size()
+        ? juce::String (code[(size_t) versionIndex]) : juce::String();
+    const juce::String verStr = juce::String (version[(size_t) versionIndex]);
+
+    juce::String label = codeStr.isNotEmpty() && verStr.isNotEmpty() ? codeStr + " - " + verStr
+                        : (codeStr.isNotEmpty() ? codeStr : verStr);
+    if (label.isEmpty())
+        label = "Version " + juce::String (versionIndex + 1);
+
+    if ((size_t) versionIndex < rating.size() && rating[(size_t) versionIndex] > 0.0)
+        label += juce::String::formatted (" (%.1f)", rating[(size_t) versionIndex]);
+
+    return label;
 }

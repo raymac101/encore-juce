@@ -1223,7 +1223,7 @@ void MainComponent::setupUI()
         item.songArtist  = r.song.artistName;
         item.songVersion = versionLabel.toStdString();
         item.duration    = r.song.durationMS / 1000;
-        item.pitch       = 1.0f + (float) r.pitchSemitones / 12.0f;
+        item.pitch       = (float) r.pitchSemitones; // semitones, 0.0 = normal -- see QueueItem.h
         item.key         = r.pitchSemitones;
         item.status      = "queued";
         item.dateAdded   = juce::Time::getCurrentTime().toMilliseconds();
@@ -2587,8 +2587,8 @@ void MainComponent::setupUI()
         item.songArtist  = song.artistName;
         item.songVersion = versionLabel.toStdString();
         item.duration    = song.durationMS / 1000;
-        item.pitch       = 1.0f;
-        item.key         = 0;
+        item.pitch       = 0.0f; // 0.0 = normal -- matches .key (semitones), not the
+        item.key         = 0;    // 1.0-ratio convention SongSelectionDialog's flow uses.
         item.status      = "queued";
         item.dateAdded   = juce::Time::getCurrentTime().toMilliseconds();
 
@@ -2611,6 +2611,58 @@ void MainComponent::setupUI()
 
                 if (safe != nullptr)
                     safe->reloadQueueFromFirestore (venueId);
+            });
+    };
+
+    // ── Now Playing: click the song to change its version ─────────────────────
+    // Purely a live playback change, same as the BottomBar pitch knob
+    // (bottomBar->onPitchChanged above) -- not written back to the singer's
+    // Firestore queue doc. currentSong is already the full library record
+    // (with every version[]/rating[] entry) since loadAndPlaySong sets it.
+    queueBar->onNowPlayingSongClicked = [this]()
+    {
+        if (! currentSong.isValid())
+            return;
+
+        if (currentSong.version.empty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+                "No Other Versions",
+                "No other manufacturer versions of this song were found in the library.");
+            return;
+        }
+
+        const juce::String currentVersion = currentSongVersion_.trim();
+        const auto orderedIndices = currentSong.getVersionIndicesByRating();
+
+        juce::PopupMenu menu;
+        for (int vi : orderedIndices)
+        {
+            const bool isCurrent = juce::String (currentSong.version[(size_t) vi]).trim()
+                                       .equalsIgnoreCase (currentVersion);
+            menu.addItem (vi + 1, currentSong.getVersionLabel (vi), true, isCurrent);
+        }
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        const CdgSong songToReload = currentSong;
+        const int pitchSemis = juce::roundToInt (currentPitchSemitones_);
+
+        menu.showMenuAsync (juce::PopupMenu::Options(),
+            [safe, songToReload, pitchSemis] (int result)
+            {
+                if (safe == nullptr || result <= 0)
+                    return;
+
+                const int vi = result - 1;
+                if (vi < 0 || (size_t) vi >= songToReload.version.size())
+                    return;
+
+                // Same partial-play logging as any other song change (e.g.
+                // SongSelectionDialog's "Play Now").
+                if (safe->currentSong.isValid())
+                    safe->logPlayHistoryIfNeeded (false);
+
+                safe->loadAndPlaySong (songToReload, vi, pitchSemis, /*autoStart*/ true);
             });
     };
 

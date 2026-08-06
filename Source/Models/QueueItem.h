@@ -35,7 +35,10 @@ struct QueueItem
     int duration = 0;                   // Song duration in seconds
     int order = 0;                      // Position in overall queue
     int songOrder = 0;                  // Position within singer's songs
-    float pitch = 1.0f;                 // Pitch adjustment (1.0 = normal)
+    float pitch = 0.0f;                 // Pitch adjustment in semitones (0.0 = normal) -- read
+                                         // directly as semitones when a queued song loads for
+                                         // playback (see MainComponent::loadSingerIntoNowPlaying),
+                                         // same value as `key` below, not a 1.0-based ratio.
     std::string status = "queued";      // Status: "queued", "playing", "completed", "new", "approved", "approvedpending", "rejected"
     std::string action;                 // Optional action verb on /requested ("delete", "next", "now", ...)
     std::string reason;                 // Rejection reason (when status == "rejected")

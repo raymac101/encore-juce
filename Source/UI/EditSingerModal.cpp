@@ -5,6 +5,8 @@
 */
 
 #include "EditSingerModal.h"
+#include "SpriteIcon.h"
+#include "../Services/SongDatabase.h"
 
 namespace
 {
@@ -21,13 +23,45 @@ EditSingerModal::Row::Row(EditSingerModal& o, int idx) : owner(o), index(idx)
     addAndMakeVisible(downBtn);   downBtn.addListener(&owner);
     addAndMakeVisible(minusBtn);  minusBtn.addListener(&owner);
     addAndMakeVisible(plusBtn);   plusBtn.addListener(&owner);
-    addAndMakeVisible(trashBtn);  trashBtn.addListener(&owner);
+
+    // Crisp vector icon (assets/images/sprite.svg's icon-trash) rather than
+    // an emoji glyph -- the wastebasket emoji doesn't render reliably with
+    // this app's fonts (was showing as mangled/blank glyphs).
+    if (auto icon = SpriteIcon::create ("icon-trash", juce::Colour (0xffd0d0d0)))
+        trashBtn.setImages (icon.get());
+    trashBtn.addListener(&owner);
+    addAndMakeVisible(trashBtn);
+
+    versionBtn.addListener(&owner);
+    addAndMakeVisible(versionBtn);
 
     pitchLabel.setJustificationType(juce::Justification::centred);
     pitchLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(pitchLabel);
 
     setComponentID("row" + juce::String(index));
+}
+
+void EditSingerModal::Row::mouseDrag (const juce::MouseEvent& e)
+{
+    // Don't start a drag from any of the buttons -- only the row's plain
+    // "body" (the artist/song text area with no button over it).
+    const auto start = e.getMouseDownPosition();
+    if (upBtn.getBounds().contains (start) || downBtn.getBounds().contains (start)
+        || minusBtn.getBounds().contains (start) || plusBtn.getBounds().contains (start)
+        || trashBtn.getBounds().contains (start) || pitchLabel.getBounds().contains (start)
+        || versionBtn.getBounds().contains (start))
+        return;
+
+    if (auto* dnd = juce::DragAndDropContainer::findParentDragContainerFor (this))
+    {
+        if (! dnd->isDragAndDropActive())
+        {
+            auto img = createComponentSnapshot (getLocalBounds(), true);
+            dnd->startDragging (juce::var (index), this, juce::ScaledImage (img),
+                                /*allowDraggingToOtherWindows*/ false);
+        }
+    }
 }
 
 void EditSingerModal::Row::resized()
@@ -43,6 +77,8 @@ void EditSingerModal::Row::resized()
     plusBtn .setBounds(r.removeFromRight(28));
     pitchLabel.setBounds(r.removeFromRight(48));
     minusBtn.setBounds(r.removeFromRight(28));
+    r.removeFromRight(8);
+    versionBtn.setBounds(r.removeFromRight(110));
 }
 
 void EditSingerModal::Row::paint(juce::Graphics& g)
@@ -59,7 +95,7 @@ void EditSingerModal::Row::paint(juce::Graphics& g)
     // Text area sits between the up/down buttons and the pitch group.
     auto text = r;
     text.removeFromLeft(28 + 2 + 28 + 8); // up/down
-    text.removeFromRight(36 + 8 + 28 + 48 + 28 + 8); // trash + pitch group
+    text.removeFromRight(36 + 8 + 28 + 48 + 28 + 8 + 110); // trash + pitch group + version
 
     auto top = text.removeFromTop(text.getHeight() / 2);
     g.setColour(juce::Colour(0xffd0d0d0));
@@ -82,7 +118,13 @@ EditSingerModal::EditSingerModal(const juce::String& name,
                                  const std::vector<QueueItem>& s)
     : singerName(name), songs(s)
 {
-    title.setText("Edit Songs in the Queue — " + singerName,
+    // Plain ASCII hyphen rather than an em-dash: a literal multi-byte UTF-8
+    // character embedded in a source string literal renders as mangled
+    // bytes unless the compiler is explicitly told the source is UTF-8 --
+    // safer to just not depend on that (see the row buttons below, which
+    // sidestep the same issue via juce::String::fromUTF8 for real cases
+    // where a non-ASCII glyph is unavoidable).
+    title.setText("Edit Songs in the Queue - " + singerName,
                   juce::dontSendNotification);
     title.setFont(juce::Font(15.f).boldened());
     title.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -92,7 +134,7 @@ EditSingerModal::EditSingerModal(const juce::String& name,
     addAndMakeVisible(doneBtn);  doneBtn.addListener(this);
 
     rebuildRows();
-    setSize(560, kHeaderH + kFooterH + (int) songs.size() * kRowHeight + kPadding * 2);
+    setSize(670, kHeaderH + kFooterH + (int) songs.size() * kRowHeight + kPadding * 2);
 }
 
 void EditSingerModal::rebuildRows()
@@ -103,6 +145,8 @@ void EditSingerModal::rebuildRows()
         auto* row = new Row(*this, i);
         row->pitchLabel.setText(juce::String((int) songs[(size_t) i].pitch),
                                 juce::dontSendNotification);
+        const auto ver = juce::String(songs[(size_t) i].songVersion);
+        row->versionBtn.setButtonText(ver.isNotEmpty() ? ver : "Change Version");
         addAndMakeVisible(row);
         rows.add(row);
     }
@@ -128,6 +172,92 @@ void EditSingerModal::resized()
 void EditSingerModal::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1a1a1a));
+}
+
+void EditSingerModal::paintOverChildren (juce::Graphics& g)
+{
+    if (dropIndicatorY < 0)
+        return;
+
+    g.setColour (juce::Colour (0xff30daff));
+    g.fillRect (juce::Rectangle<int> (kPadding, dropIndicatorY - 1, getWidth() - kPadding * 2, 3));
+}
+
+bool EditSingerModal::isInterestedInDragSource (const SourceDetails& details)
+{
+    return dynamic_cast<Row*> (details.sourceComponent.get()) != nullptr;
+}
+
+void EditSingerModal::itemDragMove (const SourceDetails& details)
+{
+    const int fromIndex = (int) details.description;
+    const int targetY   = details.localPosition.y;
+
+    int toIndex = 0;
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        if (i == fromIndex) continue;
+        auto* r = rows[i];
+        if (r->getY() + r->getHeight() / 2 < targetY)
+            ++toIndex;
+    }
+    toIndex = juce::jlimit (0, (int) songs.size() - 1, toIndex);
+
+    const int newY = (toIndex < rows.size()) ? rows[toIndex]->getY()
+                                              : (rows.getLast() != nullptr ? rows.getLast()->getBottom() : -1);
+    if (newY != dropIndicatorY)
+    {
+        dropIndicatorY = newY;
+        repaint();
+    }
+}
+
+void EditSingerModal::itemDragExit (const SourceDetails&)
+{
+    if (dropIndicatorY != -1)
+    {
+        dropIndicatorY = -1;
+        repaint();
+    }
+}
+
+void EditSingerModal::itemDropped (const SourceDetails& details)
+{
+    const int fromIndex = (int) details.description;
+    const int targetY   = details.localPosition.y;
+
+    int toIndex = 0;
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        if (i == fromIndex) continue;
+        auto* r = rows[i];
+        if (r->getY() + r->getHeight() / 2 < targetY)
+            ++toIndex;
+    }
+    toIndex = juce::jlimit (0, (int) songs.size() - 1, toIndex);
+
+    dropIndicatorY = -1;
+
+    if (fromIndex < 0 || fromIndex >= (int) songs.size() || toIndex == fromIndex)
+    {
+        repaint();
+        return;
+    }
+
+    moveSong (fromIndex, toIndex);
+}
+
+void EditSingerModal::moveSong (int fromIndex, int toIndex)
+{
+    if (fromIndex < 0 || fromIndex >= (int) songs.size()) return;
+    if (toIndex < 0 || toIndex >= (int) songs.size()) return;
+    if (fromIndex == toIndex) return;
+
+    auto moved = songs[(size_t) fromIndex];
+    songs.erase (songs.begin() + fromIndex);
+    songs.insert (songs.begin() + toIndex, moved);
+
+    rebuildRows();
 }
 
 void EditSingerModal::buttonClicked(juce::Button* b)
@@ -179,7 +309,88 @@ void EditSingerModal::buttonClicked(juce::Button* b)
             juce::MessageManager::callAsync([safe]() { if (safe != nullptr) safe->rebuildRows(); });
             return;
         }
+        if (b == &row->versionBtn)
+        {
+            showVersionPickerFor (i, &row->versionBtn);
+            return;
+        }
     }
+}
+
+CdgSong EditSingerModal::findFullSongRecord (const QueueItem& item) const
+{
+    SongDatabase db;
+    if (! db.open())
+        return {};
+
+    const juce::String wantId = juce::String (item.songId).trim();
+    if (wantId.isNotEmpty())
+    {
+        auto byId = db.getById (wantId);
+        if (! byId.id.empty())
+            return byId;
+    }
+
+    const juce::String wantName   = juce::String (item.songName).trim();
+    const juce::String wantArtist = juce::String (item.songArtist).trim();
+    if (wantName.isEmpty())
+        return {};
+
+    const juce::String query = wantArtist.isNotEmpty() ? (wantName + " " + wantArtist) : wantName;
+    auto hits = db.searchPrefix (query, 40);
+
+    for (auto& hit : hits)
+    {
+        if (juce::String (hit.songName).trim().equalsIgnoreCase (wantName)
+            && (wantArtist.isEmpty() || juce::String (hit.artistName).trim().equalsIgnoreCase (wantArtist)))
+            return hit;
+    }
+
+    return hits.empty() ? CdgSong{} : hits.front();
+}
+
+void EditSingerModal::showVersionPickerFor (int songIndex, juce::Component* anchor)
+{
+    if (songIndex < 0 || songIndex >= (int) songs.size() || anchor == nullptr)
+        return;
+
+    const auto fullSong = findFullSongRecord (songs[(size_t) songIndex]);
+    if (fullSong.version.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+            "No Other Versions",
+            "No other manufacturer versions of this song were found in the library.");
+        return;
+    }
+
+    const juce::String currentVersion = juce::String (songs[(size_t) songIndex].songVersion).trim();
+    const auto orderedIndices = fullSong.getVersionIndicesByRating();
+
+    juce::PopupMenu menu;
+    for (int vi : orderedIndices)
+    {
+        const bool isCurrent = juce::String (fullSong.version[(size_t) vi]).trim()
+                                   .equalsIgnoreCase (currentVersion);
+        menu.addItem (vi + 1, fullSong.getVersionLabel (vi), true, isCurrent);
+    }
+
+    juce::Component::SafePointer<EditSingerModal> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
+        [safe, songIndex, fullSong] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+
+            const int vi = result - 1;
+            if (vi < 0 || (size_t) vi >= fullSong.version.size())
+                return;
+
+            if (songIndex < 0 || songIndex >= (int) safe->songs.size())
+                return;
+
+            safe->songs[(size_t) songIndex].songVersion = fullSong.version[(size_t) vi];
+            safe->rebuildRows();
+        });
 }
 
 void EditSingerModal::closeWindow()

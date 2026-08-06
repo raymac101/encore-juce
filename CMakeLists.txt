@@ -85,6 +85,7 @@ target_sources(EncoreJUCE
         Source/UI/MainArea.cpp
         Source/UI/MenuTheme.cpp
         Source/UI/RibbonMenu.cpp
+        Source/UI/SpriteIcon.cpp
         Source/UI/MixerPage.cpp
         Source/UI/TestingPage.cpp
         Source/UI/QueueBar.cpp

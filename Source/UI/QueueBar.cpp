@@ -156,6 +156,29 @@ bool QueueBar::NowPlayingCard::isOverMenuButton(juce::Point<int> p) const
     return getMenuButtonRect().contains(p);
 }
 
+juce::Rectangle<int> QueueBar::NowPlayingCard::getSongInfoRect() const
+{
+    // Mirrors the layout math in paint(): avatar removed from the left,
+    // 3-dot menu from the right, then the bottom half of what's left (the
+    // top half is the singer's name).
+    if (! hasSinger)
+        return {};
+
+    auto bounds = getLocalBounds().reduced(4);
+    const int avatarSize = bounds.getHeight() - 8;
+    bounds.removeFromLeft(avatarSize + 8);
+    bounds.removeFromRight(28);
+
+    auto textArea = bounds.reduced(4, 0);
+    textArea.removeFromTop(textArea.getHeight() / 2);
+    return textArea;
+}
+
+bool QueueBar::NowPlayingCard::isOverSongInfo(juce::Point<int> p) const
+{
+    return getSongInfoRect().contains(p);
+}
+
 void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().reduced(4);
@@ -242,6 +265,14 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
         g.fillEllipse(cx - dotR, midY + gap - dotR, dotR * 2.f, dotR * 2.f);
     }
 
+    // Song-info hover highlight -- getSongInfoRect() mirrors this same
+    // avatar/menu-trimmed `bounds` + bottom-half split, computed independently.
+    if (hoverSongInfo)
+    {
+        g.setColour(juce::Colours::black.withAlpha(0.10f));
+        g.fillRoundedRectangle(getSongInfoRect().toFloat(), 4.f);
+    }
+
     // Name row (top half of remaining area)
     auto textArea = bounds.reduced(4, 0);
     auto nameArea = textArea.removeFromTop(textArea.getHeight() / 2);
@@ -299,12 +330,17 @@ void QueueBar::NowPlayingCard::mouseDown(const juce::MouseEvent& e)
 
 void QueueBar::NowPlayingCard::mouseMove(const juce::MouseEvent& e)
 {
-    const bool over = isOverMenuButton(e.getPosition());
-    if (over != hoverMenu)
+    const bool overMenu = isOverMenuButton(e.getPosition());
+    const bool overSong = ! overMenu && isOverSongInfo(e.getPosition());
+    bool changed = false;
+
+    if (overMenu != hoverMenu)     { hoverMenu = overMenu;         changed = true; }
+    if (overSong != hoverSongInfo) { hoverSongInfo = overSong;     changed = true; }
+
+    if (changed)
     {
-        hoverMenu = over;
-        setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
-                            : juce::MouseCursor::NormalCursor);
+        setMouseCursor((overMenu || overSong) ? juce::MouseCursor::PointingHandCursor
+                                              : juce::MouseCursor::NormalCursor);
         repaint();
     }
 }
@@ -314,6 +350,13 @@ void QueueBar::NowPlayingCard::mouseUp(const juce::MouseEvent& e)
     if (!hasSinger) return;
     // Menu button fires on mouseDown — swallow the up event for that zone.
     if (isOverMenuButton(e.getPosition())) return;
+
+    if (isOverSongInfo(e.getPosition()))
+    {
+        if (onSongClicked) onSongClicked();
+        return;
+    }
+
     if (isPlaying)
     {
         if (onPauseClicked) onPauseClicked();
@@ -734,6 +777,7 @@ QueueBar::QueueBar()
     nowPlayingCard->onReturnToQueueNext  = [this]() { if (onReturnCurrentToQueueNext) onReturnCurrentToQueueNext(); };
     nowPlayingCard->onReturnToQueueEnd   = [this]() { if (onReturnCurrentToQueueEnd)  onReturnCurrentToQueueEnd();  };
     nowPlayingCard->onSkipAndRemove      = [this]() { if (onSkipCurrentSinger)        onSkipCurrentSinger();        };
+    nowPlayingCard->onSongClicked        = [this]() { if (onNowPlayingSongClicked)    onNowPlayingSongClicked();    };
     addAndMakeVisible(*nowPlayingCard);
 
     // Viewport for singer list
