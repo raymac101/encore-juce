@@ -25,6 +25,24 @@
 #include "BuildInfo.h"
 #include "Onboarding/OnboardingWizard.h"
 
+namespace
+{
+    // Was a compile-time-only ENCORE_DEV_SKIP_LOGIN macro (baked into every
+    // build, including the production installer -- meaning a "Skip Login
+    // (Dev)" button that auto-signs in with a real, hardcoded password was
+    // shipping to customers). Now a runtime opt-in instead: pass
+    // --dev-skip-login on the command line to reveal it. Checked once at
+    // LoginContent construction, same juce::JUCEApplicationBase API already
+    // used for --scan-plugin=/--scan-output= in PluginHostService.
+    bool isDevSkipLoginEnabled()
+    {
+        for (auto& arg : juce::JUCEApplicationBase::getCommandLineParameterArray())
+            if (arg == "--dev-skip-login")
+                return true;
+        return false;
+    }
+}
+
 //==============================================================================
 class LoginWindow::LoginContent : public juce::Component
 {
@@ -101,21 +119,22 @@ public:
         appleButton_.onClick      = [this] { handleOAuth("apple.com");  };
         getStartedButton_.onClick = [this] { launchOnboardingWizard(OnboardingWizard::StartStep::CreateAccount); };
 
-       #if ENCORE_DEV_SKIP_LOGIN
-        addChildComponent(skipButton_);
-        skipButton_.setButtonText(lm.getText("login.dev_skip_button"));
-        skipButton_.getProperties().set("ghost", true);
-        skipButton_.onClick = [this]
+        if (devSkipLoginEnabled_)
         {
-            // Auto-fill canonical dev credentials, mark the venue we want
-            // post-auth, and reuse the normal sign-in path.
-            isLoginMode_ = true;
-            emailEditor_.setText("raymac@shaw.ca", juce::dontSendNotification);
-            passwordEditor_.setText("123456",      juce::dontSendNotification);
-            autoPickVenueName_ = "Karaoke Palace";
-            handleEmailSubmit();
-        };
-       #endif
+            addChildComponent(skipButton_);
+            skipButton_.setButtonText(lm.getText("login.dev_skip_button"));
+            skipButton_.getProperties().set("ghost", true);
+            skipButton_.onClick = [this]
+            {
+                // Auto-fill canonical dev credentials, mark the venue we want
+                // post-auth, and reuse the normal sign-in path.
+                isLoginMode_ = true;
+                emailEditor_.setText("raymac@shaw.ca", juce::dontSendNotification);
+                passwordEditor_.setText("123456",      juce::dontSendNotification);
+                autoPickVenueName_ = "Karaoke Palace";
+                handleEmailSubmit();
+            };
+        }
 
         // ── Multi-page widgets (created up-front, hidden by default) ─────────
         // SelectVenue: heading + remember-toggle + scrolling venue cards
@@ -370,18 +389,16 @@ public:
         headingLabel_.setJustificationType(juce::Justification::centredLeft);
         headingLabel_.setFont(juce::Font(juce::FontOptions(28.0f)).withStyle(juce::Font::plain));
 
-       #if ENCORE_DEV_SKIP_LOGIN
         // Dev-only shortcut sits beside the "Login" heading rather than
         // stacked at the bottom of the form, where it used to overlap
         // "New to Encore? Get Started" once the form grew past the card's
         // fixed height.
-        if (page_ == Page::Login)
+        if (devSkipLoginEnabled_ && page_ == Page::Login)
         {
             auto headingArea = headingLabel_.getBounds();
             skipButton_.setBounds(headingArea.removeFromRight(170).reduced(0, 4));
             headingLabel_.setBounds(headingArea);
         }
-       #endif
 
         inner.removeFromTop(8);
         statusLabel_.setBounds(inner.removeFromTop(28));
@@ -518,9 +535,8 @@ private:
         googleButton_.setVisible(login);
         appleButton_.setVisible(login);
         getStartedButton_.setVisible(login);
-       #if ENCORE_DEV_SKIP_LOGIN
-        skipButton_.setVisible(login);
-       #endif
+        if (devSkipLoginEnabled_)
+            skipButton_.setVisible(login);
 
         venuesHeadingLabel_.setVisible(sel);
         rememberVenueToggle_.setVisible(sel);
@@ -728,10 +744,12 @@ private:
 
                 using O = LoginFlowController::Outcome;
 
-               #if ENCORE_DEV_SKIP_LOGIN
                 // Dev skip path: if a target venue name was set by the Skip
                 // button, find it in the associations list (or accept the
                 // already-resolved single venue) and short-circuit the picker.
+                // autoPickVenueName_ can only be non-empty if devSkipLoginEnabled_
+                // was true and the button was actually clicked, so no separate
+                // runtime guard is needed here.
                 if (autoPickVenueName_.isNotEmpty())
                 {
                     juce::String pickId;
@@ -772,7 +790,6 @@ private:
                     }
                     // Fall through to the normal picker if we couldn't find it.
                 }
-               #endif
 
                 switch (flowResult_.outcome)
                 {
@@ -1174,12 +1191,15 @@ private:
     juce::TextButton getStartedButton_;
     juce::TextButton googleButton_;
     juce::TextButton appleButton_;
-   #if ENCORE_DEV_SKIP_LOGIN
+
+    // Dev-only "Skip Login" shortcut -- hidden unless launched with
+    // --dev-skip-login (see isDevSkipLoginEnabled() above). Always declared
+    // (cheap) so the rest of the class doesn't need conditional compilation.
+    const bool       devSkipLoginEnabled_ = isDevSkipLoginEnabled();
     juce::TextButton skipButton_;
     // Set when the dev "Skip" button auto-fills credentials so the post-auth
     // flow knows to bypass the venue picker by name. Cleared after the pick.
     juce::String     autoPickVenueName_;
-   #endif
 
     // SelectVenue page (custom cards instead of ListBox)
     class VenueCardComponent;

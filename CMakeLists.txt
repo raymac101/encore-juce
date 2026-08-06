@@ -161,11 +161,13 @@ target_compile_definitions(EncoreJUCE
         JUCE_USE_CAMERA=0
         JUCE_DISPLAY_SPLASH_SCREEN=1
         # VST3 plugin hosting (Source/Audio/ChannelPluginChain, PluginHostService).
-        JUCE_PLUGINHOST_VST3=1
-        # Dev-only: shows a "Skip Login (Dev)" button on the login page that
-        # auto-signs in as raymac@shaw.ca and selects the "Karaoke Palace"
-        # venue. Set to 0 (or delete this line) for production builds.
-        ENCORE_DEV_SKIP_LOGIN=1)
+        JUCE_PLUGINHOST_VST3=1)
+        # The "Skip Login (Dev)" button (Source/UI/LoginWindow.cpp) used to be
+        # gated by an ENCORE_DEV_SKIP_LOGIN=1 compile define here -- meaning it
+        # shipped in every build, including the production installer, with a
+        # real hardcoded password. It's now a runtime opt-in instead: launch
+        # with --dev-skip-login to reveal it (see isDevSkipLoginEnabled() in
+        # that file). Nothing to set here anymore.
 
 # Link JUCE modules
 target_link_libraries(EncoreJUCE
