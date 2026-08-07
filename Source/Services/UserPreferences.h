@@ -153,6 +153,48 @@ public:
     bool hasConfirmedVenueOnThisDevice(const juce::String& venueId) const;
     void markVenueConfirmedOnThisDevice(const juce::String& venueId);
 
+    //--- Sound effects slot assignments (Ribbon > Sound Effects, full-screen) --
+    // 8 entries, one per slot, each the display name of a SfxLibraryService
+    // entry (or an empty string for an unassigned/cleared slot). Defaults to
+    // the 8 sounds this app always used before slots became configurable,
+    // so existing users see no change until they customize.
+    juce::StringArray getSfxSlotAssignments() const;
+    void setSfxSlotAssignment(int slotIndex, const juce::String& soundName);
+
+    //--- Background music folder + track selection (Ribbon > Background Music,
+    //    full-screen) --------------------------------------------------------
+    // Empty string means "use the bundled default (assets/music)".
+    juce::String getBackgroundMusicFolder() const;
+    void setBackgroundMusicFolder(const juce::String& path);
+
+    // Filenames (with extension, no path) of tracks selected to actually
+    // play from the current folder. Empty array means "every track in the
+    // folder is selected" -- this is what makes a freshly-picked folder
+    // play everything by default with no extra step.
+    juce::StringArray getBackgroundMusicSelectedTracks() const;
+    void setBackgroundMusicSelectedTracks(const juce::StringArray& filenames);
+
+    //--- "Start the Night" AI voice intro (Ribbon > Next Singer, full-screen) --
+    // All per-machine, same as every other host preference above -- each
+    // host supplies their own TTS provider API key.
+    juce::String getElevenLabsApiKey() const;
+    void setElevenLabsApiKey(const juce::String& key);
+
+    // May contain the literal placeholders {venue} and {host}, substituted
+    // at generation time. Defaults to a template using them so it works
+    // out of the box.
+    juce::String getIntroScript() const;
+    void setIntroScript(const juce::String& script);
+
+    juce::String getIntroVoiceId() const;
+    void setIntroVoiceId(const juce::String& voiceId);
+
+    // Filename (with extension, no path) of the chosen track under
+    // assets/music/ (the same folder background music draws from). Empty
+    // if none chosen yet.
+    juce::String getIntroMusicFilename() const;
+    void setIntroMusicFilename(const juce::String& filename);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

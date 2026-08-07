@@ -552,6 +552,135 @@ void UserPreferences::markVenueConfirmedOnThisDevice(const juce::String& venueId
 }
 
 //==============================================================================
+juce::StringArray UserPreferences::getSfxSlotAssignments() const
+{
+    static const juce::StringArray defaults {
+        "Are You Ready", "Chicken", "Burp", "Bruh",
+        "Buzzer", "Drum Fill", "Drum Roll", "WooHoo"
+    };
+
+    const juce::ScopedLock sl(lock_);
+    auto arr = root_.getProperty("sfxSlotAssignments", juce::var());
+    if (! arr.isArray() || arr.size() != 8)
+        return defaults;
+
+    juce::StringArray out;
+    for (int i = 0; i < 8; ++i)
+        out.add(arr[i].toString());
+    return out;
+}
+
+void UserPreferences::setSfxSlotAssignment(int slotIndex, const juce::String& soundName)
+{
+    if (slotIndex < 0 || slotIndex >= 8)
+        return;
+
+    const juce::ScopedLock sl(lock_);
+    auto current = getSfxSlotAssignments();
+    current.set(slotIndex, soundName);
+
+    juce::Array<juce::var> arr;
+    for (auto& name : current)
+        arr.add(name);
+
+    asObj(root_)->setProperty("sfxSlotAssignments", arr);
+    save();
+}
+
+//==============================================================================
+juce::String UserPreferences::getBackgroundMusicFolder() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("backgroundMusicFolder", juce::var()).toString();
+}
+
+void UserPreferences::setBackgroundMusicFolder(const juce::String& path)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("backgroundMusicFolder", path);
+    save();
+}
+
+juce::StringArray UserPreferences::getBackgroundMusicSelectedTracks() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto arr = root_.getProperty("backgroundMusicSelectedTracks", juce::var());
+    juce::StringArray out;
+    if (! arr.isArray())
+        return out;
+    for (int i = 0; i < arr.size(); ++i)
+        out.add(arr[i].toString());
+    return out;
+}
+
+void UserPreferences::setBackgroundMusicSelectedTracks(const juce::StringArray& filenames)
+{
+    const juce::ScopedLock sl(lock_);
+    juce::Array<juce::var> arr;
+    for (auto& name : filenames)
+        arr.add(name);
+    asObj(root_)->setProperty("backgroundMusicSelectedTracks", arr);
+    save();
+}
+
+//==============================================================================
+juce::String UserPreferences::getElevenLabsApiKey() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("elevenLabsApiKey", juce::var()).toString();
+}
+
+void UserPreferences::setElevenLabsApiKey(const juce::String& key)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("elevenLabsApiKey", key);
+    save();
+}
+
+juce::String UserPreferences::getIntroScript() const
+{
+    static const juce::String defaultScript =
+        "Welcome to Karaoke Night at {venue}, with your host {host}! Let's get this party started!";
+
+    const juce::ScopedLock sl(lock_);
+    const auto value = root_.getProperty("introScript", juce::var()).toString();
+    return value.isNotEmpty() ? value : defaultScript;
+}
+
+void UserPreferences::setIntroScript(const juce::String& script)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introScript", script);
+    save();
+}
+
+juce::String UserPreferences::getIntroVoiceId() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("introVoiceId", juce::var()).toString();
+}
+
+void UserPreferences::setIntroVoiceId(const juce::String& voiceId)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introVoiceId", voiceId);
+    save();
+}
+
+juce::String UserPreferences::getIntroMusicFilename() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("introMusicFilename", juce::var()).toString();
+}
+
+void UserPreferences::setIntroMusicFilename(const juce::String& filename)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introMusicFilename", filename);
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);

@@ -651,7 +651,18 @@ void LibraryPage::onAddSongs()
             }
 
             if (! newlyImported.empty())
+            {
+                if (onSongsAddedViaAddSongs)
+                {
+                    std::vector<CdgSong> added;
+                    added.reserve(newlyImported.size());
+                    for (auto index : newlyImported)
+                        added.push_back(songs_[index]);
+                    onSongsAddedViaAddSongs(added);
+                }
+
                 fetchMetadataForImportedSongs(std::move(newlyImported), true);
+            }
         });
 }
 

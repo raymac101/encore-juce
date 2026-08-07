@@ -417,80 +417,12 @@ void HomePage::updateAllText()
 //==============================================================================
 void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
 {
-    libraryRef_ = songs;   // cached for venue-playlist resolution
-    if (songs.empty()) return;
-
-    constexpr int maxCards = 20;
-
-    // Helper: build a Playlist from a CdgSong
-    auto toPlaylist = [](const CdgSong& s) {
-        Playlist p;
-        p.songName   = s.songName;
-        p.artistName = s.artistName;
-        p.imageUrl   = s.imageUrl;
-        return p;
-    };
-
-    // Restrict every home-page row to songs that have album artwork — the
-    // cards look broken without an image, and the venue's full library is
-    // already available on the Search page if the user wants more.
-    std::vector<const CdgSong*> withArt;
-    withArt.reserve(songs.size());
-    for (auto& s : songs)
-        if (! s.imageUrl.empty())
-            withArt.push_back(&s);
-
-    if (withArt.empty()) return;
-
-    // Helper: take up to maxCards songs from `pool`, write them into the
-    // SongRow + backing list, and refresh the row.
-    auto fillRow = [&](SongRow& row,
-                       const std::vector<const CdgSong*>& pool,
-                       std::vector<CdgSong>& outBacking)
-    {
-        std::vector<Playlist> cards;
-        outBacking.clear();
-        cards.reserve((size_t) maxCards);
-        outBacking.reserve((size_t) maxCards);
-
-        for (auto* sp : pool)
-        {
-            cards.push_back(toPlaylist(*sp));
-            outBacking.push_back(*sp);
-            if ((int) cards.size() >= maxCards) break;
-        }
-        if (! cards.empty())
-            row.setPlaylists(cards);
-    };
-
-    // Popular and Recommended now come from venue Firestore playlists —
-    // populated by the shell via setPopularSongs() / setRecommendedSongs().
-    // Only New Songs and Recently Played are derived from the local library
-    // here (and "New Songs" is overwritten by the venue's "new" playlist
-    // once it loads).
-
-    // --- New songs: most recently added to library, falling back to file date ---
-    {
-        std::vector<const CdgSong*> recent = withArt;
-        std::stable_sort(recent.begin(), recent.end(),
-            [](const CdgSong* a, const CdgSong* b) {
-                // Primary: addedAt (epoch ms) — 0 means unknown, sorts last.
-                const auto ta = a->addedAt > 0 ? a->addedAt : a->fileDate;
-                const auto tb = b->addedAt > 0 ? b->addedAt : b->fileDate;
-                return ta > tb;
-            });
-        fillRow(*newSongsRow, recent, newSongsSongs_);
-    }
-
-    // --- Recently Played: random shuffle until real play history is wired up. ---
-    {
-        std::vector<const CdgSong*> recent = withArt;
-        juce::Random rng((int) juce::Time::getMillisecondCounter() ^ 0x5a5a5a5a);
-        for (int i = (int) recent.size() - 1; i > 0; --i)
-        {
-            int j = rng.nextInt(i + 1);
-            std::swap(recent[(size_t) i], recent[(size_t) j]);
-        }
-        fillRow(*recentRow, recent, recentSongsSongs_);
-    }
+    // Cached so populateRowFromPlaylist() (setNewSongs/setPopularSongs/
+    // setRecommendedSongs/setRecentlyPlayedFromHistory) can resolve a
+    // Firestore Playlist entry back to its full local CdgSong by id.
+    // New/Popular/Recommended/Recently Played are all driven by the
+    // venue's real Firestore data now (see MainComponent) -- none of them
+    // are derived from the local library directly, so a fresh/first scan
+    // never shows up as "new" on its own.
+    libraryRef_ = songs;
 }

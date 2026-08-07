@@ -114,19 +114,23 @@ void BackgroundMusicPlayer::setPlaylistDirectory (const juce::File& directory)
     bool hasTracks = false;
     {
         std::lock_guard<std::mutex> lock (playlistMutex_);
-        playlist_.clear();
+        availableTracks_.clear();
 
         for (auto it = juce::RangedDirectoryIterator (directory, false, "*", juce::File::findFiles); it != juce::RangedDirectoryIterator(); ++it)
         {
             const auto ext = it->getFile().getFileExtension().toLowerCase();
             if (kAudioExtensions.contains (ext))
-                playlist_.push_back (it->getFile());
+                availableTracks_.push_back (it->getFile());
         }
 
         // Sort alphabetically so the order is deterministic across platforms.
-        std::sort (playlist_.begin(), playlist_.end(), [] (const juce::File& a, const juce::File& b) {
+        std::sort (availableTracks_.begin(), availableTracks_.end(), [] (const juce::File& a, const juce::File& b) {
             return a.getFileName().compareNatural (b.getFileName()) < 0;
         });
+
+        // Default: play everything just found, until/unless
+        // setTrackSelection() narrows it down.
+        playlist_ = availableTracks_;
 
         DBG ("[BGMusic] Playlist built: " + juce::String ((int) playlist_.size()) + " tracks");
         hasTracks = ! playlist_.empty();
@@ -134,6 +138,83 @@ void BackgroundMusicPlayer::setPlaylistDirectory (const juce::File& directory)
 
     if (hasTracks)
         loadTrack (0);
+}
+
+void BackgroundMusicPlayer::resetToDefaultFolder()
+{
+    auto musicDir = resolveAssetDir ("assets/music");
+    if (musicDir.isDirectory())
+        setPlaylistDirectory (musicDir);
+    setTrackSelection ({});
+}
+
+void BackgroundMusicPlayer::setTrackSelection (const juce::StringArray& selectedFilenames)
+{
+    bool hasTracks = false;
+    {
+        std::lock_guard<std::mutex> lock (playlistMutex_);
+
+        if (selectedFilenames.isEmpty())
+        {
+            playlist_ = availableTracks_;
+        }
+        else
+        {
+            playlist_.clear();
+            for (auto& file : availableTracks_)
+                if (selectedFilenames.contains (file.getFileName()))
+                    playlist_.push_back (file);
+        }
+
+        DBG ("[BGMusic] Track selection applied: " + juce::String ((int) playlist_.size())
+             + " / " + juce::String ((int) availableTracks_.size()) + " tracks");
+        hasTracks = ! playlist_.empty();
+    }
+
+    if (hasTracks)
+        loadTrack (0);
+}
+
+std::vector<juce::File> BackgroundMusicPlayer::getAvailableTracks() const
+{
+    std::lock_guard<std::mutex> lock (playlistMutex_);
+    return availableTracks_;
+}
+
+void BackgroundMusicPlayer::playSpecificTrack (const juce::File& file)
+{
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock (playlistMutex_);
+        found = std::find (availableTracks_.begin(), availableTracks_.end(), file) != availableTracks_.end();
+    }
+
+    if (! found)
+        return;
+
+    loadTrackFile (file, -1);
+    play();
+}
+
+void BackgroundMusicPlayer::playOneShotIntro (const juce::File& file, std::function<void (bool)> onFinished)
+{
+    if (! initialized_.load() || ! file.existsAsFile())
+    {
+        if (onFinished)
+            juce::MessageManager::callAsync ([onFinished] { onFinished (false); });
+        return;
+    }
+
+    oneShotIntroFinishedCallback_ = std::move (onFinished);
+    oneShotIntroActive_ = true;
+
+    // Force full volume immediately -- currentGain_ may currently be at (or
+    // ramping toward) 0 if background music was faded out before the show
+    // started, and the intro must be audible regardless.
+    currentGain_ = targetVolume_.load();
+
+    loadTrackFile (file, -1);
+    play();
 }
 
 juce::String BackgroundMusicPlayer::getCurrentTrackName() const
@@ -156,6 +237,11 @@ void BackgroundMusicPlayer::loadTrack (int index)
         trackFile = playlist_[(size_t) index];
     }
 
+    loadTrackFile (trackFile, index);
+}
+
+void BackgroundMusicPlayer::loadTrackFile (const juce::File& trackFile, int indexToSet)
+{
     const bool wasPlaying = playing_.load();
 
     // Stop player while we rebuild the chain.
@@ -197,7 +283,12 @@ void BackgroundMusicPlayer::loadTrack (int index)
         currentPosition_ = 0.0;
     }
 
-    currentIndex_ = index;
+    // indexToSet < 0 means "don't touch the rotation position" -- used by
+    // playSpecificTrack() so previewing a track (which may not even be in
+    // the current selection) never corrupts currentIndex_ for the next
+    // real skipToNext()/skipToPrev().
+    if (indexToSet >= 0)
+        currentIndex_ = indexToSet;
     // NOTE: do NOT set trackChangedFlag_ here.  That flag is exclusively for
     // advanceToNext() which signals the message thread that a reload is needed.
     // loadTrack() IS the reload — setting the flag here would create an
@@ -440,9 +531,23 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
     {
         currentPosition_ = transportSource_->getCurrentPosition();
 
-        // Auto-advance to next track when this one finishes.
+        // Auto-advance to next track when this one finishes -- unless a
+        // one-shot intro is playing, in which case the message thread
+        // needs to resume the regular rotation instead (see
+        // playOneShotIntro()/timerCallback()).
         if (transportSource_->hasStreamFinished())
-            advanceToNext();
+        {
+            if (oneShotIntroActive_.load())
+            {
+                oneShotIntroActive_ = false;
+                playing_ = false;
+                oneShotIntroFinishedFlag_ = true;
+            }
+            else
+            {
+                advanceToNext();
+            }
+        }
     }
 }
 
@@ -470,6 +575,21 @@ void BackgroundMusicPlayer::timerCallback()
         std::lock_guard<std::mutex> lock (chainMutex_);
         if (transportSource_) transportSource_->stop();
         playing_ = false;
+    }
+
+    // A one-shot intro (playOneShotIntro) just finished on the audio thread
+    // -- resume the regular rotation from wherever it was, then tell the
+    // caller. Must happen before the trackChangedFlag_ handling below,
+    // which is unrelated (that's for the normal playlist auto-advance).
+    if (oneShotIntroFinishedFlag_.exchange (false))
+    {
+        auto callback = std::move (oneShotIntroFinishedCallback_);
+        oneShotIntroFinishedCallback_ = nullptr;
+
+        loadTrack (currentIndex_.load());
+
+        if (callback)
+            callback (true);
     }
 
     // Fire state-change callbacks on the message thread.

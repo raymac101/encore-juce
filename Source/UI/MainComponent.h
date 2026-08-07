@@ -240,6 +240,9 @@ private:
     juce::String activeVenueId_;
     juce::String activeVenueName_;
     bool queueExpanded_ = false;
+    // Whether "Start the Night" has been used (or bypassed) yet this
+    // session -- reset to false on every fresh venue load in setVenueId().
+    bool nightStarted_ = false;
     bool companyContextEnabled_ = false;
     juce::String companyId_;
     juce::String companyRole_;
@@ -348,6 +351,18 @@ private:
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);
     void refreshRibbonState();
+
+    /** "Start the Night" -- plays the cached AI-voice intro (if one has
+        been generated) then starts the first queued singer's song exactly
+        as onPlayNextSinger already does. Marks nightStarted_ true so the
+        Ribbon button reverts to its normal behaviour immediately, even if
+        the intro itself fails to play. */
+    void startTheNight();
+
+    /** Scans assets/music/ (the same default background-music folder) for
+        the intro config panel's music picker -- reuses whatever tracks are
+        already bundled/added there rather than a separate sting library. */
+    std::vector<juce::File> getAvailableIntroMusicTracks() const;
     void syncLyricNowSingingSummary();
     juce::String buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const;
     void syncLyricLowerThirdNextUp(const std::vector<Singers>& singers);

@@ -24,10 +24,36 @@ namespace SpriteIcon
         tree. Returns an invalid (non-existent) juce::File if not found. */
     juce::File resolveAssetFile (const juce::String& relativePath);
 
+    /** Same root-search strategy as resolveAssetFile(), but for a directory
+        (e.g. "assets/sounds"). Returns an invalid (non-existent) juce::File
+        if no root has a directory at that relative path. */
+    juce::File resolveAssetDirectory (const juce::String& relativePath);
+
     /** Loads the <symbol id="symbolId"> from assets/images/sprite.svg,
         tinted to `colour`. Falls back to a small set of hand-coded inline
         SVG paths for a few common transport symbols if the sprite file (or
         that particular symbol) can't be found. Returns nullptr if neither
         source has the symbol. */
     std::unique_ptr<juce::Drawable> create (const juce::String& symbolId, const juce::Colour& colour);
+
+    /** Loads an arbitrary standalone SVG file (as opposed to a <symbol> in
+        the shared sprite sheet -- e.g. assets/sound-icons/*.svg) and tints
+        it to `colour`, both by walking the SVG tree's fill/stroke
+        attributes and by replacing a set of common dark literal colours
+        (covers icons that set colour via a class/style block instead of
+        plain attributes). Returns nullptr if the file doesn't exist or
+        can't be parsed as an SVG. */
+    std::unique_ptr<juce::Drawable> createFromSvgFile (const juce::File& svgFile, const juce::Colour& colour);
+
+    /** Loads an icon file for display, handling both formats used by
+        assets/sound-icons/:
+         - .png: drawn exactly as authored, never tinted -- these are
+           pre-coloured on disk (flat icons recoloured to the app's icon
+           tint, a few genuinely multi-colour ones left alone).
+         - .svg: tinted to `colour` via createFromSvgFile(), UNLESS the
+           file is one of a small hardcoded set that ships as genuine
+           multi-colour artwork (see the .cpp) -- those are drawn as
+           authored too.
+        Returns nullptr if the file doesn't exist or can't be loaded. */
+    std::unique_ptr<juce::Drawable> createIconDrawable (const juce::File& iconFile, const juce::Colour& colour);
 }
