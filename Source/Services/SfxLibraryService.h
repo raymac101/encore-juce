@@ -5,10 +5,11 @@
 
     Enumerates every sound effect available to assign into one of the
     Ribbon's 8 configurable slots (Source/UI/RibbonMenu.h). Scans
-    assets/sounds/*.wav once and caches the result; each sound is
-    best-effort matched to an icon in assets/sound-icons/*.svg (most sounds
-    have no matching icon file -- callers fall back to a generic sprite
-    icon, e.g. "icon-volume-high", when Entry::iconFile is invalid).
+    assets/sounds/*.wav once and caches the result; each sound is matched
+    to an icon in assets/sound-icons/ (*.svg or *.png) via a hand-curated
+    table in the .cpp, falling back to best-effort name matching for
+    anything not in that table -- callers fall back to a generic sprite
+    icon, e.g. "icon-volume-high", when Entry::iconFile is invalid.
 
   ==============================================================================
 */

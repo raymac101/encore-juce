@@ -61,7 +61,7 @@ void styleActionButton (juce::DrawableButton& b)
 // SfxLibraryService rather than a fixed relative path string.
 void setSfxButtonIconFromFile (juce::DrawableButton& button, const juce::File& iconFile)
 {
-    auto normal = SpriteIcon::createFromSvgFile (iconFile, kSfxIconTint);
+    auto normal = SpriteIcon::createIconDrawable (iconFile, kSfxIconTint);
     if (normal == nullptr)
         return;
 
@@ -270,7 +270,26 @@ RibbonMenu::RibbonMenu()
     nextSingerSongLabel_.setColour (juce::Label::textColourId, kText.withAlpha (0.8f));
     nextSingerSongLabel_.setJustificationType (juce::Justification::topLeft);
     styleActionButton (nextSingerPlayButton_);
-    nextSingerPlayButton_.onClick = [this]() { if (onPlayNextSinger) onPlayNextSinger(); };
+    nextSingerPlayButton_.onClick = [this]()
+    {
+        if (! nightStarted_)
+        {
+            if (onStartTheNightRequested)
+                onStartTheNightRequested();
+        }
+        else if (onPlayNextSinger)
+        {
+            onPlayNextSinger();
+        }
+    };
+
+    introConfigPanel_ = std::make_unique<StartTheNightConfigPanel>();
+    addAndMakeVisible (*introConfigPanel_);
+    introConfigPanel_->onGenerateRequested = [this] (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)
+    {
+        if (onIntroGenerateRequested)
+            onIntroGenerateRequested (apiKey, script, voiceId, musicFile);
+    };
 
     // Icons + onClick effectNames are data-driven from UserPreferences (see
     // refreshSfxSlots(), called at the end of this constructor) rather than
@@ -486,6 +505,7 @@ void RibbonMenu::resized()
         nextSingerNameLabel_.setVisible (false);
         nextSingerSongLabel_.setVisible (false);
         nextSingerPlayButton_.setVisible (false);
+        introConfigPanel_->setVisible (false);
         sfxAreYouReadyButton_.setVisible (false);
         sfxChickenButton_.setVisible (false);
         sfxBurpButton_.setVisible (false);
@@ -536,6 +556,7 @@ void RibbonMenu::resized()
     nextSingerNameLabel_.setVisible (showNextSinger);
     nextSingerSongLabel_.setVisible (showNextSinger);
     nextSingerPlayButton_.setVisible (showNextSinger);
+    introConfigPanel_->setVisible (expanded && expandedPanel_ == PanelId::nextSinger);
 
     sfxAreYouReadyButton_.setVisible (showSfx);
     sfxChickenButton_.setVisible (showSfx);
@@ -692,6 +713,9 @@ void RibbonMenu::resized()
         nextSingerSongLabel_.setBounds (content.removeFromTop (30));
         content.removeFromTop (10);
         nextSingerPlayButton_.setBounds (content.removeFromTop (34).removeFromLeft (220));
+
+        content.removeFromTop (14);
+        introConfigPanel_->setBounds (content);
     }
     else if (expandedPanel_ == PanelId::soundEffects)
     {
@@ -790,6 +814,28 @@ void RibbonMenu::setBackgroundTrackInfo (const juce::String& songName,
     backgroundPositionSeconds_ = juce::jmax (0.0, positionSeconds);
     backgroundTotalSeconds_ = juce::jmax (0.0, totalSeconds);
     updateControlState();
+}
+
+void RibbonMenu::setNightStarted (bool started)
+{
+    if (nightStarted_ == started)
+        return;
+    nightStarted_ = started;
+    updateControlState();
+}
+
+void RibbonMenu::setIntroConfigInitialState (const juce::String& apiKey,
+                                             const juce::String& script,
+                                             const juce::String& voiceId,
+                                             const juce::String& selectedMusicFilename,
+                                             const std::vector<juce::File>& availableMusicFiles)
+{
+    introConfigPanel_->setInitialState (apiKey, script, voiceId, selectedMusicFilename, availableMusicFiles);
+}
+
+void RibbonMenu::reportIntroGenerationResult (bool ok, const juce::String& error)
+{
+    introConfigPanel_->reportGenerationResult (ok, error);
 }
 
 void RibbonMenu::setBackgroundFolderPath (const juce::String& path)
@@ -898,7 +944,8 @@ void RibbonMenu::updateControlState()
     lyricStateLabel_.setText (tr ("ribbon.lyric.status").replace ("{0}", lyricWindowState).replace ("{1}", lyricFullState),
                               juce::dontSendNotification);
 
-    nextSingerPlayButton_.setButtonText (tr ("ribbon.action.play_next_singer"));
+    nextSingerPlayButton_.setButtonText (nightStarted_ ? tr ("ribbon.action.play_next_singer")
+                                                       : tr ("ribbon.action.start_the_night"));
 
     sfxVolumeSlider_.setValue (sfxVolume01_, juce::dontSendNotification);
     sfxVolumeLabel_.setText (tr ("ribbon.sfx_volume"), juce::dontSendNotification);

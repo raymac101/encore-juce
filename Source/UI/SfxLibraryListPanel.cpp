@@ -33,7 +33,7 @@ public:
         : entry_ (entry), owner_ (owner)
     {
         icon_ = entry_.iconFile.existsAsFile()
-            ? SpriteIcon::createFromSvgFile (entry_.iconFile, kIconTint)
+            ? SpriteIcon::createIconDrawable (entry_.iconFile, kIconTint)
             : SpriteIcon::create ("icon-volume-high", kIconTint);
 
         nameLabel_.setText (entry_.name, juce::dontSendNotification);

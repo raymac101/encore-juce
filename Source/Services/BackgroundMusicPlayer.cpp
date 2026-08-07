@@ -196,6 +196,27 @@ void BackgroundMusicPlayer::playSpecificTrack (const juce::File& file)
     play();
 }
 
+void BackgroundMusicPlayer::playOneShotIntro (const juce::File& file, std::function<void (bool)> onFinished)
+{
+    if (! initialized_.load() || ! file.existsAsFile())
+    {
+        if (onFinished)
+            juce::MessageManager::callAsync ([onFinished] { onFinished (false); });
+        return;
+    }
+
+    oneShotIntroFinishedCallback_ = std::move (onFinished);
+    oneShotIntroActive_ = true;
+
+    // Force full volume immediately -- currentGain_ may currently be at (or
+    // ramping toward) 0 if background music was faded out before the show
+    // started, and the intro must be audible regardless.
+    currentGain_ = targetVolume_.load();
+
+    loadTrackFile (file, -1);
+    play();
+}
+
 juce::String BackgroundMusicPlayer::getCurrentTrackName() const
 {
     const int idx = currentIndex_.load();
@@ -510,9 +531,23 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
     {
         currentPosition_ = transportSource_->getCurrentPosition();
 
-        // Auto-advance to next track when this one finishes.
+        // Auto-advance to next track when this one finishes -- unless a
+        // one-shot intro is playing, in which case the message thread
+        // needs to resume the regular rotation instead (see
+        // playOneShotIntro()/timerCallback()).
         if (transportSource_->hasStreamFinished())
-            advanceToNext();
+        {
+            if (oneShotIntroActive_.load())
+            {
+                oneShotIntroActive_ = false;
+                playing_ = false;
+                oneShotIntroFinishedFlag_ = true;
+            }
+            else
+            {
+                advanceToNext();
+            }
+        }
     }
 }
 
@@ -540,6 +575,21 @@ void BackgroundMusicPlayer::timerCallback()
         std::lock_guard<std::mutex> lock (chainMutex_);
         if (transportSource_) transportSource_->stop();
         playing_ = false;
+    }
+
+    // A one-shot intro (playOneShotIntro) just finished on the audio thread
+    // -- resume the regular rotation from wherever it was, then tell the
+    // caller. Must happen before the trackChangedFlag_ handling below,
+    // which is unrelated (that's for the normal playlist auto-advance).
+    if (oneShotIntroFinishedFlag_.exchange (false))
+    {
+        auto callback = std::move (oneShotIntroFinishedCallback_);
+        oneShotIntroFinishedCallback_ = nullptr;
+
+        loadTrack (currentIndex_.load());
+
+        if (callback)
+            callback (true);
     }
 
     // Fire state-change callbacks on the message thread.

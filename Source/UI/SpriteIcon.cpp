@@ -257,4 +257,30 @@ std::unique_ptr<juce::Drawable> createFromSvgFile (const juce::File& svgFile, co
     return drawable;
 }
 
+std::unique_ptr<juce::Drawable> createIconDrawable (const juce::File& iconFile, const juce::Colour& colour)
+{
+    if (! iconFile.existsAsFile())
+        return {};
+
+    if (iconFile.hasFileExtension ("png"))
+    {
+        auto image = juce::ImageFileFormat::loadFrom (iconFile);
+        if (! image.isValid())
+            return {};
+        auto drawableImage = std::make_unique<juce::DrawableImage>();
+        drawableImage->setImage (image);
+        return drawableImage;
+    }
+
+    // A couple of sound-effect icons ship as genuine multi-colour artwork
+    // (an illustrated party horn, a red comic "WHAT?!" bubble) rather than
+    // the flat single-tone line icon every other file in the set is --
+    // drawn as authored instead of force-tinted like the rest.
+    static const juce::StringArray keepOriginalColour { "WooHoo.svg", "say-whhat.svg" };
+    if (keepOriginalColour.contains (iconFile.getFileName()))
+        return juce::Drawable::createFromSVGFile (iconFile);
+
+    return createFromSvgFile (iconFile, colour);
+}
+
 } // namespace SpriteIcon

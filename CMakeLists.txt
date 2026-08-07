@@ -87,6 +87,7 @@ target_sources(EncoreJUCE
         Source/UI/RibbonMenu.cpp
         Source/UI/SfxLibraryListPanel.cpp
         Source/UI/BackgroundMusicLibraryPanel.cpp
+        Source/UI/StartTheNightConfigPanel.cpp
         Source/UI/SpriteIcon.cpp
         Source/UI/MixerPage.cpp
         Source/UI/TestingPage.cpp
@@ -116,6 +117,7 @@ target_sources(EncoreJUCE
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
         Source/Services/SfxLibraryService.cpp
+        Source/Services/IntroVoiceService.cpp
         Source/Services/VenueSessionService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp

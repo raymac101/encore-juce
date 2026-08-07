@@ -174,6 +174,27 @@ public:
     juce::StringArray getBackgroundMusicSelectedTracks() const;
     void setBackgroundMusicSelectedTracks(const juce::StringArray& filenames);
 
+    //--- "Start the Night" AI voice intro (Ribbon > Next Singer, full-screen) --
+    // All per-machine, same as every other host preference above -- each
+    // host supplies their own TTS provider API key.
+    juce::String getElevenLabsApiKey() const;
+    void setElevenLabsApiKey(const juce::String& key);
+
+    // May contain the literal placeholders {venue} and {host}, substituted
+    // at generation time. Defaults to a template using them so it works
+    // out of the box.
+    juce::String getIntroScript() const;
+    void setIntroScript(const juce::String& script);
+
+    juce::String getIntroVoiceId() const;
+    void setIntroVoiceId(const juce::String& voiceId);
+
+    // Filename (with extension, no path) of the chosen track under
+    // assets/music/ (the same folder background music draws from). Empty
+    // if none chosen yet.
+    juce::String getIntroMusicFilename() const;
+    void setIntroMusicFilename(const juce::String& filename);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

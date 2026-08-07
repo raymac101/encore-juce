@@ -44,4 +44,16 @@ namespace SpriteIcon
         plain attributes). Returns nullptr if the file doesn't exist or
         can't be parsed as an SVG. */
     std::unique_ptr<juce::Drawable> createFromSvgFile (const juce::File& svgFile, const juce::Colour& colour);
+
+    /** Loads an icon file for display, handling both formats used by
+        assets/sound-icons/:
+         - .png: drawn exactly as authored, never tinted -- these are
+           pre-coloured on disk (flat icons recoloured to the app's icon
+           tint, a few genuinely multi-colour ones left alone).
+         - .svg: tinted to `colour` via createFromSvgFile(), UNLESS the
+           file is one of a small hardcoded set that ships as genuine
+           multi-colour artwork (see the .cpp) -- those are drawn as
+           authored too.
+        Returns nullptr if the file doesn't exist or can't be loaded. */
+    std::unique_ptr<juce::Drawable> createIconDrawable (const juce::File& iconFile, const juce::Colour& colour);
 }

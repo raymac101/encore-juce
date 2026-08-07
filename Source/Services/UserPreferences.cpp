@@ -624,6 +624,63 @@ void UserPreferences::setBackgroundMusicSelectedTracks(const juce::StringArray& 
 }
 
 //==============================================================================
+juce::String UserPreferences::getElevenLabsApiKey() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("elevenLabsApiKey", juce::var()).toString();
+}
+
+void UserPreferences::setElevenLabsApiKey(const juce::String& key)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("elevenLabsApiKey", key);
+    save();
+}
+
+juce::String UserPreferences::getIntroScript() const
+{
+    static const juce::String defaultScript =
+        "Welcome to Karaoke Night at {venue}, with your host {host}! Let's get this party started!";
+
+    const juce::ScopedLock sl(lock_);
+    const auto value = root_.getProperty("introScript", juce::var()).toString();
+    return value.isNotEmpty() ? value : defaultScript;
+}
+
+void UserPreferences::setIntroScript(const juce::String& script)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introScript", script);
+    save();
+}
+
+juce::String UserPreferences::getIntroVoiceId() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("introVoiceId", juce::var()).toString();
+}
+
+void UserPreferences::setIntroVoiceId(const juce::String& voiceId)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introVoiceId", voiceId);
+    save();
+}
+
+juce::String UserPreferences::getIntroMusicFilename() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("introMusicFilename", juce::var()).toString();
+}
+
+void UserPreferences::setIntroMusicFilename(const juce::String& filename)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("introMusicFilename", filename);
+    save();
+}
+
+//==============================================================================
 std::vector<float> UserPreferences::getSearchColumnFractions() const
 {
     const juce::ScopedLock sl(lock_);

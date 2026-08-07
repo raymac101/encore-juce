@@ -76,6 +76,15 @@ public:
         rotation for subsequent skipToNext()/skipToPrev() calls. */
     void playSpecificTrack (const juce::File& file);
 
+    /** Plays `file` (any file, not just one of getAvailableTracks() --
+        typically a generated/cached intro) once, then automatically
+        resumes the regular playlist rotation from wherever it was and
+        calls onFinished on the message thread. Forces full volume
+        immediately (no fade-in ramp) so the intro is audible even if
+        background music was previously faded to 0. For the Ribbon's
+        "Start the Night" action. */
+    void playOneShotIntro (const juce::File& file, std::function<void (bool completedNaturally)> onFinished);
+
     int getTrackCount() const noexcept { return (int) playlist_.size(); }
     int getCurrentTrackIndex() const noexcept { return currentIndex_.load(); }
 
@@ -150,6 +159,15 @@ private:
     std::atomic<int> currentIndex_ { 0 };
     std::atomic<bool> trackChangedFlag_ { false };
     std::atomic<bool> playStateChangedFlag_ { false };
+
+    // playOneShotIntro() state -- set on the message thread when starting,
+    // checked/cleared on the audio thread (getNextAudioBlock) when the
+    // one-shot file finishes, consumed on the message thread (timerCallback)
+    // to resume the regular rotation and fire the completion callback.
+    // Mirrors the existing trackChangedFlag_/pauseAfterFadeFlag_ pattern.
+    std::atomic<bool> oneShotIntroActive_ { false };
+    std::atomic<bool> oneShotIntroFinishedFlag_ { false };
+    std::function<void (bool)> oneShotIntroFinishedCallback_;  // message-thread only
 
     // Devices — BackgroundMusicPlayer uses a secondary AudioDeviceManager so
     // it runs concurrently with the main karaoke engine.

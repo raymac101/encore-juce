@@ -18,6 +18,7 @@
 #include "LyricDisplayComponent.h"
 #include "SfxLibraryListPanel.h"
 #include "BackgroundMusicLibraryPanel.h"
+#include "StartTheNightConfigPanel.h"
 
 class AudioEngine;
 
@@ -77,6 +78,24 @@ public:
     void setLyricWindowFullScreen (bool fullScreen);
     void setNextSinger (const juce::String& singerName, const juce::String& songName);
 
+    /** Whether "Start the Night" has already been used this session --
+        true flips the Next Singer button/action back to its normal "Play
+        Next Singer" behaviour. MainComponent resets this to false on every
+        fresh venue load. */
+    void setNightStarted (bool started);
+
+    /** Seeds the intro config panel from persisted values + whatever's in
+        assets/music/ (the same folder background music draws from). */
+    void setIntroConfigInitialState (const juce::String& apiKey,
+                                     const juce::String& script,
+                                     const juce::String& voiceId,
+                                     const juce::String& selectedMusicFilename,
+                                     const std::vector<juce::File>& availableMusicFiles);
+
+    /** Forwarded from MainComponent once IntroVoiceService::generateAndCache
+        finishes. */
+    void reportIntroGenerationResult (bool ok, const juce::String& error);
+
     std::function<void()> onLayoutChanged;
 
     std::function<void(bool shouldPlay)> onBackgroundPlayPause;
@@ -94,6 +113,14 @@ public:
     std::function<void()> onLyricToggleFullscreen;
 
     std::function<void()> onPlayNextSinger;
+
+    /** Fired instead of onPlayNextSinger when the Next Singer button is
+        clicked while ! nightStarted_ -- MainComponent plays the cached
+        intro then itself calls the same code path onPlayNextSinger would
+        have. */
+    std::function<void()> onStartTheNightRequested;
+
+    std::function<void (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)> onIntroGenerateRequested;
 
     std::function<void(float volume01)> onSfxVolumeChanged;
     std::function<void(const juce::String& effectName)> onTriggerSfx;
@@ -147,6 +174,7 @@ private:
     bool lyricWindowFullScreen_ = false;
     juce::String nextSingerName_;
     juce::String nextSingerSong_;
+    bool nightStarted_ = false;
     juce::File lyricPreviewFile_;
     AudioEngine* audioEngine_ = nullptr;
 
@@ -188,6 +216,10 @@ private:
     juce::Label nextSingerNameLabel_;
     juce::Label nextSingerSongLabel_;
     juce::TextButton nextSingerPlayButton_ { "nextSingerPlay" };
+
+    // "Start the Night" intro configuration, shown below the Next Singer
+    // card's existing controls only when expandedPanel_ == PanelId::nextSinger.
+    std::unique_ptr<StartTheNightConfigPanel> introConfigPanel_;
 
     juce::DrawableButton sfxAreYouReadyButton_ { "sfxAreYouReady", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton sfxChickenButton_ { "sfxChicken", juce::DrawableButton::ImageOnButtonBackground };

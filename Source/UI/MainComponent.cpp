@@ -27,6 +27,8 @@
 #include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
+#include "../Services/IntroVoiceService.h"
+#include "SpriteIcon.h"
 #include "EditSingerModal.h"
 #include <cmath>
 #include <cstring>
@@ -892,6 +894,12 @@ void MainComponent::setupUI()
         if (bgPlayer_ != nullptr)
             bgPlayer_->fadeOut (1.5f);
 
+        // A song is starting one way or another -- the Ribbon's "Start the
+        // Night" button must never keep showing once karaoke is underway,
+        // even if the host bypassed it entirely.
+        nightStarted_ = true;
+        if (ribbonMenu) ribbonMenu->setNightStarted (true);
+
         if (videoLoaded)
             lyricWindow_->playVideo();
         else
@@ -1165,6 +1173,57 @@ void MainComponent::setupUI()
         if (! ok)
             showMaintenanceToast("No queued singer available.");
     };
+
+    ribbonMenu->onStartTheNightRequested = [this]()
+    {
+        startTheNight();
+    };
+
+    // Seeds the intro config panel from persisted values + whatever's in
+    // assets/music/ (the same folder background music draws from) --
+    // called once now, and again after a successful generate (the saved
+    // music filename may have changed).
+    auto refreshIntroConfigUi = [this]()
+    {
+        if (ribbonMenu == nullptr)
+            return;
+        auto& prefs = UserPreferences::getInstance();
+        ribbonMenu->setIntroConfigInitialState(prefs.getElevenLabsApiKey(),
+                                               prefs.getIntroScript(),
+                                               prefs.getIntroVoiceId(),
+                                               prefs.getIntroMusicFilename(),
+                                               getAvailableIntroMusicTracks());
+    };
+
+    ribbonMenu->onIntroGenerateRequested = [this, refreshIntroConfigUi](juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)
+    {
+        const juce::String venueName = activeVenueName_.isNotEmpty() ? activeVenueName_ : juce::String("the venue");
+        const juce::String hostName = juce::String(HostService::getInstance().getCurrent().stageName);
+
+        juce::String substitutedScript = script;
+        substitutedScript = substitutedScript.replace("{venue}", venueName.isNotEmpty() ? venueName : juce::String("the venue"));
+        substitutedScript = substitutedScript.replace("{host}", hostName.isNotEmpty() ? hostName : juce::String("your host"));
+
+        auto& prefs = UserPreferences::getInstance();
+        prefs.setElevenLabsApiKey(apiKey);
+        prefs.setIntroScript(script);
+        prefs.setIntroVoiceId(voiceId);
+        prefs.setIntroMusicFilename(musicFile.getFileName());
+
+        juce::Component::SafePointer<MainComponent> safe(this);
+        IntroVoiceService::getInstance().generateAndCache(apiKey, substitutedScript, voiceId, musicFile,
+            [safe, refreshIntroConfigUi](bool ok, juce::String error)
+            {
+                if (safe == nullptr) return;
+                if (safe->ribbonMenu) safe->ribbonMenu->reportIntroGenerationResult(ok, error);
+                refreshIntroConfigUi();
+
+                if (ok && safe->bgPlayer_ != nullptr)
+                    safe->bgPlayer_->playOneShotIntro(IntroVoiceService::getCachedIntroFile(), nullptr);
+            });
+    };
+
+    refreshIntroConfigUi();
 
     ribbonMenu->onSfxVolumeChanged = [this](float volume01)
     {
@@ -4035,6 +4094,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
             // Fade out background music so it doesn't overlap karaoke.
             if (self->bgPlayer_ != nullptr)
                 self->bgPlayer_->fadeOut (1.5f);
+            self->nightStarted_ = true;
+            if (self->ribbonMenu) self->ribbonMenu->setNightStarted (true);
             self->writePlayingDocIfNeeded();
         }
 
@@ -4142,6 +4203,8 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
         // Fade out background music so it doesn't overlap karaoke.
         if (self->bgPlayer_ != nullptr)
             self->bgPlayer_->fadeOut (1.5f);
+        self->nightStarted_ = true;
+        if (self->ribbonMenu) self->ribbonMenu->setNightStarted (true);
         self->audioEngine->play();
         self->writePlayingDocIfNeeded();
     }
@@ -4503,6 +4566,49 @@ void MainComponent::refreshRibbonState()
     ribbonMenu->setNextSinger(nextSingerName, nextSongName);
 }
 
+std::vector<juce::File> MainComponent::getAvailableIntroMusicTracks() const
+{
+    std::vector<juce::File> result;
+
+    // Same folder the background-music player draws its default playlist
+    // from -- whatever's bundled/added there for background music doubles
+    // as the pool of intro tracks, no separate sting library to maintain.
+    const auto musicDir = SpriteIcon::resolveAssetDirectory ("assets/music");
+    if (! musicDir.isDirectory())
+        return result;
+
+    for (const auto& file : musicDir.findChildFiles (juce::File::findFiles, false, "*.mp3;*.wav;*.ogg;*.flac;*.aac;*.m4a"))
+        result.push_back (file);
+
+    return result;
+}
+
+void MainComponent::startTheNight()
+{
+    nightStarted_ = true;
+    if (ribbonMenu) ribbonMenu->setNightStarted (true);
+
+    const auto introFile = IntroVoiceService::getCachedIntroFile();
+
+    if (bgPlayer_ != nullptr && introFile.existsAsFile())
+    {
+        juce::Component::SafePointer<MainComponent> safe (this);
+        bgPlayer_->playOneShotIntro (introFile, [safe] (bool /*completedNaturally*/)
+        {
+            if (safe == nullptr) return;
+            const bool ok = safe->queueAndLoadNextSingerSong (true, true);
+            if (! ok)
+                safe->showMaintenanceToast ("No queued singer available.");
+        });
+    }
+    else
+    {
+        const bool ok = queueAndLoadNextSingerSong (true, true);
+        if (! ok)
+            showMaintenanceToast ("No queued singer available.");
+    }
+}
+
 juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<Singers>& singers) const
 {
     for (const auto& singer : singers)
@@ -4811,6 +4917,11 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
     activeVenueId_ = venueId;
     applyCurrentIdentityToUi();
     applyNavRoleForActiveVenue();
+
+    // Every fresh venue load is a new "night" -- the Ribbon's Next Singer
+    // button reverts to "Start the Night" until a song actually plays.
+    nightStarted_ = false;
+    if (ribbonMenu) ribbonMenu->setNightStarted (false);
 
     if (venueId.isEmpty())
     {
