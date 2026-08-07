@@ -57,6 +57,12 @@ public:
     // (and other consumers) can refresh their song list.
     std::function<void(const std::vector<CdgSong>&)> onSongbookChanged;
 
+    // Callback — fired once per "Add Songs" import with exactly the songs
+    // that were newly added this time (never fired for the initial full
+    // library scan). MainComponent pushes these into the venue's Firestore
+    // "new songs" feed (VenueService::addSongToNewSongs).
+    std::function<void(const std::vector<CdgSong>&)> onSongsAddedViaAddSongs;
+
     //==========================================================================
     // Callback — fired with a short phase description ("Scanning Folders...",
     // "Adding Meta Data...", "Uploading Songbook...", etc.) during a scan/

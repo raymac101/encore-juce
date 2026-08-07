@@ -32,6 +32,11 @@ StartTheNightConfigPanel::StartTheNightConfigPanel()
     addAndMakeVisible (apiKeyEditor_);
     apiKeyEditor_.setPasswordCharacter ((juce::juce_wchar) 0x2022);
     apiKeyEditor_.setTextToShowWhenEmpty (lm.getText ("ribbon.intro.api_key_placeholder"), kText.withAlpha (0.5f));
+    apiKeyEditor_.onFocusLost = [this]
+    {
+        if (onApiKeyChanged)
+            onApiKeyChanged (apiKeyEditor_.getText().trim());
+    };
 
     addAndMakeVisible (fetchVoicesButton_);
     fetchVoicesButton_.setButtonText (lm.getText ("ribbon.intro.fetch_voices"));
@@ -160,6 +165,11 @@ void StartTheNightConfigPanel::fetchVoices()
                                             juce::dontSendNotification);
                 return;
             }
+
+            // A key that just successfully fetched voices is worth saving
+            // immediately, without waiting for focus-lost or Generate.
+            if (safe->onApiKeyChanged)
+                safe->onApiKeyChanged (safe->apiKeyEditor_.getText().trim());
 
             const auto previouslySelected = safe->voiceIds_.empty() ? juce::String()
                 : (safe->voiceCombo_.getSelectedId() > 0

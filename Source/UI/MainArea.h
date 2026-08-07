@@ -183,6 +183,11 @@ public:
         deleting it from Firestore, and patching playlist memberships. */
     std::function<void(const SongEditResult&)> onSongEditResult;
 
+    /** Fired once per "Add Songs" import with exactly the songs newly added
+        that time (never for the initial full library scan). The shell
+        pushes these into the venue's Firestore "new songs" feed. */
+    std::function<void(const std::vector<CdgSong>&)> onSongsAddedViaAddSongs;
+
     /** Synchronous query that fills in the initial playlist-membership
         flags for the Edit dialog (whether the song is currently in
         New / Popular / Recommended for this venue). */

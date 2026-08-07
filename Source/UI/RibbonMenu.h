@@ -122,6 +122,10 @@ public:
 
     std::function<void (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)> onIntroGenerateRequested;
 
+    /** Fired as soon as the ElevenLabs API key is worth persisting -- see
+        StartTheNightConfigPanel::onApiKeyChanged. */
+    std::function<void (juce::String apiKey)> onIntroApiKeyChanged;
+
     std::function<void(float volume01)> onSfxVolumeChanged;
     std::function<void(const juce::String& effectName)> onTriggerSfx;
 

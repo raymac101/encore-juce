@@ -1223,6 +1223,11 @@ void MainComponent::setupUI()
             });
     };
 
+    ribbonMenu->onIntroApiKeyChanged = [](juce::String apiKey)
+    {
+        UserPreferences::getInstance().setElevenLabsApiKey(apiKey);
+    };
+
     refreshIntroConfigUi();
 
     ribbonMenu->onSfxVolumeChanged = [this](float volume01)
@@ -1550,6 +1555,25 @@ void MainComponent::setupUI()
                 if (safe != nullptr) safe->loadVenuePlaylists();
             });
         }
+    };
+
+    // Songs added via LibraryPage's "Add Songs" dialog (never the initial
+    // full library scan -- see LibraryPage::onAddSongs) join the venue's
+    // Firestore "new songs" feed so they show up in the Home page's New
+    // Songs row.
+    mainArea->onSongsAddedViaAddSongs = [this](const std::vector<CdgSong>& songs)
+    {
+        if (songs.empty() || activeVenueId_.isEmpty())
+            return;
+
+        auto& v = VenueService::getInstance();
+        for (const auto& song : songs)
+            v.addSongToNewSongs(song);
+
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::Timer::callAfterDelay(800, [safe]() {
+            if (safe != nullptr) safe->loadVenuePlaylists();
+        });
     };
 
     // Initial playlist membership for the Edit dialog — reads the cached
@@ -4864,9 +4888,6 @@ void MainComponent::loadVenuePlaylists()
             setter(*hp, list);
     };
 
-    // The home page "New Songs" row is driven by local addedAt tracking
-    // (setSongsFromLibrary). We still fetch the Firebase "new" playlist to
-    // keep newSongIds_ in sync for the SongEditDialog checkbox state.
     v.getNewSongs(venueId,
         [safe](bool ok, std::vector<Playlist> list, juce::String err)
         {
@@ -4875,7 +4896,9 @@ void MainComponent::loadVenuePlaylists()
             safe->newSongIds_.clear();
             for (auto& p : list)
                 if (! p.id.empty()) safe->newSongIds_.insert(p.id);
-            DBG ("[Playlists] new (for edit-dialog) count=" << (int) list.size());
+            DBG ("[Playlists] new count=" << (int) list.size());
+            if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                hp->setNewSongs(list);
         });
 
     v.getPlaylists(venueId, "Popular",
@@ -5104,6 +5127,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                     safe->newSongIds_.clear();
                     for (auto& p : list)
                         if (! p.id.empty()) safe->newSongIds_.insert(p.id);
+                    if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                        hp->setNewSongs(list);
                     advanceProgress("Loaded New Songs");
                 });
 

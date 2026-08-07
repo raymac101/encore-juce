@@ -290,6 +290,11 @@ RibbonMenu::RibbonMenu()
         if (onIntroGenerateRequested)
             onIntroGenerateRequested (apiKey, script, voiceId, musicFile);
     };
+    introConfigPanel_->onApiKeyChanged = [this] (juce::String apiKey)
+    {
+        if (onIntroApiKeyChanged)
+            onIntroApiKeyChanged (apiKey);
+    };
 
     // Icons + onClick effectNames are data-driven from UserPreferences (see
     // refreshSfxSlots(), called at the end of this constructor) rather than

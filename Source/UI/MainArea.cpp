@@ -90,6 +90,10 @@ MainArea::MainArea()
             if (onLibraryStatusMessage) onLibraryStatusMessage(msg);
         };
 
+        libraryPage->onSongsAddedViaAddSongs = [this](const std::vector<CdgSong>& songs) {
+            if (onSongsAddedViaAddSongs) onSongsAddedViaAddSongs(songs);
+        };
+
         // Seed Search and Home pages with whatever is already on disk
         if (searchPage)
             searchPage->setSongs(libraryPage->getSongs());

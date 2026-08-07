@@ -43,6 +43,12 @@ public:
         reportGenerationResult() below. */
     std::function<void (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)> onGenerateRequested;
 
+    /** Fired as soon as the API key is worth persisting -- on focus lost
+        and right after a successful "Fetch Voices" -- so it survives an
+        app restart without the host having to click all the way through
+        to "Generate & Preview" first. */
+    std::function<void (juce::String apiKey)> onApiKeyChanged;
+
     /** MainComponent calls this once generation finishes (success or
         failure) so the panel can show a status message. */
     void reportGenerationResult (bool ok, const juce::String& error);
