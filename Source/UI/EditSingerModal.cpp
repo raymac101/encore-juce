@@ -352,19 +352,9 @@ void EditSingerModal::showVersionPickerFor (int songIndex, juce::Component* anch
     const auto fullSong = findFullSongRecord (songs[(size_t) songIndex]);
     if (fullSong.version.empty())
     {
-        const auto& item = songs[(size_t) songIndex];
-        SongDatabase diagDb;
-        const bool diagOpened = diagDb.open();
-        juce::String diag;
-        diag << "No other manufacturer versions of this song were found in the library.\n\n"
-             << "[diagnostic]\n"
-             << "songId: '" << juce::String (item.songId) << "'\n"
-             << "songName: '" << juce::String (item.songName) << "'\n"
-             << "songArtist: '" << juce::String (item.songArtist) << "'\n"
-             << "db opened: " << (diagOpened ? "yes" : "NO") << "\n"
-             << "db file: " << diagDb.getFile().getFullPathName();
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
-            "No Other Versions", diag);
+            "No Other Versions",
+            "No other manufacturer versions of this song were found in the library.");
         return;
     }
 

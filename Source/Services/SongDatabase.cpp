@@ -212,8 +212,25 @@ void SongDatabase::close()
 bool SongDatabase::createSchema()
 {
     if (! exec(kCreateSongs))   return false;
-    if (! exec(kCreateFts))     return false;
-    if (! exec(kCreateTriggers)) return false;
+
+    // FTS5 is optional: the vcpkg sqlite3 port used for Windows builds
+    // doesn't compile in the fts5 extension, so this always fails with
+    // "no such module: fts5" there (confirmed via sqlite3_compileoption_get()
+    // -- FTS5 is simply absent from the shipped sqlite3.dll). Nothing in
+    // this class actually depends on songs_fts existing: search()/
+    // searchPrefix() already degrade to empty results without it, and every
+    // real lookup goes through findByNameAndArtist()/getById() instead. This
+    // used to make createSchema() -- and therefore open() -- return false on
+    // every single Windows install, even though the songs table (created
+    // just above) was perfectly usable; every call site that correctly
+    // checked open()'s return value (e.g. EditSingerModal::findFullSongRecord)
+    // was silently bailing out because of it. Only install the sync triggers
+    // if the FTS table actually exists, since their INSERT/UPDATE/DELETE
+    // bodies reference songs_fts directly and would fail at insert time
+    // otherwise.
+    if (exec(kCreateFts))
+        exec(kCreateTriggers);
+
     if (! exec(kCreateIndices)) return false;
 
     // Non-destructive migration: add added_at to databases created before this
