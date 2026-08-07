@@ -45,9 +45,36 @@ public:
 
     //==========================================================================
     // Playlist
-    /** Scans a directory for supported audio files and rebuilds the playlist.
-        Must be called from the message thread. */
+    /** Scans a directory for supported audio files, sorted naturally by
+        name. Rebuilds BOTH getAvailableTracks() (everything found) and the
+        actually-played list to match (i.e. "play everything" is the
+        default until setTrackSelection() narrows it down). Must be called
+        from the message thread. */
     void setPlaylistDirectory (const juce::File& directory);
+
+    /** Re-points the playlist at the bundled assets/music directory (the
+        same default initialize() starts with) and clears the track
+        selection back to "everything." For a "Use Default" button in a
+        folder-picker UI. */
+    void resetToDefaultFolder();
+
+    /** Narrows the actually-played list down to the given filenames (name +
+        extension, no path) out of whatever setPlaylistDirectory() last
+        found. An empty array means "play everything" -- the same default
+        setPlaylistDirectory() already starts with. Must be called from the
+        message thread. */
+    void setTrackSelection (const juce::StringArray& selectedFilenames);
+
+    /** Every track found by the last setPlaylistDirectory() call, regardless
+        of the current selection -- for populating a track-picker UI. */
+    std::vector<juce::File> getAvailableTracks() const;
+
+    /** Loads and plays `file` immediately (must be one of
+        getAvailableTracks()), independently of the current selection/
+        rotation -- for auditioning a track from a picker UI. Does not
+        change getCurrentTrackIndex() or disturb the regular playlist
+        rotation for subsequent skipToNext()/skipToPrev() calls. */
+    void playSpecificTrack (const juce::File& file);
 
     int getTrackCount() const noexcept { return (int) playlist_.size(); }
     int getCurrentTrackIndex() const noexcept { return currentIndex_.load(); }
@@ -99,6 +126,12 @@ public:
 private:
     void timerCallback() override;   // used to fire callbacks on the message thread
     void loadTrack (int index);
+
+    // Shared by loadTrack(int) (looks up playlist_[index] then delegates
+    // here) and playSpecificTrack() (calls this directly with indexToSet=-1
+    // so previewing a track never disturbs the real rotation's
+    // currentIndex_).
+    void loadTrackFile (const juce::File& trackFile, int indexToSet);
     void advanceToNext();
 
     std::atomic<bool> initialized_ { false };
@@ -134,7 +167,14 @@ private:
     // its size/contents are also read from the audio thread (advanceToNext),
     // so all access goes through playlistMutex_. Kept separate from
     // chainMutex_ so the two never nest.
+    //
+    // availableTracks_ is everything setPlaylistDirectory() found;
+    // playlist_ is the subset actually played/rotated (== availableTracks_
+    // until setTrackSelection() narrows it down). Every existing bit of
+    // rotation logic (loadTrack/skipToNext/skipToPrev/advanceToNext) only
+    // ever looks at playlist_, so none of it needed to change.
     mutable std::mutex playlistMutex_;
+    std::vector<juce::File> availableTracks_;
     std::vector<juce::File> playlist_;
     double deviceSampleRate_ { 44100.0 };
 

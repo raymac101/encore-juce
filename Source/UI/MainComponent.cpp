@@ -432,6 +432,22 @@ MainComponent::MainComponent()
 
     bgPlayer_ = std::make_unique<BackgroundMusicPlayer>();
     bgPlayer_->initialize();
+
+    // Restore a host's custom background-music folder/selection, if any --
+    // initialize() above already loaded the bundled assets/music default,
+    // so this only does anything once a host has actually customized it.
+    {
+        auto& prefs = UserPreferences::getInstance();
+        const auto savedFolder = prefs.getBackgroundMusicFolder();
+        if (savedFolder.isNotEmpty())
+        {
+            juce::File folder(savedFolder);
+            if (folder.isDirectory())
+                bgPlayer_->setPlaylistDirectory(folder);
+        }
+        bgPlayer_->setTrackSelection(prefs.getBackgroundMusicSelectedTracks());
+    }
+
     DBG("[Startup] BackgroundMusicPlayer initialized: "
         + juce::String(juce::Time::getMillisecondCounterHiRes() - ctorStartMs, 1) + " ms");
 
@@ -1065,6 +1081,62 @@ void MainComponent::setupUI()
             bgPlayer_->skipToPrev();
     };
 
+    // Pushes the current folder path + available/selected tracks into the
+    // Ribbon's full-screen library panel -- called once now to seed it,
+    // and again after anything changes the folder underneath it (the
+    // checklist itself needs to reflect whatever's actually on disk).
+    auto refreshBgLibraryUi = [this]()
+    {
+        if (ribbonMenu == nullptr || bgPlayer_ == nullptr)
+            return;
+        auto& prefs = UserPreferences::getInstance();
+        ribbonMenu->setBackgroundFolderPath(prefs.getBackgroundMusicFolder());
+        ribbonMenu->setBackgroundAvailableTracks(bgPlayer_->getAvailableTracks(),
+                                                 prefs.getBackgroundMusicSelectedTracks());
+    };
+
+    ribbonMenu->onBackgroundFolderChanged = [this, refreshBgLibraryUi](juce::File folder)
+    {
+        if (bgPlayer_ == nullptr) return;
+
+        auto& prefs = UserPreferences::getInstance();
+        prefs.setBackgroundMusicFolder(folder.getFullPathName());
+        // A brand-new folder always starts with everything selected --
+        // matches the zero-config behaviour the bundled default already had.
+        prefs.setBackgroundMusicSelectedTracks({});
+
+        bgPlayer_->setPlaylistDirectory(folder);
+        bgPlayer_->setTrackSelection({});
+        refreshBgLibraryUi();
+    };
+
+    ribbonMenu->onBackgroundSelectionChanged = [this](juce::StringArray selected)
+    {
+        if (bgPlayer_ == nullptr) return;
+        UserPreferences::getInstance().setBackgroundMusicSelectedTracks(selected);
+        bgPlayer_->setTrackSelection(selected);
+    };
+
+    ribbonMenu->onBackgroundPreviewRequested = [this](juce::File file)
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->playSpecificTrack(file);
+    };
+
+    ribbonMenu->onBackgroundUseDefaultRequested = [this, refreshBgLibraryUi]()
+    {
+        if (bgPlayer_ == nullptr) return;
+
+        auto& prefs = UserPreferences::getInstance();
+        prefs.setBackgroundMusicFolder({});
+        prefs.setBackgroundMusicSelectedTracks({});
+
+        bgPlayer_->resetToDefaultFolder();
+        refreshBgLibraryUi();
+    };
+
+    refreshBgLibraryUi();
+
     ribbonMenu->onLyricToggleWindow = [this]()
     {
         if (lyricWindow_ == nullptr)
@@ -1104,25 +1176,14 @@ void MainComponent::setupUI()
 
     ribbonMenu->onTriggerSfx = [this](const juce::String& effectName)
     {
-        juce::String soundPath;
-        if (effectName.equalsIgnoreCase("Are You Ready"))
-            soundPath = "assets/sounds/Are You Ready.wav";
-        else if (effectName.equalsIgnoreCase("Chicken"))
-            soundPath = "assets/sounds/Chicken.wav";
-        else if (effectName.equalsIgnoreCase("Burp"))
-            soundPath = "assets/sounds/Burp.wav";
-        else if (effectName.equalsIgnoreCase("Bruh"))
-            soundPath = "assets/sounds/Bruh.wav";
-        else if (effectName.equalsIgnoreCase("Buzzer"))
-            soundPath = "assets/sounds/Buzzer.wav";
-        else if (effectName.equalsIgnoreCase("Drum Fill"))
-            soundPath = "assets/sounds/Drum Fill.wav";
-        else if (effectName.equalsIgnoreCase("Drum Roll"))
-            soundPath = "assets/sounds/Drum Roll.wav";
-        else if (effectName.equalsIgnoreCase("WooHoo"))
-            soundPath = "assets/sounds/WooHoo.wav";
-        else
+        if (effectName.isEmpty())
             return;
+
+        // effectName is always a sound's plain display name -- it equals
+        // the .wav's basename exactly (see SfxLibraryService), whether it
+        // came from one of the 8 configurable slots or a preview click in
+        // the full-screen sound library list.
+        const juce::String soundPath = "assets/sounds/" + effectName + ".wav";
 
         auto soundFile = resolveAssetFile(soundPath);
         if (! soundFile.existsAsFile())

@@ -9,6 +9,8 @@
 #include "RibbonMenu.h"
 #include "SpriteIcon.h"
 #include "../Localization/LocalizationManager.h"
+#include "../Services/SfxLibraryService.h"
+#include "../Services/UserPreferences.h"
 
 namespace
 {
@@ -54,90 +56,26 @@ void styleActionButton (juce::DrawableButton& b)
     b.setColour (juce::DrawableButton::backgroundOnColourId, juce::Colour (0xff1b2334));
 }
 
-std::unique_ptr<juce::Drawable> loadSvgDrawable (const juce::File& svgFile)
+// Shared by setSfxButtonIcon (fixed relative-path callers below) and by
+// RibbonMenu::refreshSfxSlots(), which resolves an icon File directly via
+// SfxLibraryService rather than a fixed relative path string.
+void setSfxButtonIconFromFile (juce::DrawableButton& button, const juce::File& iconFile)
 {
-    auto xml = juce::XmlDocument::parse (svgFile);
-    if (xml == nullptr)
-        return {};
+    auto normal = SpriteIcon::createFromSvgFile (iconFile, kSfxIconTint);
+    if (normal == nullptr)
+        return;
 
-    std::function<void(juce::XmlElement&)> tintSvgTree = [&tintSvgTree] (juce::XmlElement& node)
-    {
-        const auto tag = node.getTagName().toLowerCase();
-        const bool isShape = tag == "path" || tag == "circle" || tag == "ellipse"
-                          || tag == "rect" || tag == "polygon" || tag == "polyline"
-                          || tag == "line";
-
-        auto tintAttribute = [&node] (const char* attrName)
-        {
-            if (! node.hasAttribute (attrName))
-                return;
-
-            const auto value = node.getStringAttribute (attrName).trim();
-            if (value.equalsIgnoreCase ("none"))
-                return;
-
-            node.setAttribute (attrName, kSfxIconTint.toDisplayString (true));
-        };
-
-        tintAttribute ("fill");
-        tintAttribute ("stroke");
-
-        // Some icon paths omit fill/stroke entirely and default to black.
-        if (isShape && ! node.hasAttribute ("fill") && ! node.hasAttribute ("stroke"))
-            node.setAttribute ("fill", kSfxIconTint.toDisplayString (true));
-
-        for (auto* child = node.getFirstChildElement(); child != nullptr; child = child->getNextElement())
-            tintSvgTree (*child);
-    };
-
-    tintSvgTree (*xml);
-
-    // This JUCE version dropped Drawable::createFromSVG(XmlElement) in
-    // favour of file-based loading only — round-trip through a temp file.
-    auto tempFile = juce::File::createTempFile (".svg");
-    if (! xml->writeTo (tempFile))
-        return {};
-    auto drawable = juce::Drawable::createFromSVGFile (tempFile);
-    tempFile.deleteFile();
-    return drawable;
+    // Already tinted by createFromSvgFile -- copies inherit that, no need
+    // to re-tint them.
+    auto over = normal->createCopy();
+    auto down = normal->createCopy();
+    button.setImages (normal.release(), over.release(), down.release());
 }
 
 void setSfxButtonIcon (juce::DrawableButton& button, const juce::String& iconRelativePath)
 {
     auto iconFile = SpriteIcon::resolveAssetFile (iconRelativePath);
-    if (! iconFile.existsAsFile())
-        return;
-
-    auto normal = loadSvgDrawable (iconFile);
-    if (normal == nullptr)
-        return;
-
-    // Safety pass for SVGs that define dark tones via style blocks/classes.
-    const juce::Colour darksToReplace[] = {
-        juce::Colour (0xff000000),
-        juce::Colour (0xff111111),
-        juce::Colour (0xff1a1a1a),
-        juce::Colour (0xff222222),
-        juce::Colour (0xff333333),
-        juce::Colour (0xff444444),
-        juce::Colour (0xff555555),
-        juce::Colour (0xff666666),
-        juce::Colour (0xff777777)
-    };
-
-    for (auto dark : darksToReplace)
-        normal->replaceColour (dark, kSfxIconTint);
-
-    auto over = normal->createCopy();
-    auto down = normal->createCopy();
-
-    for (auto dark : darksToReplace)
-    {
-        over->replaceColour (dark, kSfxIconTint);
-        down->replaceColour (dark, kSfxIconTint);
-    }
-
-    button.setImages (normal.release(), over.release(), down.release());
+    setSfxButtonIconFromFile (button, iconFile);
 }
 
 void setSpriteButtonIcon (juce::DrawableButton& button, const juce::String& symbolId)
@@ -206,6 +144,19 @@ RibbonMenu::RibbonMenu()
     nextSingerCard_.onClick = [this]() { togglePanel (PanelId::nextSinger); };
     sfxCard_.onClick = [this]() { togglePanel (PanelId::soundEffects); };
 
+    // Gear icons -- added after the cards so they sit on top in z-order.
+    // Same action as clicking the card itself; just an explicit affordance.
+    for (auto* gear : { &backgroundCardGear_, &lyricCardGear_, &nextSingerCardGear_, &sfxCardGear_ })
+    {
+        addAndMakeVisible (*gear);
+        setSpriteButtonIcon (*gear, "icon-cog");
+        gear->setTooltip (tr ("ribbon.expand"));
+    }
+    backgroundCardGear_.onClick = [this]() { togglePanel (PanelId::backgroundMusic); };
+    lyricCardGear_.onClick      = [this]() { togglePanel (PanelId::lyricDisplay); };
+    nextSingerCardGear_.onClick = [this]() { togglePanel (PanelId::nextSinger); };
+    sfxCardGear_.onClick        = [this]() { togglePanel (PanelId::soundEffects); };
+
     addAndMakeVisible (collapsePanelButton_);
     styleActionButton (collapsePanelButton_);
     collapsePanelButton_.onClick = [this]() { togglePanel (PanelId::none); };
@@ -235,17 +186,44 @@ RibbonMenu::RibbonMenu()
 
     addAndMakeVisible (bgVolumeSlider_);
     bgVolumeSlider_.setSliderStyle (juce::Slider::LinearHorizontal);
-    bgVolumeSlider_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 20);
-    bgVolumeSlider_.setRange (0.0, 1.0, 0.01);
+    bgVolumeSlider_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
+    // Displayed/dragged on a 0-10 scale (more familiar than a raw 0-1
+    // fraction); converted to/from the real 0.0-1.0 volume at the boundary
+    // here so onBackgroundVolumeChanged's contract (and backgroundVolume01_)
+    // stay in the same 0-1 range every other caller already expects.
+    bgVolumeSlider_.setRange (0.0, 10.0, 1.0);
     bgVolumeSlider_.onValueChange = [this]()
     {
-        backgroundVolume01_ = (float) bgVolumeSlider_.getValue();
+        backgroundVolume01_ = (float) bgVolumeSlider_.getValue() / 10.0f;
         if (onBackgroundVolumeChanged)
             onBackgroundVolumeChanged (backgroundVolume01_);
     };
 
     addAndMakeVisible (bgVolumeLabel_);
     bgVolumeLabel_.setColour (juce::Label::textColourId, kText);
+
+    bgLibraryPanel_ = std::make_unique<BackgroundMusicLibraryPanel>();
+    addAndMakeVisible (*bgLibraryPanel_);
+    bgLibraryPanel_->onFolderChanged = [this] (juce::File folder)
+    {
+        if (onBackgroundFolderChanged)
+            onBackgroundFolderChanged (folder);
+    };
+    bgLibraryPanel_->onSelectionChanged = [this] (juce::StringArray selected)
+    {
+        if (onBackgroundSelectionChanged)
+            onBackgroundSelectionChanged (selected);
+    };
+    bgLibraryPanel_->onPreviewRequested = [this] (juce::File file)
+    {
+        if (onBackgroundPreviewRequested)
+            onBackgroundPreviewRequested (file);
+    };
+    bgLibraryPanel_->onUseDefaultRequested = [this]
+    {
+        if (onBackgroundUseDefaultRequested)
+            onBackgroundUseDefaultRequested();
+    };
 
     addAndMakeVisible (bgProgressSlider_);
     bgProgressSlider_.setSliderStyle (juce::Slider::LinearBar);
@@ -294,22 +272,39 @@ RibbonMenu::RibbonMenu()
     styleActionButton (nextSingerPlayButton_);
     nextSingerPlayButton_.onClick = [this]() { if (onPlayNextSinger) onPlayNextSinger(); };
 
-    auto setupSfx = [this] (juce::DrawableButton& button, const juce::String& iconPath, const juce::String& effectName)
+    // Icons + onClick effectNames are data-driven from UserPreferences (see
+    // refreshSfxSlots(), called at the end of this constructor) rather than
+    // hardcoded here, now that any of SfxLibraryService's sounds can occupy
+    // any of these 8 buttons.
+    for (auto* button : sfxSlotButtons())
     {
-        addAndMakeVisible (button);
-        styleActionButton (button);
-        setSfxButtonIcon (button, iconPath);
-        button.onClick = [this, effectName]() { if (onTriggerSfx) onTriggerSfx (effectName); };
-    };
+        addAndMakeVisible (*button);
+        styleActionButton (*button);
+    }
 
-    setupSfx (sfxAreYouReadyButton_, "assets/sound-icons/ARE YOU READY!.svg", "Are You Ready");
-    setupSfx (sfxChickenButton_, "assets/sound-icons/Chicken.svg", "Chicken");
-    setupSfx (sfxBurpButton_, "assets/sound-icons/Burp.svg", "Burp");
-    setupSfx (sfxBruhButton_, "assets/sound-icons/BRUH.svg", "Bruh");
-    setupSfx (sfxBuzzerButton_, "assets/sound-icons/Buzzer.svg", "Buzzer");
-    setupSfx (sfxDrumFillButton_, "assets/sound-icons/Drum-Fill.svg", "Drum Fill");
-    setupSfx (sfxDrumRollButton_, "assets/sound-icons/drum-roll.svg", "Drum Roll");
-    setupSfx (sfxWooHooButton_, "assets/sound-icons/WooHoo.svg", "WooHoo");
+    for (auto* clearButton : sfxSlotClearButtons())
+    {
+        addAndMakeVisible (*clearButton);
+        clearButton->setButtonText (juce::String::fromUTF8 ("\xc3\x97")); // "x" (multiplication sign)
+        clearButton->setTooltip (tr ("ribbon.sfx.clear_slot"));
+    }
+    for (int i = 0; i < 8; ++i)
+    {
+        auto* clearButton = sfxSlotClearButtons()[(size_t) i];
+        clearButton->onClick = [this, i]()
+        {
+            UserPreferences::getInstance().setSfxSlotAssignment (i, {});
+            refreshSfxSlots();
+        };
+    }
+
+    sfxLibraryPanel_ = std::make_unique<SfxLibraryListPanel>();
+    addAndMakeVisible (*sfxLibraryPanel_);
+    sfxLibraryPanel_->onPreviewRequested = [this] (juce::String soundName)
+    {
+        if (onTriggerSfx)
+            onTriggerSfx (soundName);
+    };
 
     addAndMakeVisible (sfxVolumeSlider_);
     sfxVolumeSlider_.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -325,8 +320,99 @@ RibbonMenu::RibbonMenu()
     addAndMakeVisible (sfxVolumeLabel_);
     sfxVolumeLabel_.setColour (juce::Label::textColourId, kText);
 
+    refreshSfxSlots();
     updateAllText();
     updateControlState();
+}
+
+std::array<juce::DrawableButton*, 8> RibbonMenu::sfxSlotButtons()
+{
+    return {
+        &sfxAreYouReadyButton_, &sfxChickenButton_, &sfxBurpButton_, &sfxBruhButton_,
+        &sfxBuzzerButton_, &sfxDrumFillButton_, &sfxDrumRollButton_, &sfxWooHooButton_
+    };
+}
+
+std::array<juce::TextButton*, 8> RibbonMenu::sfxSlotClearButtons()
+{
+    return {
+        &sfxSlotClearButtons_[0], &sfxSlotClearButtons_[1], &sfxSlotClearButtons_[2], &sfxSlotClearButtons_[3],
+        &sfxSlotClearButtons_[4], &sfxSlotClearButtons_[5], &sfxSlotClearButtons_[6], &sfxSlotClearButtons_[7]
+    };
+}
+
+void RibbonMenu::refreshSfxSlots()
+{
+    const auto assignments = UserPreferences::getInstance().getSfxSlotAssignments();
+    sfxSlotAssignmentsCache_ = assignments;
+    auto buttons = sfxSlotButtons();
+    auto clearButtons = sfxSlotClearButtons();
+
+    for (int i = 0; i < 8; ++i)
+    {
+        const auto name = assignments[i];
+        auto* button = buttons[(size_t) i];
+
+        if (name.isEmpty())
+        {
+            button->setImages (nullptr);
+            button->onClick = nullptr;
+            button->setTooltip ({});
+            clearButtons[(size_t) i]->setVisible (false);
+            continue;
+        }
+
+        button->setTooltip (name);
+        button->onClick = [this, name]() { if (onTriggerSfx) onTriggerSfx (name); };
+
+        if (auto* entry = SfxLibraryService::getInstance().findByName (name))
+        {
+            if (entry->iconFile.existsAsFile())
+                setSfxButtonIconFromFile (*button, entry->iconFile);
+            else
+                setSpriteButtonIcon (*button, "icon-volume-high");
+        }
+        else
+        {
+            // Assigned name no longer matches any sound on disk.
+            setSpriteButtonIcon (*button, "icon-volume-high");
+        }
+    }
+
+    // Clear-button visibility/positioning is finished in resized() (needs
+    // each slot's on-screen bounds, which only exist there), except for
+    // the "hide when empty" case handled above.
+    resized();
+}
+
+bool RibbonMenu::isInterestedInDragSource (const SourceDetails& details)
+{
+    // Only sound tiles dragged from sfxLibraryPanel_ encode themselves as a
+    // plain string naming a real SfxLibraryService entry -- nothing else in
+    // this app starts a drag with that description shape.
+    return details.description.isString()
+        && SfxLibraryService::getInstance().findByName (details.description.toString()) != nullptr;
+}
+
+void RibbonMenu::itemDropped (const SourceDetails& details)
+{
+    const auto soundName = details.description.toString();
+    if (SfxLibraryService::getInstance().findByName (soundName) == nullptr)
+        return;
+
+    auto buttons = sfxSlotButtons();
+    for (int i = 0; i < 8; ++i)
+    {
+        // localPosition is already relative to this component (the target
+        // receiving the drop), the same space the slot buttons' own
+        // getBounds() live in -- no conversion needed.
+        if (buttons[(size_t) i]->getBounds().contains (details.localPosition))
+        {
+            UserPreferences::getInstance().setSfxSlotAssignment (i, soundName);
+            refreshSfxSlots();
+            return;
+        }
+    }
 }
 
 void RibbonMenu::updateAllText()
@@ -379,6 +465,10 @@ void RibbonMenu::resized()
         lyricCard_.setVisible (false);
         nextSingerCard_.setVisible (false);
         sfxCard_.setVisible (false);
+        backgroundCardGear_.setVisible (false);
+        lyricCardGear_.setVisible (false);
+        nextSingerCardGear_.setVisible (false);
+        sfxCardGear_.setVisible (false);
         collapsePanelButton_.setVisible (false);
         panelTitleLabel_.setVisible (false);
         bgPlayPauseButton_.setVisible (false);
@@ -387,6 +477,7 @@ void RibbonMenu::resized()
         bgProgressSlider_.setVisible (false);
         bgTrackLabel_.setVisible (false);
         bgTimeLabel_.setVisible (false);
+        bgLibraryPanel_->setVisible (false);
         lyricToggleWindowButton_.setVisible (false);
         lyricFullscreenButton_.setVisible (false);
         lyricStateLabel_.setVisible (false);
@@ -405,6 +496,9 @@ void RibbonMenu::resized()
         sfxWooHooButton_.setVisible (false);
         sfxVolumeSlider_.setVisible (false);
         sfxVolumeLabel_.setVisible (false);
+        sfxLibraryPanel_->setVisible (false);
+        for (auto* clearButton : sfxSlotClearButtons())
+            clearButton->setVisible (false);
         return;
     }
 
@@ -418,6 +512,10 @@ void RibbonMenu::resized()
     lyricCard_.setVisible (compact);
     nextSingerCard_.setVisible (compact);
     sfxCard_.setVisible (compact);
+    backgroundCardGear_.setVisible (compact);
+    lyricCardGear_.setVisible (compact);
+    nextSingerCardGear_.setVisible (compact);
+    sfxCardGear_.setVisible (compact);
     collapsePanelButton_.setVisible (expanded);
     panelTitleLabel_.setVisible (expanded);
 
@@ -427,6 +525,7 @@ void RibbonMenu::resized()
     bgProgressSlider_.setVisible (showBackground);
     bgTrackLabel_.setVisible (showBackground);
     bgTimeLabel_.setVisible (showBackground);
+    bgLibraryPanel_->setVisible (expandedPanel_ == PanelId::backgroundMusic);
 
     lyricToggleWindowButton_.setVisible (expanded && expandedPanel_ == PanelId::lyricDisplay);
     lyricFullscreenButton_.setVisible (expanded && expandedPanel_ == PanelId::lyricDisplay);
@@ -446,8 +545,18 @@ void RibbonMenu::resized()
     sfxDrumFillButton_.setVisible (showSfx);
     sfxDrumRollButton_.setVisible (showSfx);
     sfxWooHooButton_.setVisible (showSfx);
-    sfxVolumeSlider_.setVisible (expanded && expandedPanel_ == PanelId::soundEffects);
-    sfxVolumeLabel_.setVisible (expanded && expandedPanel_ == PanelId::soundEffects);
+    const bool sfxExpanded = expanded && expandedPanel_ == PanelId::soundEffects;
+    sfxVolumeSlider_.setVisible (sfxExpanded);
+    sfxVolumeLabel_.setVisible (sfxExpanded);
+    sfxLibraryPanel_->setVisible (sfxExpanded);
+
+    auto clearButtons = sfxSlotClearButtons();
+    for (int i = 0; i < 8; ++i)
+    {
+        const bool slotOccupied = i < sfxSlotAssignmentsCache_.size()
+                                && sfxSlotAssignmentsCache_[i].isNotEmpty();
+        clearButtons[(size_t) i]->setVisible (sfxExpanded && slotOccupied);
+    }
 
     if (compact)
     {
@@ -455,31 +564,57 @@ void RibbonMenu::resized()
         const int gap = 8;
         const int cardW = juce::jmax (90, (cardsArea.getWidth() - gap * 3) / 4);
 
+        constexpr int gearSize = 18;
+        auto positionGear = [gearSize] (juce::DrawableButton& gear, juce::Rectangle<int> card)
+        {
+            gear.setBounds (card.getRight() - gearSize - 4, card.getY() + 4, gearSize, gearSize);
+            // Force frontmost every layout pass -- construction order alone
+            // wasn't enough to keep these above each card's own controls
+            // (e.g. the SFX grid's top-right button sits at this same
+            // corner), so they were unclickable.
+            gear.toFront (false);
+        };
+
         auto bgCard = cardsArea.removeFromLeft (cardW);
         backgroundCard_.setBounds (bgCard);
+        positionGear (backgroundCardGear_, bgCard);
         cardsArea.removeFromLeft (gap);
         auto lyricCardBounds = cardsArea.removeFromLeft (cardW);
         lyricCard_.setBounds (lyricCardBounds);
+        positionGear (lyricCardGear_, lyricCardBounds);
         cardsArea.removeFromLeft (gap);
         auto nextCard = cardsArea.removeFromLeft (cardW);
         nextSingerCard_.setBounds (nextCard);
+        positionGear (nextSingerCardGear_, nextCard);
         cardsArea.removeFromLeft (gap);
         auto sfxCardBounds = cardsArea;
         sfxCard_.setBounds (sfxCardBounds);
+        positionGear (sfxCardGear_, sfxCardBounds);
 
         auto bgInner = bgCard.reduced (10, 8);
         bgTrackLabel_.setBounds (bgInner.removeFromTop (22));
-        bgProgressSlider_.setBounds (bgInner.removeFromTop (18));
-        bgInner.removeFromTop (8);
-        auto bgBottomRow = bgInner.removeFromBottom (28);
-        bgPrevButton_.setBounds (bgBottomRow.removeFromLeft (30));
-        bgBottomRow.removeFromLeft (2);
-        bgPlayPauseButton_.setBounds (bgBottomRow.removeFromLeft (38));
-        bgBottomRow.removeFromLeft (2);
-        bgNextButton_.setBounds (bgBottomRow.removeFromLeft (30));
-        bgBottomRow.removeFromLeft (4);
-        bgTimeLabel_.setBounds (bgBottomRow.removeFromRight (60));
-        bgVolumeSlider_.setBounds (bgBottomRow);
+
+        // Progress bar, with the elapsed/duration time to its right --
+        // stays pinned right under the track label.
+        auto bgProgressRow = bgInner.removeFromTop (16);
+        bgTimeLabel_.setBounds (bgProgressRow.removeFromRight (60));
+        bgProgressSlider_.setBounds (bgProgressRow);
+        bgInner.removeFromTop (4);
+
+        // Volume slider stays pinned to the bottom of the box...
+        bgVolumeSlider_.setBounds (bgInner.removeFromBottom (18));
+        bgInner.removeFromBottom (4);
+
+        // ...and the transport buttons are vertically centred in whatever
+        // space is left between the progress row and the volume slider,
+        // rather than sitting flush against either one.
+        constexpr int bgButtonsRowH = 26;
+        auto bgButtonsRow = bgInner.withSizeKeepingCentre (bgInner.getWidth(), bgButtonsRowH);
+        bgPrevButton_.setBounds (bgButtonsRow.removeFromLeft (30));
+        bgButtonsRow.removeFromLeft (2);
+        bgPlayPauseButton_.setBounds (bgButtonsRow.removeFromLeft (38));
+        bgButtonsRow.removeFromLeft (2);
+        bgNextButton_.setBounds (bgButtonsRow.removeFromLeft (30));
 
         if (lyricPreview_ != nullptr)
             lyricPreview_->setBounds (lyricCardBounds.reduced (8));
@@ -527,16 +662,20 @@ void RibbonMenu::resized()
         bgProgressSlider_.setBounds (seekRow.removeFromLeft (juce::jmax (180, seekRow.getWidth() - 74)));
         bgTimeLabel_.setBounds (seekRow.reduced (8, 0));
         content.removeFromTop (12);
-        auto controls = content.removeFromTop (34);
-        auto transportRow = controls.removeFromTop (34);
+        auto transportRow = content.removeFromTop (34);
         bgPrevButton_.setBounds (transportRow.removeFromLeft (46));
         transportRow.removeFromLeft (8);
         bgPlayPauseButton_.setBounds (transportRow.removeFromLeft (120));
         transportRow.removeFromLeft (8);
         bgNextButton_.setBounds (transportRow.removeFromLeft (46));
-        controls.removeFromTop (8);
-        bgVolumeLabel_.setBounds (controls.removeFromLeft (80));
-        bgVolumeSlider_.setBounds (controls);
+        content.removeFromTop (8);
+
+        auto volumeRow = content.removeFromTop (28);
+        bgVolumeLabel_.setBounds (volumeRow.removeFromLeft (80));
+        bgVolumeSlider_.setBounds (volumeRow);
+
+        content.removeFromTop (10);
+        bgLibraryPanel_->setBounds (content);
     }
     else if (expandedPanel_ == PanelId::lyricDisplay)
     {
@@ -562,25 +701,32 @@ void RibbonMenu::resized()
         const int gap = 12;
         const int cellW = (grid.getWidth() - gap * (columns - 1)) / columns;
         const int cellH = (grid.getHeight() - gap * (rows - 1)) / rows;
-        juce::DrawableButton* buttons[] = {
-            &sfxAreYouReadyButton_, &sfxChickenButton_, &sfxBurpButton_, &sfxBruhButton_,
-            &sfxBuzzerButton_, &sfxDrumFillButton_, &sfxDrumRollButton_, &sfxWooHooButton_
-        };
+        auto buttons = sfxSlotButtons();
+        auto clearButtons = sfxSlotClearButtons();
+        constexpr int clearSize = 18;
 
         for (int i = 0; i < 8; ++i)
         {
             const int col = i % columns;
             const int row = i / columns;
-            buttons[i]->setBounds (grid.getX() + col * (cellW + gap),
-                                   grid.getY() + row * (cellH + gap),
-                                   cellW,
-                                   cellH);
+            const juce::Rectangle<int> cell (grid.getX() + col * (cellW + gap),
+                                             grid.getY() + row * (cellH + gap),
+                                             cellW, cellH);
+            buttons[(size_t) i]->setBounds (cell);
+
+            // Same overlay-z-order fix as the card gear icons -- add order
+            // alone doesn't reliably keep this on top of the slot button.
+            clearButtons[(size_t) i]->setBounds (cell.getRight() - clearSize - 2, cell.getY() + 2, clearSize, clearSize);
+            clearButtons[(size_t) i]->toFront (false);
         }
 
         content.removeFromTop (10);
         auto volRow = content.removeFromTop (30);
         sfxVolumeLabel_.setBounds (volRow.removeFromLeft (90));
         sfxVolumeSlider_.setBounds (volRow);
+
+        content.removeFromTop (10);
+        sfxLibraryPanel_->setBounds (content);
     }
 }
 
@@ -644,6 +790,17 @@ void RibbonMenu::setBackgroundTrackInfo (const juce::String& songName,
     backgroundPositionSeconds_ = juce::jmax (0.0, positionSeconds);
     backgroundTotalSeconds_ = juce::jmax (0.0, totalSeconds);
     updateControlState();
+}
+
+void RibbonMenu::setBackgroundFolderPath (const juce::String& path)
+{
+    bgLibraryPanel_->setFolderPath (path);
+}
+
+void RibbonMenu::setBackgroundAvailableTracks (const std::vector<juce::File>& tracks,
+                                               const juce::StringArray& selectedFilenames)
+{
+    bgLibraryPanel_->setTracks (tracks, selectedFilenames);
 }
 
 void RibbonMenu::setSfxVolume (float volume01)
@@ -723,7 +880,7 @@ void RibbonMenu::updateControlState()
     collapsePanelButton_.setButtonText (tr ("ribbon.back"));
 
     setSpriteButtonIcon (bgPlayPauseButton_, backgroundPlaying_ ? "icon-pause2" : "icon-play3");
-    bgVolumeSlider_.setValue (backgroundVolume01_, juce::dontSendNotification);
+    bgVolumeSlider_.setValue (backgroundVolume01_ * 10.0f, juce::dontSendNotification);
     bgVolumeLabel_.setText (tr ("ribbon.volume"), juce::dontSendNotification);
     bgTrackLabel_.setText (backgroundSongName_.isNotEmpty() ? backgroundSongName_ : tr ("ribbon.background.none"),
                            juce::dontSendNotification);
@@ -745,14 +902,9 @@ void RibbonMenu::updateControlState()
 
     sfxVolumeSlider_.setValue (sfxVolume01_, juce::dontSendNotification);
     sfxVolumeLabel_.setText (tr ("ribbon.sfx_volume"), juce::dontSendNotification);
-    sfxAreYouReadyButton_.setTooltip (tr ("ribbon.sfx.are_you_ready"));
-    sfxChickenButton_.setTooltip (tr ("ribbon.sfx.chicken"));
-    sfxBurpButton_.setTooltip (tr ("ribbon.sfx.burp"));
-    sfxBruhButton_.setTooltip (tr ("ribbon.sfx.bruh"));
-    sfxBuzzerButton_.setTooltip (tr ("ribbon.sfx.buzzer"));
-    sfxDrumFillButton_.setTooltip (tr ("ribbon.sfx.drum_fill"));
-    sfxDrumRollButton_.setTooltip (tr ("ribbon.sfx.drum_roll"));
-    sfxWooHooButton_.setTooltip (tr ("ribbon.sfx.woohoo"));
+    // Slot tooltips are data-driven -- see refreshSfxSlots(), which already
+    // sets each button's tooltip to its assigned sound's name and must not
+    // be overwritten here with the old fixed 8 names.
 
     updateCardTexts();
     resized();

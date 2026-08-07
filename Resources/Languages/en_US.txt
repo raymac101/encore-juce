@@ -271,7 +271,8 @@ queue.next_in=Next in
 # ── Ribbon quick controls ────────────────────────────────────────────────────
 ribbon.show=Show Ribbon
 ribbon.hide=Hide Ribbon
-ribbon.back=Back to Ribbon
+ribbon.back=Close
+ribbon.expand=Expand to full screen
 ribbon.card.background=Background Music
 ribbon.card.lyric=Lyric Display
 ribbon.card.next_singer=Next Singer
@@ -288,6 +289,10 @@ ribbon.state.ready=Ready
 ribbon.state.yes=Yes
 ribbon.state.no=No
 ribbon.background.none=No song loaded
+ribbon.bg.browse=Browse...
+ribbon.bg.use_default=Use Default
+ribbon.bg.using_default=Using default music
+ribbon.bg.choose_folder_title=Choose a background music folder
 ribbon.next_singer.none=No singer queued
 ribbon.action.play=Play
 ribbon.action.pause=Pause
@@ -307,6 +312,8 @@ ribbon.sfx.woohoo=WooHoo
 ribbon.sfx.drum_fill=Drum Fill
 ribbon.sfx.drum_roll=Drum Roll
 ribbon.sfx.buzzer=Buzzer
+ribbon.sfx.clear_slot=Clear this slot
+ribbon.sfx.filter_placeholder=Filter sounds...
 
 # ── Testing page ───────────────────────────────────────────────────────────
 testing.title=TESTING

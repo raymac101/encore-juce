@@ -34,6 +34,29 @@ juce::File resolveAssetFile (const juce::String& relativePath)
     return {};
 }
 
+juce::File resolveAssetDirectory (const juce::String& relativePath)
+{
+    auto exeDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+    auto cwd = juce::File::getCurrentWorkingDirectory();
+
+    const juce::Array<juce::File> roots {
+        cwd,
+        exeDir,
+        exeDir.getParentDirectory(),
+        exeDir.getParentDirectory().getParentDirectory(),
+        exeDir.getParentDirectory().getParentDirectory().getParentDirectory()
+    };
+
+    for (const auto& root : roots)
+    {
+        auto candidate = root.getChildFile (relativePath);
+        if (candidate.isDirectory())
+            return candidate;
+    }
+
+    return {};
+}
+
 std::unique_ptr<juce::Drawable> create (const juce::String& symbolId, const juce::Colour& colour)
 {
     auto createInlineIcon = [&]() -> std::unique_ptr<juce::Drawable>
@@ -166,6 +189,72 @@ std::unique_ptr<juce::Drawable> create (const juce::String& symbolId, const juce
         return drawable;
 
     return createInlineIcon();
+}
+
+std::unique_ptr<juce::Drawable> createFromSvgFile (const juce::File& svgFile, const juce::Colour& colour)
+{
+    if (! svgFile.existsAsFile())
+        return {};
+
+    auto xml = juce::XmlDocument::parse (svgFile);
+    if (xml == nullptr)
+        return {};
+
+    std::function<void (juce::XmlElement&)> tintSvgTree = [&tintSvgTree, &colour] (juce::XmlElement& node)
+    {
+        const auto tag = node.getTagName().toLowerCase();
+        const bool isShape = tag == "path" || tag == "circle" || tag == "ellipse"
+                          || tag == "rect" || tag == "polygon" || tag == "polyline"
+                          || tag == "line";
+
+        auto tintAttribute = [&node, &colour] (const char* attrName)
+        {
+            if (! node.hasAttribute (attrName))
+                return;
+
+            const auto value = node.getStringAttribute (attrName).trim();
+            if (value.equalsIgnoreCase ("none"))
+                return;
+
+            node.setAttribute (attrName, colour.toDisplayString (true));
+        };
+
+        tintAttribute ("fill");
+        tintAttribute ("stroke");
+
+        // Some icon paths omit fill/stroke entirely and default to black.
+        if (isShape && ! node.hasAttribute ("fill") && ! node.hasAttribute ("stroke"))
+            node.setAttribute ("fill", colour.toDisplayString (true));
+
+        for (auto* child = node.getFirstChildElement(); child != nullptr; child = child->getNextElement())
+            tintSvgTree (*child);
+    };
+
+    tintSvgTree (*xml);
+
+    // This JUCE version dropped Drawable::createFromSVG(XmlElement) in
+    // favour of file-based loading only -- round-trip through a temp file.
+    auto tempFile = juce::File::createTempFile (".svg");
+    if (! xml->writeTo (tempFile))
+        return {};
+    auto drawable = juce::Drawable::createFromSVGFile (tempFile);
+    tempFile.deleteFile();
+    if (drawable == nullptr)
+        return {};
+
+    // Safety pass for SVGs that define dark tones via a class/style block
+    // rather than plain fill/stroke attributes -- the attribute tree-walk
+    // above can't see those, so replace the common literal dark colours
+    // directly on the rendered drawable instead.
+    const juce::Colour darksToReplace[] = {
+        juce::Colour (0xff000000), juce::Colour (0xff111111), juce::Colour (0xff1a1a1a),
+        juce::Colour (0xff222222), juce::Colour (0xff333333), juce::Colour (0xff444444),
+        juce::Colour (0xff555555), juce::Colour (0xff666666), juce::Colour (0xff777777)
+    };
+    for (auto dark : darksToReplace)
+        drawable->replaceColour (dark, colour);
+
+    return drawable;
 }
 
 } // namespace SpriteIcon

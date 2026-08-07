@@ -16,10 +16,13 @@
 
 #include <JuceHeader.h>
 #include "LyricDisplayComponent.h"
+#include "SfxLibraryListPanel.h"
+#include "BackgroundMusicLibraryPanel.h"
 
 class AudioEngine;
 
-class RibbonMenu : public juce::Component
+class RibbonMenu : public juce::Component,
+                   public juce::DragAndDropTarget
 {
 public:
     enum class PanelId
@@ -41,6 +44,11 @@ public:
     void mouseUp (const juce::MouseEvent& event) override;
     void mouseDoubleClick (const juce::MouseEvent& event) override;
 
+    // juce::DragAndDropTarget -- accepts a sound tile dragged from
+    // sfxLibraryPanel_ and dropped onto one of the 8 slot buttons below.
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
+
     bool isHidden() const noexcept { return hidden_; }
     bool isPanelExpanded() const noexcept { return expandedPanel_ != PanelId::none; }
     PanelId getExpandedPanel() const noexcept { return expandedPanel_; }
@@ -55,6 +63,15 @@ public:
     void setBackgroundTrackInfo (const juce::String& songName,
                    double positionSeconds,
                    double totalSeconds);
+
+    /** Pushes the current folder path (empty == using the bundled default)
+        into the full-screen library panel's path label. */
+    void setBackgroundFolderPath (const juce::String& path);
+
+    /** Rebuilds the full-screen library panel's checklist. Call after any
+        change to the folder or the persisted selection. */
+    void setBackgroundAvailableTracks (const std::vector<juce::File>& tracks,
+                                       const juce::StringArray& selectedFilenames);
     void setSfxVolume (float volume01);
     void setLyricWindowVisible (bool visible);
     void setLyricWindowFullScreen (bool fullScreen);
@@ -67,6 +84,11 @@ public:
     std::function<void(double positionSeconds)> onBackgroundSeekRequested;
     std::function<void()> onBackgroundNextTrack;
     std::function<void()> onBackgroundPrevTrack;
+
+    std::function<void (juce::File folder)> onBackgroundFolderChanged;
+    std::function<void (juce::StringArray selectedFilenames)> onBackgroundSelectionChanged;
+    std::function<void (juce::File file)> onBackgroundPreviewRequested;
+    std::function<void()> onBackgroundUseDefaultRequested;
 
     std::function<void()> onLyricToggleWindow;
     std::function<void()> onLyricToggleFullscreen;
@@ -84,6 +106,23 @@ private:
 
     void toggleHidden();
     void togglePanel (PanelId id);
+
+    // Applies UserPreferences::getSfxSlotAssignments() to the 8 buttons
+    // below (icon + onClick effectName) -- called once at construction and
+    // again after any slot is changed via drag-drop or the clear button.
+    void refreshSfxSlots();
+
+    // The 8 slot buttons in fixed order, matching the persisted assignment
+    // array's index order. Used by refreshSfxSlots(), both grid layouts,
+    // and itemDropped()'s hit-testing, so the list only ever lives in one
+    // place.
+    std::array<juce::DrawableButton*, 8> sfxSlotButtons();
+    std::array<juce::TextButton*, 8> sfxSlotClearButtons();
+
+    // Cached by refreshSfxSlots() so resized() can decide per-slot clear-
+    // button visibility without re-reading UserPreferences every layout
+    // pass.
+    juce::StringArray sfxSlotAssignmentsCache_;
 
     PanelId expandedPanel_ = PanelId::none;
     bool hidden_ = false;
@@ -116,6 +155,14 @@ private:
     juce::TextButton nextSingerCard_ { "nextSingerCard" };
     juce::TextButton sfxCard_ { "sfxCard" };
 
+    // Gear icon in each compact card's top-right corner -- an explicit
+    // affordance for the same "expand to full screen" action the card
+    // itself already performs on click (see togglePanel()).
+    juce::DrawableButton backgroundCardGear_ { "backgroundCardGear", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton lyricCardGear_      { "lyricCardGear",      juce::DrawableButton::ImageFitted };
+    juce::DrawableButton nextSingerCardGear_ { "nextSingerCardGear", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton sfxCardGear_        { "sfxCardGear",        juce::DrawableButton::ImageFitted };
+
     juce::TextButton collapsePanelButton_ { "collapsePanel" };
 
     juce::Label panelTitleLabel_;
@@ -128,6 +175,10 @@ private:
     juce::Slider bgProgressSlider_;
     juce::Label bgTrackLabel_;
     juce::Label bgTimeLabel_;
+
+    // Folder picker + track checklist, shown below the transport controls
+    // only when expandedPanel_ == PanelId::backgroundMusic.
+    std::unique_ptr<BackgroundMusicLibraryPanel> bgLibraryPanel_;
 
     juce::TextButton lyricToggleWindowButton_ { "lyricToggleWindow" };
     juce::TextButton lyricFullscreenButton_ { "lyricFullscreen" };
@@ -148,6 +199,21 @@ private:
     juce::DrawableButton sfxWooHooButton_ { "sfxWooHoo", juce::DrawableButton::ImageOnButtonBackground };
     juce::Slider sfxVolumeSlider_;
     juce::Label sfxVolumeLabel_;
+
+    // Small "x" overlay per slot (expanded view only, visible only when
+    // that slot is non-empty) to clear its assignment. Same toFront()-per-
+    // layout-pass fix as the card gear icons -- see positionGear() in
+    // resized().
+    std::array<juce::TextButton, 8> sfxSlotClearButtons_ {
+        juce::TextButton ("sfxClear0"), juce::TextButton ("sfxClear1"),
+        juce::TextButton ("sfxClear2"), juce::TextButton ("sfxClear3"),
+        juce::TextButton ("sfxClear4"), juce::TextButton ("sfxClear5"),
+        juce::TextButton ("sfxClear6"), juce::TextButton ("sfxClear7")
+    };
+
+    // Scrollable sound library + filter box, shown below the 8-slot grid
+    // only when expandedPanel_ == PanelId::soundEffects.
+    std::unique_ptr<SfxLibraryListPanel> sfxLibraryPanel_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RibbonMenu)
 };
