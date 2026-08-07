@@ -490,7 +490,9 @@ void RibbonMenu::resized()
         sfxCardGear_.setVisible (false);
         collapsePanelButton_.setVisible (false);
         panelTitleLabel_.setVisible (false);
+        bgPrevButton_.setVisible (false);
         bgPlayPauseButton_.setVisible (false);
+        bgNextButton_.setVisible (false);
         bgVolumeSlider_.setVisible (false);
         bgVolumeLabel_.setVisible (false);
         bgProgressSlider_.setVisible (false);
@@ -539,7 +541,9 @@ void RibbonMenu::resized()
     collapsePanelButton_.setVisible (expanded);
     panelTitleLabel_.setVisible (expanded);
 
+    bgPrevButton_.setVisible (showBackground);
     bgPlayPauseButton_.setVisible (showBackground);
+    bgNextButton_.setVisible (showBackground);
     bgVolumeSlider_.setVisible (showBackground);
     bgVolumeLabel_.setVisible (expandedPanel_ == PanelId::backgroundMusic);
     bgProgressSlider_.setVisible (showBackground);
