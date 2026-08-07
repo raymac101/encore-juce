@@ -25,6 +25,8 @@ namespace
     constexpr float kMusicDuckedGain = 0.32f;
     constexpr float kVoiceGain = 1.0f;
     constexpr double kVoicePickupSeconds = 1.5; // music plays alone before the voice starts
+    constexpr double kOutroTailSeconds = 6.0;   // music plays alone this long after the voice ends, then gets cut
+    constexpr double kOutroFadeSeconds = 1.5;   // fade-out length when the track is actually cut short
 
     // Decodes `file` in full, resampled (simple linear interpolation -- this
     // is a one-off offline render, not real-time playback, so a heavier
