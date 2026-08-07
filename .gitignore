@@ -44,3 +44,6 @@ firebase_SA.json
 # never committed. See WINDOWS_HANDOFF.md for the current release's
 # content if you need to reference it.
 dist/
+
+# Firebase CLI regenerates this on every command run
+firebase-debug.log

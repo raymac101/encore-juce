@@ -7,13 +7,13 @@
 #     1.1.0 \
 #     "Developer ID Application: Your Name (TEAMID)"
 #
-# Requires (all provided by CI as environment variables -- see
-# .github/workflows/release.yml for how the corresponding GitHub secrets
-# are wired in; nothing here is invented or guessed):
-#   APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_PATH (a .p8 file
-#   written to disk earlier in the job by the workflow), and a
-#   "Developer ID Application" certificate already imported into the
-#   active keychain (also done earlier in the job).
+# Requires a "Developer ID Application" certificate already imported into
+# the active keychain, plus notarization credentials via EITHER of:
+#   - NOTARY_KEYCHAIN_PROFILE (local/manual runs) -- a profile already
+#     created once via `xcrun notarytool store-credentials <name>`.
+#   - APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_PATH (CI runs --
+#     see .github/workflows/release.yml for how the GitHub secrets are
+#     wired into a .p8 file written to disk earlier in the job).
 #
 # Deliberately a signed + notarized .dmg, not a .pkg: Encore needs no
 # install scripts and writes nothing to a protected location, so a plain
@@ -55,11 +55,17 @@ NOTARIZE_ZIP="${STAGING_DIR}/${APP_NAME}-notarize.zip"
 ditto -c -k --keepParent "${APP_PATH}" "${NOTARIZE_ZIP}"
 
 echo "==> Submitting to notarytool (waits for Apple's result)"
-xcrun notarytool submit "${NOTARIZE_ZIP}" \
-    --key "${APPLE_API_KEY_PATH}" \
-    --key-id "${APPLE_API_KEY_ID}" \
-    --issuer "${APPLE_API_ISSUER_ID}" \
-    --wait
+if [ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+    xcrun notarytool submit "${NOTARIZE_ZIP}" \
+        --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" \
+        --wait
+else
+    xcrun notarytool submit "${NOTARIZE_ZIP}" \
+        --key "${APPLE_API_KEY_PATH}" \
+        --key-id "${APPLE_API_KEY_ID}" \
+        --issuer "${APPLE_API_ISSUER_ID}" \
+        --wait
+fi
 
 echo "==> Stapling notarization ticket"
 xcrun stapler staple "${APP_PATH}"
