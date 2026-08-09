@@ -191,6 +191,24 @@ bool AudioEngine::setupAudioDevice()
         error = deviceManager.initialise(0, 2, nullptr, true, {}, preferredSetupPtr);
     }
 
+    // If the saved preferred device is unavailable on this machine (for
+    // example after moving between laptops or changing audio hardware),
+    // fall back to the system default device instead of leaving the app in
+    // an "audio unavailable" state.
+    if (error.isNotEmpty() && preferredSetupPtr != nullptr)
+    {
+        DBG("[AudioStartup] Preferred device '" + preferredDevice + "' failed (" + error + "); retrying with system default device.");
+        preferredSetup.outputDeviceName.clear();
+        preferredSetup.inputDeviceName.clear();
+        error = deviceManager.initialise(numInputChannelsRequested, 2, nullptr, true, {}, nullptr);
+
+        if (error.isNotEmpty() && numInputChannelsRequested > 0)
+        {
+            DBG("[AudioStartup] Default-device init with input channels failed (" + error + "); retrying output-only.");
+            error = deviceManager.initialise(0, 2, nullptr, true, {}, nullptr);
+        }
+    }
+
     const auto initMs = juce::Time::getMillisecondCounterHiRes() - startMs;
 
     if (error.isNotEmpty())
