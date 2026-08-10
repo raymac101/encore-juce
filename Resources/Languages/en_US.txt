@@ -306,6 +306,7 @@ ribbon.bg.spotify_not_connected=Not connected.
 ribbon.bg.spotify_playlist_label=Playlist
 ribbon.bg.spotify_refresh_playlists=Refresh Playlists
 ribbon.bg.spotify_no_playlists=No playlists found
+ribbon.bg.spotify_playing=Playing on Spotify.
 ribbon.next_singer.none=No singer queued
 ribbon.action.play=Play
 ribbon.action.pause=Pause

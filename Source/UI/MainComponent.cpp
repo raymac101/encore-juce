@@ -1249,10 +1249,13 @@ void MainComponent::setupUI()
     ribbonMenu->onSpotifyPlaylistSelected = [this](juce::String uri, juce::String name)
     {
         UserPreferences::getInstance().setSpotifySelectedPlaylist (uri, name);
+        juce::Component::SafePointer<MainComponent> safe (this);
         SpotifyService::getInstance().playPlaylist (uri,
-            [] (bool ok, juce::String error)
+            [safe] (bool ok, juce::String error)
             {
                 if (! ok) DBG ("[Spotify] playPlaylist failed: " << error);
+                if (safe != nullptr && safe->ribbonMenu != nullptr)
+                    safe->ribbonMenu->reportSpotifyPlaybackResult (ok, error);
             });
     };
 

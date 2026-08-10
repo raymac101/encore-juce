@@ -86,6 +86,10 @@ public:
                          const juce::String& selectedUri);
     void setSpotifyClientId (const juce::String& clientId);
 
+    /** Forwarded from MainComponent once SpotifyService::playPlaylist's
+        callback fires. */
+    void reportSpotifyPlaybackResult (bool ok, const juce::String& error);
+
     void setSfxVolume (float volume01);
     void setLyricWindowVisible (bool visible);
     void setLyricWindowFullScreen (bool fullScreen);

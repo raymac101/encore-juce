@@ -15,6 +15,7 @@ namespace
     const auto kText = juce::Colours::white;
     const auto kAccent = juce::Colour (0xff5a8fd8);
     const auto kInactiveBg = juce::Colour (0xff2d2d3a);
+    const auto kDanger = juce::Colour (0xffd9534f);
 
     void initLabelWhite (juce::Label& l, const juce::String& text)
     {
@@ -176,6 +177,21 @@ void BackgroundMusicLibraryPanel::setSpotifyClientId (const juce::String& client
     spotifyClientIdEditor_.setText (clientId, juce::dontSendNotification);
 }
 
+void BackgroundMusicLibraryPanel::reportSpotifyPlaybackResult (bool ok, const juce::String& error)
+{
+    if (ok)
+    {
+        spotifyStatusLabel_.setColour (juce::Label::textColourId, kText.withAlpha (0.85f));
+        spotifyStatusLabel_.setText (LocalizationManager::getInstance().getText ("ribbon.bg.spotify_playing"),
+                                    juce::dontSendNotification);
+    }
+    else
+    {
+        spotifyStatusLabel_.setColour (juce::Label::textColourId, kDanger);
+        spotifyStatusLabel_.setText (error, juce::dontSendNotification);
+    }
+}
+
 void BackgroundMusicLibraryPanel::setSpotifyState (bool connected, const juce::String& accountName,
                                                    const std::vector<SpotifyService::PlaylistInfo>& playlists,
                                                    const juce::String& selectedUri)
@@ -183,6 +199,7 @@ void BackgroundMusicLibraryPanel::setSpotifyState (bool connected, const juce::S
     spotifyConnected_ = connected;
     auto& lm = LocalizationManager::getInstance();
 
+    spotifyStatusLabel_.setColour (juce::Label::textColourId, kText.withAlpha (0.85f));
     spotifyStatusLabel_.setText (connected
         ? (lm.getText ("ribbon.bg.spotify_connected_as") + " " + accountName)
         : lm.getText ("ribbon.bg.spotify_not_connected"),

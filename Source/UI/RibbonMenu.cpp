@@ -924,6 +924,11 @@ void RibbonMenu::setSpotifyClientId (const juce::String& clientId)
     bgLibraryPanel_->setSpotifyClientId (clientId);
 }
 
+void RibbonMenu::reportSpotifyPlaybackResult (bool ok, const juce::String& error)
+{
+    bgLibraryPanel_->reportSpotifyPlaybackResult (ok, error);
+}
+
 void RibbonMenu::setSfxVolume (float volume01)
 {
     sfxVolume01_ = juce::jlimit (0.0f, 1.0f, volume01);

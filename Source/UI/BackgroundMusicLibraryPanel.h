@@ -70,6 +70,12 @@ public:
     /** Seeds the Client ID field once, e.g. right after construction. */
     void setSpotifyClientId (const juce::String& clientId);
 
+    /** MainComponent calls this once SpotifyService::playPlaylist's
+        callback fires, so a failure (most commonly "no active device" --
+        Spotify Connect needs the host to already have Spotify open
+        somewhere) is actually visible instead of silently doing nothing. */
+    void reportSpotifyPlaybackResult (bool ok, const juce::String& error);
+
 private:
     class TrackRow;
 

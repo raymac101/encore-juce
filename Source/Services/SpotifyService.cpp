@@ -25,7 +25,14 @@ namespace
     constexpr const char* kRedirectUri = "http://127.0.0.1:8899/callback";
 
     constexpr int kConnectTimeoutMs = 10000;
-    constexpr int kOAuthTimeoutMs   = 120000; // give up waiting for the browser login after 2 minutes
+    // A real human login (credentials, maybe 2FA, then the consent screen)
+    // can easily take a couple of minutes -- 2 minutes was measured too
+    // tight and caused the listener to close the port out from under a
+    // slow-but-legitimate login, producing a browser-side "connection
+    // refused" right when the redirect finally arrived. 10 minutes costs
+    // nothing if abandoned (one idle background thread + an open loopback
+    // port), so it's generous on purpose.
+    constexpr int kOAuthTimeoutMs   = 600000;
 
     juce::String randomUrlSafeString (int length)
     {
@@ -121,29 +128,80 @@ namespace
         bool start (int port) { return socket_.createListener (port, "127.0.0.1"); }
         void cancel() { socket_.close(); }
 
-        // Blocks until a browser redirect arrives (or cancel() is called from
-        // another thread). Returns the raw HTTP request line, or an empty
-        // string if the listener was cancelled/failed.
+        // Blocks until a browser redirect carrying a "code" or "error"
+        // query parameter arrives (or cancel() is called from another
+        // thread). Returns the raw HTTP request line, or an empty string
+        // if the listener was cancelled/failed.
+        //
+        // Browsers routinely open more than one connection to a freshly
+        // navigated-to origin -- most commonly a GET /favicon.ico alongside
+        // the real navigation request, sometimes arriving on a separate
+        // TCP connection that gets accepted before the real one. A single
+        // accept-and-done call can grab that spurious request, respond to
+        // it, and return -- leaving the real callback connection sitting
+        // fully connected (TCP handshake complete) but never serviced,
+        // which is exactly what a browser "hangs, then eventually errors"
+        // looks like from the outside. Looping past anything that isn't
+        // the real callback fixes that.
         juce::String waitForRedirect()
         {
-            std::unique_ptr<juce::StreamingSocket> client (socket_.waitForNextConnection());
-            if (client == nullptr)
-                return {};
+            for (;;)
+            {
+                std::unique_ptr<juce::StreamingSocket> client (socket_.waitForNextConnection());
+                if (client == nullptr)
+                    return {};
 
-            char buffer[4096];
-            const int bytesRead = client->read (buffer, (int) sizeof (buffer) - 1, false);
-            if (bytesRead <= 0)
-                return {};
+                // Drain the FULL request (request line + every header) before
+                // writing a response and letting `client` go out of scope
+                // (closing the socket). A real browser request -- long
+                // authorization code in the URL, plus the usual dozen+
+                // Chrome headers -- easily exceeds a single recv(), and
+                // closing a socket while the OS still has unread incoming
+                // bytes buffered makes it send a hard RST instead of a
+                // clean FIN. Browsers surface that as a connection error
+                // (seen in practice as ERR_SOCKET_NOT_CONNECTED), not just
+                // "the response arrived a little late" -- so the fix is to
+                // keep reading until nothing more arrives for a short
+                // stretch, not just until we've seen enough to extract the
+                // code.
+                juce::MemoryBlock requestData;
+                char chunk[4096];
+                for (;;)
+                {
+                    if (client->waitUntilReady (true, 200) != 1)
+                        break; // nothing more arrived within 200ms -- request is fully sent
+                    const int bytesRead = client->read (chunk, (int) sizeof (chunk), false);
+                    if (bytesRead <= 0)
+                        break;
+                    requestData.append (chunk, (size_t) bytesRead);
+                    if (requestData.getSize() > 65536)
+                        break; // safety cap, not a realistic request size
+                }
 
-            static const char* kResponseBody =
-                "<html><body style=\"font-family:sans-serif;text-align:center;padding-top:4em;\">"
-                "<h2>Encore Karaoke</h2><p>You're connected -- you can close this tab and return to Encore.</p>"
-                "</body></html>";
-            const juce::String response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                                          + juce::String (kResponseBody);
-            client->write (response.toRawUTF8(), (int) response.getNumBytesAsUTF8());
+                if (requestData.isEmpty())
+                    continue;
 
-            return juce::String::fromUTF8 (buffer, bytesRead);
+                const juce::String requestText (juce::String::fromUTF8 (
+                    static_cast<const char*> (requestData.getData()), (int) requestData.getSize()));
+                const bool isRealCallback = requestText.contains ("code=") || requestText.contains ("error=");
+
+                if (isRealCallback)
+                {
+                    static const char* kResponseBody =
+                        "<html><body style=\"font-family:sans-serif;text-align:center;padding-top:4em;\">"
+                        "<h2>Encore Karaoke</h2><p>You're connected -- you can close this tab and return to Encore.</p>"
+                        "</body></html>";
+                    const juce::String response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+                                                  + juce::String (kResponseBody);
+                    client->write (response.toRawUTF8(), (int) response.getNumBytesAsUTF8());
+                    return requestText;
+                }
+
+                // Anything else (favicon.ico, a bare preconnect, etc.) --
+                // send a quick, harmless response and keep waiting.
+                const juce::String ignoredResponse = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+                client->write (ignoredResponse.toRawUTF8(), (int) ignoredResponse.getNumBytesAsUTF8());
+            }
         }
 
     private:
