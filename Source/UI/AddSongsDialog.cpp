@@ -738,13 +738,19 @@ void AddSongsDialog::onImport()
 
 void AddSongsDialog::onCancel()
 {
-    folderScanToken_->store(true);   // abort any running folder scan
-    scanner_.stopScan();
     if (folderScanTaskId_ != 0)
     {
-        GlobalProgressService::getInstance().endTask(folderScanTaskId_);
-        folderScanTaskId_ = 0;
+        // A folder scan is running -- just stop it and drop back to Setup
+        // (Browse re-enabled) so the user can pick a different folder,
+        // rather than closing the whole dialog. onFolderScanCancelled()
+        // does the actual UI reset once the background thread notices the
+        // token and unwinds.
+        folderScanToken_->store(true);
+        return;
     }
+
+    folderScanToken_->store(true);   // abort any running folder scan
+    scanner_.stopScan();
     if (importTaskId_ != 0)
     {
         GlobalProgressService::getInstance().endTask(importTaskId_);

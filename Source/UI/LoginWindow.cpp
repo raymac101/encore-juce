@@ -97,6 +97,7 @@ public:
         styleEditor(emailEditor_, lm.getText("login.email_placeholder"));
         styleEditor(passwordEditor_, lm.getText("login.password_placeholder"));
         passwordEditor_.setPasswordCharacter((juce::juce_wchar) 0x2022); // bullet
+        passwordEditor_.onReturnKey = [this] { handleEmailSubmit(); };
 
         loginButton_.setButtonText(lm.getText("login.button_login"));
         switchModeButton_.setButtonText(lm.getText("login.button_switch_to_signup"));

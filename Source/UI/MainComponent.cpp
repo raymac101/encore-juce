@@ -28,6 +28,7 @@
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
 #include "../Services/IntroVoiceService.h"
+#include "../Services/SpotifyService.h"
 #include "SpriteIcon.h"
 #include "EditSingerModal.h"
 #include <cmath>
@@ -459,6 +460,7 @@ MainComponent::MainComponent()
         juce::MessageManager::callAsync ([safe]()
         {
             if (safe == nullptr) return;
+            if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify") return;
             if (safe->ribbonMenu != nullptr && safe->bgPlayer_ != nullptr)
             {
                 safe->ribbonMenu->setBackgroundTrackInfo (safe->bgPlayer_->getCurrentTrackName(),
@@ -475,6 +477,7 @@ MainComponent::MainComponent()
         juce::MessageManager::callAsync ([safe]()
         {
             if (safe == nullptr) return;
+            if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify") return;
             if (safe->ribbonMenu != nullptr && safe->bgPlayer_ != nullptr)
                 safe->ribbonMenu->setBackgroundState (safe->bgPlayer_->isPlaying(), safe->bgPlayer_->getVolume());
         });
@@ -1058,6 +1061,12 @@ void MainComponent::setupUI()
 
     ribbonMenu->onBackgroundPlayPause = [this](bool shouldPlay)
     {
+        if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
+        {
+            if (shouldPlay) SpotifyService::getInstance().play (nullptr);
+            else             SpotifyService::getInstance().pause (nullptr);
+            return;
+        }
         if (bgPlayer_ == nullptr) return;
         if (shouldPlay)
             bgPlayer_->play();
@@ -1067,24 +1076,42 @@ void MainComponent::setupUI()
 
     ribbonMenu->onBackgroundVolumeChanged = [this](float volume01)
     {
+        if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
+        {
+            SpotifyService::getInstance().setVolume (juce::roundToInt (volume01 * 100.0f), nullptr);
+            return;
+        }
         if (bgPlayer_ != nullptr)
             bgPlayer_->setVolume(volume01);
     };
 
     ribbonMenu->onBackgroundSeekRequested = [this](double positionSeconds)
     {
+        // Spotify's Web API has a seek endpoint, but the transport row's
+        // seek slider isn't wired to it -- Spotify's own progress bar
+        // already covers that, so this stays local-only.
         if (bgPlayer_ != nullptr)
             bgPlayer_->seekToPosition(positionSeconds);
     };
 
     ribbonMenu->onBackgroundNextTrack = [this]()
     {
+        if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
+        {
+            SpotifyService::getInstance().skipNext (nullptr);
+            return;
+        }
         if (bgPlayer_ != nullptr)
             bgPlayer_->skipToNext();
     };
 
     ribbonMenu->onBackgroundPrevTrack = [this]()
     {
+        if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
+        {
+            SpotifyService::getInstance().skipPrevious (nullptr);
+            return;
+        }
         if (bgPlayer_ != nullptr)
             bgPlayer_->skipToPrev();
     };
@@ -1145,6 +1172,92 @@ void MainComponent::setupUI()
 
     refreshBgLibraryUi();
 
+    // Pushes the source toggle + Spotify connection/playlist state into the
+    // Ribbon's full-screen library panel -- called once now, and again
+    // after anything changes underneath it (connect/disconnect, a fresh
+    // playlist fetch, a new selection).
+    auto refreshSpotifyUi = [this]()
+    {
+        if (ribbonMenu == nullptr)
+            return;
+        auto& prefs = UserPreferences::getInstance();
+        ribbonMenu->setBackgroundSource (prefs.getBackgroundMusicSource());
+        ribbonMenu->setSpotifyClientId (prefs.getSpotifyClientId());
+
+        if (! SpotifyService::getInstance().isConnected())
+        {
+            ribbonMenu->setSpotifyState (false, {}, {}, {});
+            return;
+        }
+
+        const auto accountName = prefs.getSpotifyAccountName();
+        const auto selectedUri = prefs.getSpotifySelectedPlaylistUri();
+        juce::Component::SafePointer<MainComponent> safe (this);
+        SpotifyService::getInstance().fetchPlaylists (
+            [safe, accountName, selectedUri] (bool ok, std::vector<SpotifyService::PlaylistInfo> playlists, juce::String err)
+            {
+                if (safe == nullptr || safe->ribbonMenu == nullptr)
+                    return;
+                if (! ok)
+                    DBG ("[Spotify] fetchPlaylists failed: " << err);
+                safe->ribbonMenu->setSpotifyState (true, accountName, playlists, selectedUri);
+            });
+    };
+
+    ribbonMenu->onBackgroundSourceChanged = [this, refreshSpotifyUi](juce::String source)
+    {
+        UserPreferences::getInstance().setBackgroundMusicSource (source);
+        // Switching away from whichever source was playing doesn't stop it
+        // automatically -- matches how switching Local Folder paths never
+        // auto-stops what's currently playing either; the host uses the
+        // transport controls (now pointed at the new source) to manage it.
+        refreshSpotifyUi();
+    };
+
+    ribbonMenu->onSpotifyClientIdChanged = [this](juce::String clientId)
+    {
+        UserPreferences::getInstance().setSpotifyClientId (clientId);
+    };
+
+    ribbonMenu->onSpotifyConnectRequested = [this, refreshSpotifyUi]()
+    {
+        const auto clientId = UserPreferences::getInstance().getSpotifyClientId();
+        juce::Component::SafePointer<MainComponent> safe (this);
+        SpotifyService::getInstance().connect (clientId,
+            [safe, refreshSpotifyUi] (bool ok, juce::String accountName, juce::String error)
+            {
+                if (safe == nullptr) return;
+                if (ok)
+                    UserPreferences::getInstance().setSpotifyAccountName (accountName);
+                else
+                    DBG ("[Spotify] connect failed: " << error);
+                refreshSpotifyUi();
+            });
+    };
+
+    ribbonMenu->onSpotifyDisconnectRequested = [this, refreshSpotifyUi]()
+    {
+        SpotifyService::getInstance().disconnect();
+        refreshSpotifyUi();
+    };
+
+    ribbonMenu->onSpotifyPlaylistsRefreshRequested = [refreshSpotifyUi]()
+    {
+        refreshSpotifyUi();
+    };
+
+    ribbonMenu->onSpotifyPlaylistSelected = [this](juce::String uri, juce::String name)
+    {
+        UserPreferences::getInstance().setSpotifySelectedPlaylist (uri, name);
+        SpotifyService::getInstance().playPlaylist (uri,
+            [] (bool ok, juce::String error)
+            {
+                if (! ok) DBG ("[Spotify] playPlaylist failed: " << error);
+            });
+    };
+
+    refreshSpotifyUi();
+
     ribbonMenu->onLyricToggleWindow = [this]()
     {
         if (lyricWindow_ == nullptr)
@@ -1192,10 +1305,49 @@ void MainComponent::setupUI()
                                                prefs.getIntroScript(),
                                                prefs.getIntroVoiceId(),
                                                prefs.getIntroMusicFilename(),
-                                               getAvailableIntroMusicTracks());
+                                               getAvailableIntroMusicTracks(),
+                                               prefs.getSavedIntros(),
+                                               prefs.getSelectedIntroId());
     };
 
-    ribbonMenu->onIntroGenerateRequested = [this, refreshIntroConfigUi](juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)
+    // One-time migration: a pre-existing single cached intro from before
+    // this app supported a saved-intros library becomes the first entry
+    // in that library (and gets selected), rather than silently vanishing.
+    {
+        auto& prefs = UserPreferences::getInstance();
+        if (prefs.getSavedIntros().empty())
+        {
+            const auto legacyFile = IntroVoiceService::getLegacyCachedIntroFile();
+            if (legacyFile.existsAsFile())
+            {
+                UserPreferences::SavedIntro migrated;
+                migrated.id             = legacyFile.getFileNameWithoutExtension();
+                migrated.label          = "Imported intro";
+                migrated.fileName       = legacyFile.getFileName();
+                migrated.script         = prefs.getIntroScript();
+                migrated.voiceId        = prefs.getIntroVoiceId();
+                migrated.musicFilename  = prefs.getIntroMusicFilename();
+                migrated.createdAtMs    = legacyFile.getLastModificationTime().toMilliseconds();
+                prefs.addSavedIntro (migrated);
+                prefs.setSelectedIntroId (migrated.id);
+            }
+        }
+    }
+
+    // Resolves a saved intro's stored filename back into a real File, or
+    // an invalid File if that id isn't in the list (e.g. already deleted).
+    auto resolveSavedIntroFile = [] (const juce::String& id) -> juce::File
+    {
+        if (id.isEmpty())
+            return {};
+        for (auto& s : UserPreferences::getInstance().getSavedIntros())
+            if (s.id == id)
+                return IntroVoiceService::getGeneratedDirectory().getChildFile (s.fileName);
+        return {};
+    };
+
+    ribbonMenu->onIntroGenerateRequested = [this, refreshIntroConfigUi](juce::String apiKey, juce::String script, juce::String voiceId,
+                                                                        juce::File musicFile, juce::String introName)
     {
         const juce::String venueName = activeVenueName_.isNotEmpty() ? activeVenueName_ : juce::String("the venue");
         const juce::String hostName = juce::String(HostService::getInstance().getCurrent().stageName);
@@ -1210,22 +1362,68 @@ void MainComponent::setupUI()
         prefs.setIntroVoiceId(voiceId);
         prefs.setIntroMusicFilename(musicFile.getFileName());
 
+        const auto label = introName.trim().isNotEmpty() ? introName.trim()
+            : ("Intro - " + juce::Time::getCurrentTime().toString(true, true, false, true));
+
         juce::Component::SafePointer<MainComponent> safe(this);
         IntroVoiceService::getInstance().generateAndCache(apiKey, substitutedScript, voiceId, musicFile,
-            [safe, refreshIntroConfigUi](bool ok, juce::String error)
+            [safe, refreshIntroConfigUi, label, script, voiceId, musicFile](bool ok, juce::File generatedFile, juce::String error)
             {
                 if (safe == nullptr) return;
+
+                if (ok)
+                {
+                    UserPreferences::SavedIntro saved;
+                    saved.id             = generatedFile.getFileNameWithoutExtension();
+                    saved.label          = label;
+                    saved.fileName       = generatedFile.getFileName();
+                    saved.script         = script;
+                    saved.voiceId        = voiceId;
+                    saved.musicFilename  = musicFile.getFileName();
+                    saved.createdAtMs    = juce::Time::getCurrentTime().toMilliseconds();
+
+                    auto& p = UserPreferences::getInstance();
+                    p.addSavedIntro (saved);
+                    p.setSelectedIntroId (saved.id);
+                }
+
                 if (safe->ribbonMenu) safe->ribbonMenu->reportIntroGenerationResult(ok, error);
                 refreshIntroConfigUi();
 
                 if (ok && safe->bgPlayer_ != nullptr)
-                    safe->bgPlayer_->playOneShotIntro(IntroVoiceService::getCachedIntroFile(), nullptr);
+                    safe->bgPlayer_->playOneShotIntro(generatedFile, nullptr);
             });
     };
 
     ribbonMenu->onIntroApiKeyChanged = [](juce::String apiKey)
     {
         UserPreferences::getInstance().setElevenLabsApiKey(apiKey);
+    };
+
+    ribbonMenu->onSavedIntroSelected = [this](juce::String id)
+    {
+        UserPreferences::getInstance().setSelectedIntroId(id);
+    };
+
+    ribbonMenu->onSavedIntroPreviewRequested = [this, resolveSavedIntroFile](juce::String id)
+    {
+        const auto file = resolveSavedIntroFile(id);
+        if (file.existsAsFile() && bgPlayer_ != nullptr)
+            bgPlayer_->playOneShotIntro(file, nullptr);
+    };
+
+    ribbonMenu->onSavedIntroDeleteRequested = [this, refreshIntroConfigUi, resolveSavedIntroFile](juce::String id)
+    {
+        const auto file = resolveSavedIntroFile(id);
+        if (file.existsAsFile())
+            file.deleteFile();
+
+        auto& prefs = UserPreferences::getInstance();
+        prefs.deleteSavedIntro(id);
+        if (prefs.getSelectedIntroId() == id)
+            prefs.setSelectedIntroId({});
+
+        refreshIntroConfigUi();
     };
 
     refreshIntroConfigUi();
@@ -2705,6 +2903,9 @@ void MainComponent::setupUI()
             true);
     };
 
+    queueBar->onRotateBack    = [this]() { rotateQueueManually(false); };
+    queueBar->onRotateForward = [this]() { rotateQueueManually(true); };
+
     // ── Song dropped from Search results onto a singer row ────────────────────
     // Bypasses SongSelectionDialog entirely (no version/pitch picker) --
     // defaults to the song's first version and no pitch shift, matching a
@@ -3212,6 +3413,37 @@ void MainComponent::timerCallback()
     updateDebugInfo();
     updateAudioStatusIndicator();
     runSongbookHealthCheckIfReady();
+
+    // Spotify playback state needs polling (no push notifications from
+    // their Web API) -- throttled to ~3s, matching RequestService's
+    // cadence, since this is a real network call and this timer itself
+    // runs at 20Hz for everything else.
+    if (ribbonMenu != nullptr && ! spotifyPollInFlight_
+        && UserPreferences::getInstance().getBackgroundMusicSource() == "spotify"
+        && SpotifyService::getInstance().isConnected())
+    {
+        const auto nowMs = juce::Time::currentTimeMillis();
+        if (nowMs - lastSpotifyPollMs_ >= 3000)
+        {
+            lastSpotifyPollMs_ = nowMs;
+            spotifyPollInFlight_ = true;
+            juce::Component::SafePointer<MainComponent> safe (this);
+            SpotifyService::getInstance().getPlaybackState (
+                [safe] (bool ok, SpotifyService::PlaybackState state, juce::String error)
+                {
+                    if (safe == nullptr) return;
+                    safe->spotifyPollInFlight_ = false;
+                    if (! ok) { DBG ("[Spotify] getPlaybackState failed: " << error); return; }
+                    if (safe->ribbonMenu == nullptr) return;
+
+                    safe->ribbonMenu->setBackgroundState (state.isPlaying, state.volumePercent / 100.0f);
+                    safe->ribbonMenu->setBackgroundTrackInfo (
+                        state.hasActiveDevice ? (state.trackName + (state.artistName.isNotEmpty() ? " -- " + state.artistName : juce::String()))
+                                              : juce::String(),
+                        state.positionSeconds, state.durationSeconds);
+                });
+        }
+    }
 
     if (audioEngine == nullptr)
         return;
@@ -4359,6 +4591,43 @@ bool MainComponent::queueAndLoadNextSingerSong(bool autoStartAfterLoad,
     return false;
 }
 
+void MainComponent::rotateQueueManually(bool forward)
+{
+    if (queueBar == nullptr)
+        return;
+
+    auto rr = QueueRotation::sortByStableOrder(queueBar->getSingers());
+    if (rr.size() < 2)
+        return;
+
+    const auto anchorId = QueueRotation::findAnchorId(rr);
+    QueueRotation::stampDerivedRanks(rr, anchorId);
+
+    int anchorOrder = -1;
+    for (auto& s : rr)
+        if (s.rotationOrder == 0) { anchorOrder = s.order; break; }
+    if (anchorOrder < 0)
+        return;
+
+    const auto newAnchorId = forward
+        ? QueueRotation::advanceAnchor(rr, anchorOrder)
+        : QueueRotation::retreatAnchor(rr, anchorOrder);
+    if (newAnchorId.isEmpty())
+        return;
+
+    QueueRotation::stampDerivedRanks(rr, newAnchorId);
+    queueBar->setSingers(QueueRotation::deriveDisplayQueue(rr, newAnchorId));
+
+    const auto venueId = activeVenueId_;
+    if (! venueId.isEmpty())
+        QueueService::getInstance().persistSingerOrder(venueId, rr,
+            [](bool ok, juce::String err)
+            {
+                if (! ok)
+                    DBG("[Queue] rotateQueueManually persistSingerOrder failed: " << err);
+            });
+}
+
 std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singers>& queueSingers) const
 {
     std::vector<Singers> merged = queueSingers;
@@ -4548,18 +4817,25 @@ void MainComponent::refreshRibbonState()
     if (ribbonMenu == nullptr)
         return;
 
-    // Background music state comes from the independent bgPlayer_, not the karaoke engine.
-    if (bgPlayer_ != nullptr)
+    // Background music state comes from the independent bgPlayer_, not the
+    // karaoke engine -- except when Spotify is the active source, in which
+    // case the ~3s poll in timerCallback() drives these same two calls
+    // instead, and pushing bgPlayer_'s (irrelevant) state here would just
+    // fight it.
+    if (UserPreferences::getInstance().getBackgroundMusicSource() != "spotify")
     {
-        ribbonMenu->setBackgroundState(bgPlayer_->isPlaying(), bgPlayer_->getVolume());
-        ribbonMenu->setBackgroundTrackInfo(bgPlayer_->getCurrentTrackName(),
-                                           bgPlayer_->getCurrentPosition(),
-                                           bgPlayer_->getTotalLength());
-    }
-    else
-    {
-        ribbonMenu->setBackgroundState(false, 0.5f);
-        ribbonMenu->setBackgroundTrackInfo({}, 0.0, 0.0);
+        if (bgPlayer_ != nullptr)
+        {
+            ribbonMenu->setBackgroundState(bgPlayer_->isPlaying(), bgPlayer_->getVolume());
+            ribbonMenu->setBackgroundTrackInfo(bgPlayer_->getCurrentTrackName(),
+                                               bgPlayer_->getCurrentPosition(),
+                                               bgPlayer_->getTotalLength());
+        }
+        else
+        {
+            ribbonMenu->setBackgroundState(false, 0.5f);
+            ribbonMenu->setBackgroundTrackInfo({}, 0.0, 0.0);
+        }
     }
 
     ribbonMenu->setLyricPreviewFile(currentRibbonCdgFile_);
@@ -4612,7 +4888,15 @@ void MainComponent::startTheNight()
     nightStarted_ = true;
     if (ribbonMenu) ribbonMenu->setNightStarted (true);
 
-    const auto introFile = IntroVoiceService::getCachedIntroFile();
+    // Plays whichever saved intro the host picked in the config panel
+    // (UserPreferences::getSelectedIntroId()), not just "the last one
+    // generated" -- a host can keep several around and switch between them.
+    juce::File introFile;
+    const auto selectedIntroId = UserPreferences::getInstance().getSelectedIntroId();
+    if (selectedIntroId.isNotEmpty())
+        for (auto& s : UserPreferences::getInstance().getSavedIntros())
+            if (s.id == selectedIntroId)
+                introFile = IntroVoiceService::getGeneratedDirectory().getChildFile (s.fileName);
 
     if (bgPlayer_ != nullptr && introFile.existsAsFile())
     {

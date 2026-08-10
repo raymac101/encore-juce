@@ -118,6 +118,7 @@ target_sources(EncoreJUCE
         Source/Services/SongbookStorageService.cpp
         Source/Services/SfxLibraryService.cpp
         Source/Services/IntroVoiceService.cpp
+        Source/Services/SpotifyService.cpp
         Source/Services/VenueSessionService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp

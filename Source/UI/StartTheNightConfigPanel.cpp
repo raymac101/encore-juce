@@ -28,6 +28,33 @@ StartTheNightConfigPanel::StartTheNightConfigPanel()
         l.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
     };
 
+    initLabel (savedIntrosLabel_, lm.getText ("ribbon.intro.saved_label"));
+    addAndMakeVisible (savedIntrosCombo_);
+    savedIntrosCombo_.onChange = [this]
+    {
+        const int id = savedIntrosCombo_.getSelectedId();
+        if (id > 0 && id <= (int) savedIntroIds_.size() && onSavedIntroSelected)
+            onSavedIntroSelected (savedIntroIds_[(size_t) (id - 1)]);
+    };
+
+    addAndMakeVisible (previewSavedButton_);
+    previewSavedButton_.setButtonText (lm.getText ("ribbon.intro.preview"));
+    previewSavedButton_.onClick = [this]
+    {
+        const int id = savedIntrosCombo_.getSelectedId();
+        if (id > 0 && id <= (int) savedIntroIds_.size() && onSavedIntroPreviewRequested)
+            onSavedIntroPreviewRequested (savedIntroIds_[(size_t) (id - 1)]);
+    };
+
+    addAndMakeVisible (deleteSavedButton_);
+    deleteSavedButton_.setButtonText (lm.getText ("ribbon.intro.delete"));
+    deleteSavedButton_.onClick = [this]
+    {
+        const int id = savedIntrosCombo_.getSelectedId();
+        if (id > 0 && id <= (int) savedIntroIds_.size() && onSavedIntroDeleteRequested)
+            onSavedIntroDeleteRequested (savedIntroIds_[(size_t) (id - 1)]);
+    };
+
     initLabel (apiKeyLabel_, lm.getText ("ribbon.intro.api_key_label"));
     addAndMakeVisible (apiKeyEditor_);
     apiKeyEditor_.setPasswordCharacter ((juce::juce_wchar) 0x2022);
@@ -60,6 +87,10 @@ StartTheNightConfigPanel::StartTheNightConfigPanel()
     addAndMakeVisible (musicCombo_);
     musicCombo_.onChange = [this] { updateGenerateButtonEnabled(); };
 
+    initLabel (introNameLabel_, lm.getText ("ribbon.intro.name_label"));
+    addAndMakeVisible (introNameEditor_);
+    introNameEditor_.setTextToShowWhenEmpty (lm.getText ("ribbon.intro.name_placeholder"), kText.withAlpha (0.5f));
+
     addAndMakeVisible (generateButton_);
     generateButton_.setButtonText (lm.getText ("ribbon.intro.generate"));
     generateButton_.onClick = [this]
@@ -77,7 +108,8 @@ StartTheNightConfigPanel::StartTheNightConfigPanel()
         onGenerateRequested (apiKeyEditor_.getText(),
                             scriptEditor_.getText(),
                             voiceCombo_.getSelectedId() > 0 ? voiceIds_[(size_t) (voiceCombo_.getSelectedId() - 1)] : juce::String(),
-                            availableMusicFiles_[(size_t) (musicId - 1)]);
+                            availableMusicFiles_[(size_t) (musicId - 1)],
+                            introNameEditor_.getText().trim());
     };
 
     addAndMakeVisible (statusLabel_);
@@ -93,10 +125,37 @@ void StartTheNightConfigPanel::setInitialState (const juce::String& apiKey,
                                                 const juce::String& script,
                                                 const juce::String& voiceId,
                                                 const juce::String& selectedMusicFilename,
-                                                const std::vector<juce::File>& availableMusicFiles)
+                                                const std::vector<juce::File>& availableMusicFiles,
+                                                const std::vector<UserPreferences::SavedIntro>& savedIntros,
+                                                const juce::String& selectedIntroId)
 {
     apiKeyEditor_.setText (apiKey, juce::dontSendNotification);
     scriptEditor_.setText (script, juce::dontSendNotification);
+
+    auto& lmSaved = LocalizationManager::getInstance();
+    savedIntroIds_.clear();
+    savedIntrosCombo_.clear (juce::dontSendNotification);
+    if (savedIntros.empty())
+    {
+        savedIntrosCombo_.addItem (lmSaved.getText ("ribbon.intro.no_saved_intros"), 1);
+        savedIntrosCombo_.setItemEnabled (1, false);
+        savedIntrosCombo_.setSelectedId (1, juce::dontSendNotification);
+    }
+    else
+    {
+        int selectedId = 0;
+        for (int i = 0; i < (int) savedIntros.size(); ++i)
+        {
+            savedIntroIds_.push_back (savedIntros[(size_t) i].id);
+            savedIntrosCombo_.addItem (savedIntros[(size_t) i].label, i + 1);
+            if (savedIntros[(size_t) i].id == selectedIntroId)
+                selectedId = i + 1;
+        }
+        savedIntrosCombo_.setSelectedId (selectedId, juce::dontSendNotification);
+    }
+    const bool hasSaved = ! savedIntros.empty();
+    previewSavedButton_.setEnabled (hasSaved);
+    deleteSavedButton_.setEnabled (hasSaved);
 
     availableMusicFiles_ = availableMusicFiles;
     musicCombo_.clear (juce::dontSendNotification);
@@ -213,6 +272,12 @@ void StartTheNightConfigPanel::reportGenerationResult (bool ok, const juce::Stri
     statusLabel_.setText (ok ? lm.getText ("ribbon.intro.generate_success")
                              : (lm.getText ("ribbon.intro.generate_failed") + " " + error),
                           juce::dontSendNotification);
+
+    // Ready for the next one -- setInitialState() (called right after this,
+    // from MainComponent's refresh) will repopulate the saved-intros list
+    // with the one we just added.
+    if (ok)
+        introNameEditor_.setText ({}, juce::dontSendNotification);
 }
 
 void StartTheNightConfigPanel::resized()
@@ -220,6 +285,15 @@ void StartTheNightConfigPanel::resized()
     auto area = getLocalBounds().reduced (4);
     constexpr int rowH = 26;
     constexpr int gap = 6;
+
+    auto savedRow = area.removeFromTop (rowH);
+    savedIntrosLabel_.setBounds (savedRow.removeFromLeft (90));
+    deleteSavedButton_.setBounds (savedRow.removeFromRight (70));
+    savedRow.removeFromRight (6);
+    previewSavedButton_.setBounds (savedRow.removeFromRight (70));
+    savedRow.removeFromRight (6);
+    savedIntrosCombo_.setBounds (savedRow);
+    area.removeFromTop (gap);
 
     auto apiRow = area.removeFromTop (rowH);
     apiKeyLabel_.setBounds (apiRow.removeFromLeft (90));
@@ -241,6 +315,11 @@ void StartTheNightConfigPanel::resized()
     auto musicRow = area.removeFromTop (rowH);
     musicLabel_.setBounds (musicRow.removeFromLeft (90));
     musicCombo_.setBounds (musicRow);
+    area.removeFromTop (gap);
+
+    auto nameRow = area.removeFromTop (rowH);
+    introNameLabel_.setBounds (nameRow.removeFromLeft (90));
+    introNameEditor_.setBounds (nameRow);
     area.removeFromTop (gap);
 
     auto genRow = area.removeFromTop (rowH);

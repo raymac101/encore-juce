@@ -99,7 +99,7 @@ juce::File IntroVoiceService::getGeneratedDirectory()
     return dir;
 }
 
-juce::File IntroVoiceService::getCachedIntroFile()
+juce::File IntroVoiceService::getLegacyCachedIntroFile()
 {
     auto file = getGeneratedDirectory().getChildFile ("intro-mixed.wav");
     return file.existsAsFile() ? file : juce::File();
@@ -166,14 +166,14 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
                                           const juce::String& scriptText,
                                           const juce::String& voiceId,
                                           const juce::File& introMusicFile,
-                                          std::function<void (bool, juce::String)> onDone)
+                                          std::function<void (bool, juce::File, juce::String)> onDone)
 {
     juce::Thread::launch ([apiKey, scriptText, voiceId, introMusicFile, onDone]
     {
         auto fail = [&onDone] (const juce::String& error)
         {
             if (onDone)
-                juce::MessageManager::callAsync ([onDone, error] { onDone (false, error); });
+                juce::MessageManager::callAsync ([onDone, error] { onDone (false, {}, error); });
         };
 
         if (apiKey.isEmpty() || scriptText.isEmpty() || voiceId.isEmpty())
@@ -313,8 +313,10 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
                 d[i] = juce::jlimit (-1.0f, 1.0f, d[i]);
         }
 
-        // 3) Write the combined file, overwriting any previous cache.
-        const auto destFile = getGeneratedDirectory().getChildFile ("intro-mixed.wav");
+        // 3) Write the combined file under a unique name -- every generation
+        // is kept as its own saved intro, never overwriting a previous one.
+        const auto destFile = getGeneratedDirectory().getChildFile (
+            "intro-" + juce::String (juce::Time::getCurrentTime().toMilliseconds()) + ".wav");
         if (! writeBufferToWav (combined, sampleRate, destFile))
         {
             fail ("Could not write the mixed intro file.");
@@ -322,6 +324,6 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
         }
 
         if (onDone)
-            juce::MessageManager::callAsync ([onDone] { onDone (true, {}); });
+            juce::MessageManager::callAsync ([onDone, destFile] { onDone (true, destFile, {}); });
     });
 }

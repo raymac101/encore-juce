@@ -224,6 +224,36 @@ RibbonMenu::RibbonMenu()
         if (onBackgroundUseDefaultRequested)
             onBackgroundUseDefaultRequested();
     };
+    bgLibraryPanel_->onSourceChanged = [this] (juce::String source)
+    {
+        if (onBackgroundSourceChanged)
+            onBackgroundSourceChanged (source);
+    };
+    bgLibraryPanel_->onSpotifyClientIdChanged = [this] (juce::String clientId)
+    {
+        if (onSpotifyClientIdChanged)
+            onSpotifyClientIdChanged (clientId);
+    };
+    bgLibraryPanel_->onSpotifyConnectRequested = [this]
+    {
+        if (onSpotifyConnectRequested)
+            onSpotifyConnectRequested();
+    };
+    bgLibraryPanel_->onSpotifyDisconnectRequested = [this]
+    {
+        if (onSpotifyDisconnectRequested)
+            onSpotifyDisconnectRequested();
+    };
+    bgLibraryPanel_->onSpotifyPlaylistsRefreshRequested = [this]
+    {
+        if (onSpotifyPlaylistsRefreshRequested)
+            onSpotifyPlaylistsRefreshRequested();
+    };
+    bgLibraryPanel_->onSpotifyPlaylistSelected = [this] (juce::String uri, juce::String name)
+    {
+        if (onSpotifyPlaylistSelected)
+            onSpotifyPlaylistSelected (uri, name);
+    };
 
     addAndMakeVisible (bgProgressSlider_);
     bgProgressSlider_.setSliderStyle (juce::Slider::LinearBar);
@@ -285,15 +315,31 @@ RibbonMenu::RibbonMenu()
 
     introConfigPanel_ = std::make_unique<StartTheNightConfigPanel>();
     addAndMakeVisible (*introConfigPanel_);
-    introConfigPanel_->onGenerateRequested = [this] (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)
+    introConfigPanel_->onGenerateRequested = [this] (juce::String apiKey, juce::String script, juce::String voiceId,
+                                                      juce::File musicFile, juce::String introName)
     {
         if (onIntroGenerateRequested)
-            onIntroGenerateRequested (apiKey, script, voiceId, musicFile);
+            onIntroGenerateRequested (apiKey, script, voiceId, musicFile, introName);
     };
     introConfigPanel_->onApiKeyChanged = [this] (juce::String apiKey)
     {
         if (onIntroApiKeyChanged)
             onIntroApiKeyChanged (apiKey);
+    };
+    introConfigPanel_->onSavedIntroSelected = [this] (juce::String id)
+    {
+        if (onSavedIntroSelected)
+            onSavedIntroSelected (id);
+    };
+    introConfigPanel_->onSavedIntroPreviewRequested = [this] (juce::String id)
+    {
+        if (onSavedIntroPreviewRequested)
+            onSavedIntroPreviewRequested (id);
+    };
+    introConfigPanel_->onSavedIntroDeleteRequested = [this] (juce::String id)
+    {
+        if (onSavedIntroDeleteRequested)
+            onSavedIntroDeleteRequested (id);
     };
 
     // Icons + onClick effectNames are data-driven from UserPreferences (see
@@ -837,9 +883,12 @@ void RibbonMenu::setIntroConfigInitialState (const juce::String& apiKey,
                                              const juce::String& script,
                                              const juce::String& voiceId,
                                              const juce::String& selectedMusicFilename,
-                                             const std::vector<juce::File>& availableMusicFiles)
+                                             const std::vector<juce::File>& availableMusicFiles,
+                                             const std::vector<UserPreferences::SavedIntro>& savedIntros,
+                                             const juce::String& selectedIntroId)
 {
-    introConfigPanel_->setInitialState (apiKey, script, voiceId, selectedMusicFilename, availableMusicFiles);
+    introConfigPanel_->setInitialState (apiKey, script, voiceId, selectedMusicFilename, availableMusicFiles,
+                                        savedIntros, selectedIntroId);
 }
 
 void RibbonMenu::reportIntroGenerationResult (bool ok, const juce::String& error)
@@ -856,6 +905,23 @@ void RibbonMenu::setBackgroundAvailableTracks (const std::vector<juce::File>& tr
                                                const juce::StringArray& selectedFilenames)
 {
     bgLibraryPanel_->setTracks (tracks, selectedFilenames);
+}
+
+void RibbonMenu::setBackgroundSource (const juce::String& source)
+{
+    bgLibraryPanel_->setSource (source);
+}
+
+void RibbonMenu::setSpotifyState (bool connected, const juce::String& accountName,
+                                  const std::vector<SpotifyService::PlaylistInfo>& playlists,
+                                  const juce::String& selectedUri)
+{
+    bgLibraryPanel_->setSpotifyState (connected, accountName, playlists, selectedUri);
+}
+
+void RibbonMenu::setSpotifyClientId (const juce::String& clientId)
+{
+    bgLibraryPanel_->setSpotifyClientId (clientId);
 }
 
 void RibbonMenu::setSfxVolume (float volume01)

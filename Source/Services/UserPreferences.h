@@ -174,6 +174,37 @@ public:
     juce::StringArray getBackgroundMusicSelectedTracks() const;
     void setBackgroundMusicSelectedTracks(const juce::StringArray& filenames);
 
+    //--- Background music source (Ribbon > Background Music, full-screen) -----
+    // "local" (default, zero-surprise on upgrade) or "spotify". See
+    // Source/Services/SpotifyService.h -- Spotify is remote-controlled, not
+    // played through this app's own audio engine.
+    juce::String getBackgroundMusicSource() const;
+    void setBackgroundMusicSource(const juce::String& source);
+
+    // One-time setup: the Client ID from the host's own Spotify Developer
+    // app (developer.spotify.com). Per-machine, same convention as the
+    // ElevenLabs API key below.
+    juce::String getSpotifyClientId() const;
+    void setSpotifyClientId(const juce::String& clientId);
+
+    // OAuth refresh token -- same security posture as the ElevenLabs API key
+    // (this file, not additionally encrypted). Empty means not connected.
+    juce::String getSpotifyRefreshToken() const;
+    void setSpotifyRefreshToken(const juce::String& refreshToken);
+
+    // Cached from connect()'s successful result purely so the "Connected
+    // as ..." status can be shown on every UI refresh without an extra
+    // GET /me call each time.
+    juce::String getSpotifyAccountName() const;
+    void setSpotifyAccountName(const juce::String& name);
+
+    // The host's chosen playlist to start when switching to/selecting
+    // Spotify as the source. Name is cached alongside the URI purely so the
+    // picker can show it without a network round-trip.
+    juce::String getSpotifySelectedPlaylistUri() const;
+    juce::String getSpotifySelectedPlaylistName() const;
+    void setSpotifySelectedPlaylist(const juce::String& uri, const juce::String& name);
+
     //--- "Start the Night" AI voice intro (Ribbon > Next Singer, full-screen) --
     // All per-machine, same as every other host preference above -- each
     // host supplies their own TTS provider API key.
@@ -194,6 +225,31 @@ public:
     // if none chosen yet.
     juce::String getIntroMusicFilename() const;
     void setIntroMusicFilename(const juce::String& filename);
+
+    // One entry per successful IntroVoiceService::generateAndCache() call --
+    // a host can build up a small library of intros and pick which one
+    // "Start the Night" plays (see getSelectedIntroId() below), rather than
+    // every generation overwriting the last.
+    struct SavedIntro
+    {
+        juce::String id;             // stable, timestamp-based
+        juce::String label;          // host-chosen display name
+        juce::String fileName;       // under IntroVoiceService::getGeneratedDirectory()
+        juce::String script;         // as generated (placeholders already substituted)
+        juce::String voiceId;
+        juce::String musicFilename;
+        juce::int64  createdAtMs = 0;
+    };
+
+    // Newest first.
+    std::vector<SavedIntro> getSavedIntros() const;
+    void addSavedIntro(const SavedIntro& intro);
+    void deleteSavedIntro(const juce::String& id);
+
+    // Which saved intro (by id) "Start the Night" plays. Empty if none
+    // selected yet, or if the selected one was since deleted.
+    juce::String getSelectedIntroId() const;
+    void setSelectedIntroId(const juce::String& id);
 
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):

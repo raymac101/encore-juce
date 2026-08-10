@@ -431,6 +431,30 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
         const auto collPath = "venues/" + venueId + "/queue";
         auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
 
+        // Only one host can be signed in at a time. If some *other* auth UID's
+        // doc is still flagged isHost -- e.g. left over from a previous login
+        // on this device that was never explicitly logged out before this one
+        // signed in -- remove it now, so the new host fully replaces the old
+        // one instead of both showing up as "host" side by side.
+        for (auto& d : docs)
+        {
+            const auto fullName = d.getProperty("name", "").toString();
+            const auto docId = fullName.fromLastOccurrenceOf("/", false, false).trim();
+            if (docId.equalsIgnoreCase(authUid))
+                continue;
+
+            auto fields = d.getProperty("fields", juce::var());
+            auto isHostField = fieldByName(fields, "isHost");
+            const bool wasHost = isHostField.hasProperty("booleanValue")
+                               && (bool) isHostField.getProperty("booleanValue", false);
+            if (! wasHost)
+                continue;
+
+            DBG ("[Queue] ensureHostQueueDoc: removing stale host doc '" << docId
+                 << "' (replaced by '" << authUid << "')");
+            FirestoreClient::getInstance().deleteDocument(relPathFromDocName(fullName));
+        }
+
         // If a doc already exists for this auth UID, nothing to do.
         auto existing = findSingerByDocId(docs, authUid);
         if (existing.docName.isEmpty())

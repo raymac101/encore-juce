@@ -141,6 +141,15 @@ private:
     std::unique_ptr<AudioEngine> audioEngine;
     std::unique_ptr<BackgroundMusicPlayer> bgPlayer_;
 
+    // Throttles SpotifyService::getPlaybackState polling (driven from the
+    // existing 20Hz timerCallback()) to roughly every 3s, matching
+    // RequestService's polling cadence -- a real network call, not
+    // something to run at timer frequency. Guarded against overlap since a
+    // slow response could otherwise still be in flight when the next poll
+    // would fire.
+    juce::int64 lastSpotifyPollMs_ = 0;
+    bool spotifyPollInFlight_ = false;
+
     // UI Components
     std::unique_ptr<TopBar> topBar;
     std::unique_ptr<BottomBar> bottomBar;
@@ -351,6 +360,13 @@ private:
     std::vector<Singers> composeQueueWithHost(const std::vector<Singers>& queueSingers) const;
     void syncLyricIdlePreview(const std::vector<Singers>& singers);
     void refreshRibbonState();
+
+    /** KJ manually moves the rotation anchor ("who's up next") one step
+        forward or backward, without anyone actually performing -- the RR
+        itself (`order`) is untouched, only `rotationOrder` (and thus the
+        displayed Queue order) changes. Wraps around at either end. No-op
+        if the queue has fewer than 2 singers. */
+    void rotateQueueManually(bool forward);
 
     /** "Start the Night" -- plays the cached AI-voice intro (if one has
         been generated) then starts the first queued singer's song exactly

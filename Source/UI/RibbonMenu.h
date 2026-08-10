@@ -19,6 +19,8 @@
 #include "SfxLibraryListPanel.h"
 #include "BackgroundMusicLibraryPanel.h"
 #include "StartTheNightConfigPanel.h"
+#include "../Services/UserPreferences.h"
+#include "../Services/SpotifyService.h"
 
 class AudioEngine;
 
@@ -73,6 +75,17 @@ public:
         change to the folder or the persisted selection. */
     void setBackgroundAvailableTracks (const std::vector<juce::File>& tracks,
                                        const juce::StringArray& selectedFilenames);
+
+    /** "local" or "spotify" -- forwarded to the full-screen library panel's
+        source toggle. */
+    void setBackgroundSource (const juce::String& source);
+
+    /** Forwarded to the full-screen library panel's Spotify section. */
+    void setSpotifyState (bool connected, const juce::String& accountName,
+                         const std::vector<SpotifyService::PlaylistInfo>& playlists,
+                         const juce::String& selectedUri);
+    void setSpotifyClientId (const juce::String& clientId);
+
     void setSfxVolume (float volume01);
     void setLyricWindowVisible (bool visible);
     void setLyricWindowFullScreen (bool fullScreen);
@@ -85,12 +98,15 @@ public:
     void setNightStarted (bool started);
 
     /** Seeds the intro config panel from persisted values + whatever's in
-        assets/music/ (the same folder background music draws from). */
+        assets/music/ (the same folder background music draws from) + the
+        saved-intros list and which one is currently selected. */
     void setIntroConfigInitialState (const juce::String& apiKey,
                                      const juce::String& script,
                                      const juce::String& voiceId,
                                      const juce::String& selectedMusicFilename,
-                                     const std::vector<juce::File>& availableMusicFiles);
+                                     const std::vector<juce::File>& availableMusicFiles,
+                                     const std::vector<UserPreferences::SavedIntro>& savedIntros,
+                                     const juce::String& selectedIntroId);
 
     /** Forwarded from MainComponent once IntroVoiceService::generateAndCache
         finishes. */
@@ -109,6 +125,15 @@ public:
     std::function<void (juce::File file)> onBackgroundPreviewRequested;
     std::function<void()> onBackgroundUseDefaultRequested;
 
+    // Forwarded from BackgroundMusicLibraryPanel -- see its own matching
+    // callbacks for what each one means.
+    std::function<void (juce::String source)> onBackgroundSourceChanged;
+    std::function<void (juce::String clientId)> onSpotifyClientIdChanged;
+    std::function<void()> onSpotifyConnectRequested;
+    std::function<void()> onSpotifyDisconnectRequested;
+    std::function<void()> onSpotifyPlaylistsRefreshRequested;
+    std::function<void (juce::String uri, juce::String name)> onSpotifyPlaylistSelected;
+
     std::function<void()> onLyricToggleWindow;
     std::function<void()> onLyricToggleFullscreen;
 
@@ -120,11 +145,19 @@ public:
         have. */
     std::function<void()> onStartTheNightRequested;
 
-    std::function<void (juce::String apiKey, juce::String script, juce::String voiceId, juce::File musicFile)> onIntroGenerateRequested;
+    std::function<void (juce::String apiKey, juce::String script, juce::String voiceId,
+                        juce::File musicFile, juce::String introName)> onIntroGenerateRequested;
 
     /** Fired as soon as the ElevenLabs API key is worth persisting -- see
         StartTheNightConfigPanel::onApiKeyChanged. */
     std::function<void (juce::String apiKey)> onIntroApiKeyChanged;
+
+    /** Forwarded from StartTheNightConfigPanel -- see its own
+        onSavedIntroSelected / onSavedIntroPreviewRequested /
+        onSavedIntroDeleteRequested for what each one means. */
+    std::function<void (juce::String id)> onSavedIntroSelected;
+    std::function<void (juce::String id)> onSavedIntroPreviewRequested;
+    std::function<void (juce::String id)> onSavedIntroDeleteRequested;
 
     std::function<void(float volume01)> onSfxVolumeChanged;
     std::function<void(const juce::String& effectName)> onTriggerSfx;

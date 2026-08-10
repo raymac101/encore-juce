@@ -76,6 +76,14 @@ namespace QueueRotation
         if `rr` has fewer than 2 members. Does not mutate `rr`. */
     juce::String advanceAnchor(const std::vector<Singers>& rr, int departedOrder);
 
+    /** The mirror image of advanceAnchor(), for a KJ manually rotating the
+        queue backwards (no turn actually ended). `rr` must be sorted
+        host-first by stable order. Returns the id of whoever has the
+        next-lower `order` before `currentOrder`, wrapping around to the
+        highest existing `order` if nothing lower exists. Returns an empty
+        string if `rr` has fewer than 2 members. Does not mutate `rr`. */
+    juce::String retreatAnchor(const std::vector<Singers>& rr, int currentOrder);
+
     struct DragRemapResult
     {
         std::vector<Singers> newRR;   // Canonical order, host at [0].

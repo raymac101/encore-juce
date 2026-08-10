@@ -7,6 +7,7 @@
 */
 
 #include "UserPreferences.h"
+#include <algorithm>
 
 //==============================================================================
 UserPreferences& UserPreferences::getInstance()
@@ -623,6 +624,80 @@ void UserPreferences::setBackgroundMusicSelectedTracks(const juce::StringArray& 
     save();
 }
 
+juce::String UserPreferences::getBackgroundMusicSource() const
+{
+    const juce::ScopedLock sl(lock_);
+    const auto v = root_.getProperty("backgroundMusicSource", juce::var()).toString();
+    return v.isNotEmpty() ? v : juce::String("local");
+}
+
+void UserPreferences::setBackgroundMusicSource(const juce::String& source)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("backgroundMusicSource", source);
+    save();
+}
+
+juce::String UserPreferences::getSpotifyClientId() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("spotifyClientId", juce::var()).toString();
+}
+
+void UserPreferences::setSpotifyClientId(const juce::String& clientId)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("spotifyClientId", clientId);
+    save();
+}
+
+juce::String UserPreferences::getSpotifyRefreshToken() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("spotifyRefreshToken", juce::var()).toString();
+}
+
+void UserPreferences::setSpotifyRefreshToken(const juce::String& refreshToken)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("spotifyRefreshToken", refreshToken);
+    save();
+}
+
+juce::String UserPreferences::getSpotifyAccountName() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("spotifyAccountName", juce::var()).toString();
+}
+
+void UserPreferences::setSpotifyAccountName(const juce::String& name)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("spotifyAccountName", name);
+    save();
+}
+
+juce::String UserPreferences::getSpotifySelectedPlaylistUri() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("spotifySelectedPlaylistUri", juce::var()).toString();
+}
+
+juce::String UserPreferences::getSpotifySelectedPlaylistName() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("spotifySelectedPlaylistName", juce::var()).toString();
+}
+
+void UserPreferences::setSpotifySelectedPlaylist(const juce::String& uri, const juce::String& name)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* obj = asObj(root_);
+    obj->setProperty("spotifySelectedPlaylistUri", uri);
+    obj->setProperty("spotifySelectedPlaylistName", name);
+    save();
+}
+
 //==============================================================================
 juce::String UserPreferences::getElevenLabsApiKey() const
 {
@@ -677,6 +752,95 @@ void UserPreferences::setIntroMusicFilename(const juce::String& filename)
 {
     const juce::ScopedLock sl(lock_);
     asObj(root_)->setProperty("introMusicFilename", filename);
+    save();
+}
+
+std::vector<UserPreferences::SavedIntro> UserPreferences::getSavedIntros() const
+{
+    const juce::ScopedLock sl(lock_);
+    std::vector<SavedIntro> out;
+
+    auto arr = root_.getProperty("savedIntros", juce::var());
+    if (! arr.isArray())
+        return out;
+
+    for (int i = 0; i < arr.size(); ++i)
+    {
+        auto entry = arr[i];
+        SavedIntro s;
+        s.id             = entry.getProperty("id", "").toString();
+        s.label          = entry.getProperty("label", "").toString();
+        s.fileName       = entry.getProperty("fileName", "").toString();
+        s.script         = entry.getProperty("script", "").toString();
+        s.voiceId        = entry.getProperty("voiceId", "").toString();
+        s.musicFilename  = entry.getProperty("musicFilename", "").toString();
+        s.createdAtMs    = (juce::int64) entry.getProperty("createdAtMs", 0);
+
+        if (s.id.isNotEmpty() && s.fileName.isNotEmpty())
+            out.push_back(std::move(s));
+    }
+
+    // Newest first.
+    std::sort(out.begin(), out.end(), [](const SavedIntro& a, const SavedIntro& b)
+    {
+        return a.createdAtMs > b.createdAtMs;
+    });
+
+    return out;
+}
+
+void UserPreferences::addSavedIntro(const SavedIntro& intro)
+{
+    const juce::ScopedLock sl(lock_);
+
+    juce::Array<juce::var> arr;
+    auto existing = root_.getProperty("savedIntros", juce::var());
+    if (existing.isArray())
+        for (int i = 0; i < existing.size(); ++i)
+            arr.add(existing[i]);
+
+    juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+    obj->setProperty("id",             intro.id);
+    obj->setProperty("label",          intro.label);
+    obj->setProperty("fileName",       intro.fileName);
+    obj->setProperty("script",         intro.script);
+    obj->setProperty("voiceId",        intro.voiceId);
+    obj->setProperty("musicFilename",  intro.musicFilename);
+    obj->setProperty("createdAtMs",    intro.createdAtMs);
+    arr.add(juce::var(obj.get()));
+
+    asObj(root_)->setProperty("savedIntros", arr);
+    save();
+}
+
+void UserPreferences::deleteSavedIntro(const juce::String& id)
+{
+    const juce::ScopedLock sl(lock_);
+
+    juce::Array<juce::var> arr;
+    auto existing = root_.getProperty("savedIntros", juce::var());
+    if (existing.isArray())
+        for (int i = 0; i < existing.size(); ++i)
+        {
+            auto entry = existing[i];
+            if (entry.getProperty("id", "").toString() != id)
+                arr.add(entry);
+        }
+
+    asObj(root_)->setProperty("savedIntros", arr);
+    save();
+}
+
+juce::String UserPreferences::getSelectedIntroId() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("selectedIntroId", juce::var()).toString();
+}
+
+void UserPreferences::setSelectedIntroId(const juce::String& id)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("selectedIntroId", id);
     save();
 }
 

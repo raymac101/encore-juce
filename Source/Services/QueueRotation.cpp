@@ -138,6 +138,28 @@ namespace QueueRotation
         return identityKey(rr.front());
     }
 
+    juce::String retreatAnchor(const std::vector<Singers>& rr, int currentOrder)
+    {
+        if (rr.size() < 2)
+            return {};
+
+        int prevIndex = -1;
+        for (int i = 0; i < (int) rr.size(); ++i)
+        {
+            if (rr[(size_t) i].order >= currentOrder)
+                continue;
+            if (prevIndex < 0 || rr[(size_t) i].order > rr[(size_t) prevIndex].order)
+                prevIndex = i;
+        }
+
+        if (prevIndex >= 0)
+            return identityKey(rr[(size_t) prevIndex]);
+
+        // Nothing with a lower order -- wrap to the highest existing order
+        // (rr is host-first per sortByStableOrder, so that's rr.back()).
+        return identityKey(rr.back());
+    }
+
     DragRemapResult remapFromDisplayDrag(const std::vector<Singers>& displayedQueue,
                                          int fromIndex, int toIndex)
     {

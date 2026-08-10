@@ -125,6 +125,11 @@ public:
     std::function<void()>                 onCountdownFinished;        // delay countdown elapsed
     std::function<void()>                 onAddSinger;        // KJ manually adds a singer
 
+    // KJ manually moves the rotation anchor ("who's up next") without
+    // anyone performing -- see MainComponent::rotateQueueManually().
+    std::function<void()>                 onRotateBack;
+    std::function<void()>                 onRotateForward;
+
     // A song was dragged from the Search results list and dropped onto a
     // singer's row -- add it to that singer's queue. Wired by MainComponent
     // (owns activeVenueId_ / QueueService access), mirroring the other
@@ -276,6 +281,8 @@ private:
     std::unique_ptr<juce::Label>      totalTimeLabel;
     std::unique_ptr<juce::TextButton> clearQueueButton;
     std::unique_ptr<juce::TextButton> addSingerButton;
+    std::unique_ptr<juce::TextButton> rotateBackButton;
+    std::unique_ptr<juce::TextButton> rotateForwardButton;
     std::unique_ptr<juce::ToggleButton> queueToggle;
     std::unique_ptr<juce::ToggleButton> autoPlayToggle;
     std::unique_ptr<juce::Slider>     delaySlider;
@@ -326,7 +333,7 @@ private:
 
     static constexpr int venueHeaderHeight   = 56;
     static constexpr int nowPlayingHeight    = 100;
-    static constexpr int statusBarHeight     = 110;
+    static constexpr int statusBarHeight     = 138;
     static constexpr int singerRowHeight     = 64;
     static constexpr int expandedCardWidth   = 320;
     static constexpr int expandedCardHeight  = 84;

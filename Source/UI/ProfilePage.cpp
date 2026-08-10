@@ -170,29 +170,47 @@ public:
         content.removeFromLeft (20);
         auto rightColumn = content;
 
-        auto layoutField = [] (juce::Rectangle<int>& area, juce::Label& label, juce::Component& editor)
+        // Positioned by an always-advancing cursor rather than by shrinking
+        // leftColumn's own rectangle top-down: on the first layout pass (before
+        // the self-growing logic below has corrected the component's height),
+        // leftColumn can be shorter than everything it needs to hold. A
+        // shrinking rectangle silently clamps once it runs out of height --
+        // every field from that point on collapses to zero size at the same
+        // spot -- which then also hides the bug from the self-growing check,
+        // since it measures component bottoms that were themselves clamped.
+        // A cursor that just keeps advancing past leftColumn's nominal bottom
+        // always reports the true required height, so growth actually happens.
+        const int leftX = leftColumn.getX();
+        const int leftW = leftColumn.getWidth();
+        int y = leftColumn.getY();
+
+        auto layoutField = [&] (juce::Label& label, juce::TextEditor& editor)
         {
-            label.setBounds (area.removeFromTop (16));
-            editor.setBounds (area.removeFromTop (28).reduced (0, 2));
-            area.removeFromTop (10);
+            label.setBounds (leftX, y, leftW, 16);
+            y += 16;
+            editor.setBounds (leftX, y + 2, leftW, 28 - 4);
+            y += 28 + 10;
         };
 
-        layoutField (leftColumn, fullNameLabel_,  fullNameEditor_);
-        layoutField (leftColumn, emailLabel_,     emailEditor_);
-        layoutField (leftColumn, stageNameLabel_, stageNameEditor_);
-        layoutField (leftColumn, birthdayLabel_,  birthdayEditor_);
-        layoutField (leftColumn, countryLabel_,   countryEditor_);
-        layoutField (leftColumn, cityLabel_,      cityEditor_);
+        layoutField (fullNameLabel_,  fullNameEditor_);
+        layoutField (emailLabel_,     emailEditor_);
+        layoutField (stageNameLabel_, stageNameEditor_);
+        layoutField (birthdayLabel_,  birthdayEditor_);
+        layoutField (countryLabel_,   countryEditor_);
+        layoutField (cityLabel_,      cityEditor_);
 
-        genderLabel_.setBounds (leftColumn.removeFromTop (16));
-        genderBox_.setBounds (leftColumn.removeFromTop (28).withWidth (200));
-        leftColumn.removeFromTop (10);
+        genderLabel_.setBounds (leftX, y, leftW, 16);
+        y += 16;
+        genderBox_.setBounds (leftX, y, 200, 28);
+        y += 28 + 10;
 
-        roleLabel_.setBounds (leftColumn.removeFromTop (16));
-        roleValueLabel_.setBounds (leftColumn.removeFromTop (22));
-        leftColumn.removeFromTop (14);
+        roleLabel_.setBounds (leftX, y, leftW, 16);
+        y += 16;
+        roleValueLabel_.setBounds (leftX, y, leftW, 22);
+        y += 22 + 14;
 
-        saveButton_.setBounds (leftColumn.removeFromTop (34).withWidth (200));
+        saveButton_.setBounds (leftX, y, 200, 34);
+        y += 34;
 
         //--- Right column: avatar picker grid --------------------------------
         avatarSectionLabel_.setBounds (rightColumn.removeFromTop (20));
@@ -205,7 +223,15 @@ public:
             : (((int) avatarTiles_.size() + cols - 1) / cols);
         const int gridHeight = rows * (tileSize + gap);
 
-        avatarGridHolder_.setBounds (rightColumn.withHeight (juce::jmax (rightColumn.getHeight(), gridHeight)));
+        // Height is exactly gridHeight, deliberately NOT jmax'd against
+        // rightColumn.getHeight() -- rightColumn's height is itself derived
+        // from this component's OWN current getHeight(), so doing that made
+        // avatarGridHolder_'s measured bottom track getHeight() almost 1:1.
+        // Combined with the self-growing check below, that fed back on
+        // itself forever (each pass computing "needed" as a few pixels more
+        // than whatever it just grew to) instead of ever converging --
+        // a real infinite-recursion crash, not just a layout nitpick.
+        avatarGridHolder_.setBounds (rightColumn.withHeight (gridHeight));
 
         for (int i = 0; i < (int) avatarTiles_.size(); ++i)
         {
@@ -219,7 +245,11 @@ public:
         // field and every avatar tile, on any window size. Two-pass: the
         // second call sees an unchanged width, so this converges immediately
         // rather than looping.
-        const int neededHeight = juce::jmax (saveButton_.getBottom(), avatarGridHolder_.getBottom()) + 22;
+        // Bottom margin below the button matches the panel's left-edge inset
+        // (18px, from content.reduced(18, 14) below) so the whitespace reads
+        // as even on both sides -- the outer 22px panel border inset is
+        // already baked into getHeight(), so add 18 on top of that.
+        const int neededHeight = juce::jmax (saveButton_.getBottom(), avatarGridHolder_.getBottom()) + 22 + 18;
         const int neededWidth  = juce::jmax (getWidth(), kMinContentWidth);
         if (neededHeight != getHeight() || neededWidth != getWidth())
         {
@@ -358,10 +388,19 @@ private:
 
     void updateSaveButtonState()
     {
-        const bool valid = loaded_
-                         && fullNameEditor_.getText().trim().isNotEmpty()
-                         && looksLikeValidEmail (emailEditor_.getText().trim());
-        saveButton_.setEnabled (valid);
+        // Save silently staying disabled with no explanation is exactly
+        // what reads as "there's no Save button" -- surface *why* whenever
+        // it's disabled, instead of just disabling it.
+        juce::String reason;
+        if (loaded_ && fullNameEditor_.getText().trim().isEmpty())
+            reason = "Enter your full name to save.";
+        else if (loaded_ && ! looksLikeValidEmail (emailEditor_.getText().trim()))
+            reason = "Enter a valid email address to save.";
+
+        saveButton_.setEnabled (loaded_ && reason.isEmpty());
+
+        if (reason.isNotEmpty())
+            setStatus (reason, true);
     }
 
     void onSaveClicked()

@@ -878,6 +878,20 @@ QueueBar::QueueBar()
     addSingerButton->onClick = [this]() { if (onAddSinger) onAddSinger(); };
     addAndMakeVisible(*addSingerButton);
 
+    rotateBackButton = std::make_unique<juce::TextButton>(juce::CharPointer_UTF8("\xe2\x97\x80 Rotate"));
+    rotateBackButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
+    rotateBackButton->setColour(juce::TextButton::textColourOffId, accentColour);
+    rotateBackButton->setTooltip("Move the rotation back to the previous singer");
+    rotateBackButton->onClick = [this]() { if (onRotateBack) onRotateBack(); };
+    addAndMakeVisible(*rotateBackButton);
+
+    rotateForwardButton = std::make_unique<juce::TextButton>(juce::CharPointer_UTF8("Rotate \xe2\x96\xb6"));
+    rotateForwardButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
+    rotateForwardButton->setColour(juce::TextButton::textColourOffId, accentColour);
+    rotateForwardButton->setTooltip("Move the rotation forward to the next singer");
+    rotateForwardButton->onClick = [this]() { if (onRotateForward) onRotateForward(); };
+    addAndMakeVisible(*rotateForwardButton);
+
     countdownLabel = std::make_unique<juce::Label>("countdown", "");
     countdownLabel->setColour(juce::Label::textColourId, accentColour);
     countdownLabel->setFont(juce::Font(22.f).boldened());
@@ -962,6 +976,12 @@ void QueueBar::resized()
         auto row4Right = row4.withTrimmedLeft(2);
         clearQueueButton->setBounds(row4Left);
         addSingerButton->setBounds(row4Right);
+
+        auto row5 = statusArea.removeFromTop(28).reduced(8, 2);
+        auto row5Left  = row5.removeFromLeft(row5.getWidth() / 2 - 2);
+        auto row5Right = row5.withTrimmedLeft(2);
+        rotateBackButton->setBounds(row5Left);
+        rotateForwardButton->setBounds(row5Right);
 
         // Countdown label floats over the list area (set in resized, shown/hidden by state)
         countdownLabel->setBounds(0, venueHeaderHeight + nowPlayingHeight + 5,
@@ -1411,6 +1431,8 @@ void QueueBar::updateAllText()
     auto& lm = LocalizationManager::getInstance();
     nowSingingLabel->setText(lm.getText("queue.now_singing"), juce::dontSendNotification);
     clearQueueButton->setButtonText(lm.getText("queue.clear_queue"));
+    rotateBackButton->setButtonText(lm.getText("queue.rotate_back"));
+    rotateForwardButton->setButtonText(lm.getText("queue.rotate_forward"));
     queueToggle->setButtonText(lm.getText("queue.queue_label"));
     autoPlayToggle->setButtonText(lm.getText("queue.auto_play"));
     delayLabel->setText(lm.getText("queue.delay_label"), juce::dontSendNotification);
