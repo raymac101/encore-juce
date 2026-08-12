@@ -54,6 +54,14 @@ struct CdgSong
     bool isValid() const;
     juce::String getFormattedDuration() const;
 
+    /** True once the enrichment fields (art, duration, key, tempo, release
+        date, genres) have all been filled in -- either by LibraryScanner's
+        local metadata pass or a remote lookup. Mirrors (inverted) the
+        "needs remote metadata" check LibraryPage uses to decide which
+        songs to queue for a "Get Meta Data" fetch, and backs the Search
+        page's "Only songs with metadata" toggle. */
+    bool hasMetadata() const;
+
     /** Indices into version[]/code[]/rating[] etc., ordered by rating
         descending (highest-rated manufacturer's version first). Versions
         with no recorded rating sort as 0.0, i.e. last. Ties keep their

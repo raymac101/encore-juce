@@ -251,6 +251,12 @@ SearchPage::SearchPage()
     filterArtistBtn->onClick = [this]() { setFilterMode(FilterMode::Artist); };
     filterYearBtn->onClick   = [this]() { setFilterMode(FilterMode::Year);   };
     filterGenreBtn->onClick  = [this]() { setFilterMode(FilterMode::Genre);  };
+
+    // Independent toggle, not part of the FilterMode group above.
+    filterHasMetaBtn = makeFilterBtn(lm.getText("search.filter_has_meta"));
+    filterHasMetaBtn->setClickingTogglesState(true);
+    filterHasMetaBtn->onClick = [this]() { toggleMetadataFilter(); };
+
     updateFilterButtonColours();
 
     // A-Z letter buttons
@@ -434,6 +440,10 @@ void SearchPage::resized()
     {
         auto filterArea = controlsInner.removeFromTop(filterBarHeight).reduced(0, 2);
         int bw = 84;
+        // Independent toggle -- right-justified, separated from the
+        // mutually-exclusive All/Song/Artist/Year/Genre group on the left.
+        filterHasMetaBtn->setBounds(filterArea.removeFromRight(150).reduced(2, 0));
+
         filterAllBtn->setBounds(filterArea.removeFromLeft(bw).reduced(2, 0));
         filterSongBtn->setBounds(filterArea.removeFromLeft(bw).reduced(2, 0));
         filterArtistBtn->setBounds(filterArea.removeFromLeft(bw).reduced(2, 0));
@@ -556,7 +566,7 @@ void SearchPage::applySearch()
     filteredSongs.clear();
     for (auto& s : allSongs)
     {
-        if (matchesPartialSearch(query, s, filterMode))
+        if (matchesPartialSearch(query, s, filterMode) && (! onlyWithMetadata_ || s.hasMetadata()))
             filteredSongs.push_back(s);
     }
 
@@ -567,9 +577,12 @@ void SearchPage::applyLetterFilter(const juce::String& letter)
 {
     if (currentLetter == letter)
     {
-        // Toggle off – show all
+        // Toggle off – show all (still honoring the metadata toggle)
         currentLetter = "";
-        filteredSongs = allSongs;
+        filteredSongs.clear();
+        for (auto& s : allSongs)
+            if (! onlyWithMetadata_ || s.hasMetadata())
+                filteredSongs.push_back(s);
     }
     else
     {
@@ -579,6 +592,9 @@ void SearchPage::applyLetterFilter(const juce::String& letter)
 
         for (auto& s : allSongs)
         {
+            if (onlyWithMetadata_ && ! s.hasMetadata())
+                continue;
+
             juce::String firstChar;
             if (filterMode == FilterMode::Artist)
                 firstChar = juce::String(s.artistName).trimStart().substring(0, 1).toUpperCase();
@@ -629,6 +645,13 @@ void SearchPage::clearSearch()
 void SearchPage::setFilterMode(FilterMode mode)
 {
     filterMode = mode;
+    updateFilterButtonColours();
+    applySearch();
+}
+
+void SearchPage::toggleMetadataFilter()
+{
+    onlyWithMetadata_ = filterHasMetaBtn->getToggleState();
     updateFilterButtonColours();
     applySearch();
 }
@@ -772,6 +795,7 @@ void SearchPage::updateFilterButtonColours()
     setActive(filterArtistBtn.get(), filterMode == FilterMode::Artist);
     setActive(filterYearBtn.get(),   filterMode == FilterMode::Year);
     setActive(filterGenreBtn.get(),  filterMode == FilterMode::Genre);
+    setActive(filterHasMetaBtn.get(), onlyWithMetadata_);
 }
 
 void SearchPage::updateColumnHeaderText()
@@ -813,6 +837,7 @@ void SearchPage::updateAllText()
     filterArtistBtn->setButtonText(lm.getText("search.filter_artist"));
     filterYearBtn->setButtonText(lm.getText("search.filter_year"));
     filterGenreBtn->setButtonText(lm.getText("search.filter_genre"));
+    filterHasMetaBtn->setButtonText(lm.getText("search.filter_has_meta"));
     updateCountLabel();
 }
 

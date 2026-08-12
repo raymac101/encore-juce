@@ -100,8 +100,9 @@ public:
         to the Library page and start the initial song-load flow. */
     void setVenueId (const juce::String& venueId, bool requestInitialScan = false);
 
-    /** Shows a small, dismissible, non-blocking banner ("Update available —
-        Restart Now / Later"). Called either directly from UpdateService's
+    /** Shows a small, persistent "Update" pill in TopBar, just left of the
+        avatar (VS Code-style) -- stays until the host clicks it or the app
+        restarts. Called either directly from UpdateService's
         checkForUpdates callback (if the download finishes while this
         MainComponent already exists), or from the constructor below (if it
         finished earlier, during the login/venue-selection flow). Never a
@@ -222,9 +223,6 @@ private:
     class LoadingOverlay;
     std::unique_ptr<LoadingOverlay> loadingOverlay_;
 
-    class UpdateBanner;
-    std::unique_ptr<UpdateBanner> updateBanner_;
-    
     //==============================================================================
     // Background Tile
     juce::Image backgroundTileImage_;

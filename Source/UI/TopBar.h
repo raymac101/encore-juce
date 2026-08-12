@@ -83,11 +83,20 @@ public:
     //==============================================================================
     // User information
     void setUserInfo(const juce::String& userName, const juce::Image& avatar = {});
-    
+
+    //==============================================================================
+    // Software update
+    /** Shows/hides a small persistent "Update" pill just left of the
+        avatar (mirrors VS Code's title-bar update button) -- stays
+        visible until the host clicks it or the app restarts, rather than
+        a one-off pop-up that can be missed or that interrupts a show. */
+    void setUpdateAvailable(bool available, const juce::String& version = {});
+
     //==============================================================================
     // Callbacks
     std::function<void()> onUserButtonClicked;
     std::function<void()> onLogoClicked;
+    std::function<void()> onUpdateButtonClicked;
     
     //==============================================================================
     // Localization
@@ -127,6 +136,8 @@ private:
     std::unique_ptr<juce::Label> userNameLabel;
     std::unique_ptr<InvisibleClickTarget> userButton;
     std::unique_ptr<juce::ImageButton> logoButton;
+    std::unique_ptr<juce::TextButton> updateButton_;
+    juce::String pendingUpdateVersion_;
     
     //==============================================================================
     // Images
@@ -216,6 +227,8 @@ private:
     juce::Rectangle<int> getTrackInfoArea() const;
     juce::Rectangle<int> getVUMeterArea() const;
     juce::Rectangle<int> getUserArea() const;
+    /** Slim pill area immediately left of getUserArea(), for updateButton_. */
+    juce::Rectangle<int> getUpdateButtonArea() const;
     int getCurrentResizeHandleHeight() const;  // Dynamic height based on state
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TopBar)

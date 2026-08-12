@@ -110,6 +110,10 @@ private:
     std::unique_ptr<juce::TextButton> filterYearBtn;
     std::unique_ptr<juce::TextButton> filterGenreBtn;
 
+    // Independent on/off toggle (not part of the mutually-exclusive
+    // FilterMode group above) -- only show songs with complete metadata.
+    std::unique_ptr<juce::TextButton> filterHasMetaBtn;
+
     // A-Z letter buttons
     juce::OwnedArray<juce::TextButton> letterButtons;
     juce::String currentLetter;
@@ -186,6 +190,7 @@ private:
 
     juce::String searchName = "Search";
     FilterMode   filterMode = FilterMode::All;
+    bool         onlyWithMetadata_ = false;
     SortColumn   sortColumn = SortColumn::None;
     SortDir      sortDir    = SortDir::Asc;
     int          loadedCount = 0;
@@ -234,6 +239,7 @@ private:
     void applyLetterFilter(const juce::String& letter);
     void clearSearch();
     void setFilterMode(FilterMode mode);
+    void toggleMetadataFilter();
     void sortByColumn(SortColumn col);
     void rebuildDisplayList();
     void rebuildResultRows();

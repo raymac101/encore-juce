@@ -117,6 +117,16 @@ bool CdgSong::isValid() const
     return !id.empty() && !songName.empty() && !artistName.empty();
 }
 
+bool CdgSong::hasMetadata() const
+{
+    return !imageUrl.empty()
+        && durationMS > 0
+        && !keySignature.empty()
+        && tempo > 0.0
+        && !releaseDate.empty()
+        && !genres.empty();
+}
+
 juce::String CdgSong::getFormattedDuration() const
 {
     int totalSeconds = durationMS / 1000;

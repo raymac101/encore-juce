@@ -479,6 +479,7 @@ search.filter_song=Song
 search.filter_artist=Artist
 search.filter_year=Year
 search.filter_genre=Genre
+search.filter_has_meta=Has Metadata
 search.count_suffix=songs in this list
 search.col_song=SONG
 search.col_artist=ARTIST
@@ -662,9 +663,9 @@ settings.plugin_scan_found_prefix=Found plugins:
 settings.plugin_scan_last_prefix=Last scan:
 settings.plugin_scan_never=No scan yet — click Rescan Plugins.
 
-# Auto-update banner
+# Auto-update -- persistent TopBar pill (see TopBar::setUpdateAvailable)
 update.banner_available=Update available:
-update.btn_restart_now=Restart Now
+update.pill_label=Update
 update.btn_later=Later
 
 # Manual "Check for Updates" (File menu)

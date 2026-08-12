@@ -33,12 +33,7 @@ static void styleStatLabel(juce::Label* lbl, uint32_t textColour)
 
 static bool needsRemoteMetadata(const CdgSong& song)
 {
-    return song.imageUrl.empty()
-        || song.durationMS <= 0
-        || song.keySignature.empty()
-        || song.tempo <= 0.0
-        || song.releaseDate.empty()
-        || song.genres.empty();
+    return ! song.hasMetadata();
 }
 
 //==============================================================================

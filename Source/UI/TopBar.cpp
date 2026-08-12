@@ -138,7 +138,22 @@ void TopBar::setupUI()
             onUserButtonClicked();
     };
     addAndMakeVisible(userButton.get());
-    
+
+    // Update pill -- VS Code-style persistent title-bar button, hidden
+    // until setUpdateAvailable(true, ...) is called. Colour matches the
+    // app's existing update-notice blue (was MainComponent::UpdateBanner's
+    // "Restart Now" button, now replaced by this).
+    updateButton_ = std::make_unique<juce::TextButton>("Update");
+    updateButton_->setButtonText(LocalizationManager::getInstance().getText("update.pill_label"));
+    updateButton_->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f6fed));
+    updateButton_->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    updateButton_->onClick = [this]() {
+        if (onUpdateButtonClicked)
+            onUpdateButtonClicked();
+    };
+    updateButton_->setVisible(false);
+    addAndMakeVisible(updateButton_.get());
+
     // Logo button
     logoButton = std::make_unique<juce::ImageButton>("Logo");
     logoButton->onClick = [this]() {
@@ -453,6 +468,9 @@ void TopBar::resized()
     auto nameArea = userArea;
     nameArea.removeFromLeft(AVATAR_SIZE);
     userNameLabel->setBounds(nameArea.reduced(5, 0));
+
+    if (updateButton_->isVisible())
+        updateButton_->setBounds(getUpdateButtonArea());
 }
 
 //==============================================================================
@@ -554,8 +572,19 @@ void TopBar::setUserInfo(const juce::String& name, const juce::Image& avatar)
     
     if (avatar.isValid())
         userAvatarImage = avatar;
-        
+
     repaint(getUserArea());
+}
+
+void TopBar::setUpdateAvailable(bool available, const juce::String& version)
+{
+    pendingUpdateVersion_ = version;
+    updateButton_->setVisible(available);
+    updateButton_->setTooltip(available
+        ? LocalizationManager::getInstance().getText("update.banner_available") + " " + version
+        : juce::String());
+    resized();
+    repaint();
 }
 
 //==============================================================================
@@ -879,7 +908,9 @@ void TopBar::updateAllText()
         bpmTitleLabel->setText(lm.getText("topbar.bpm"), juce::dontSendNotification);
     if (offlineWarningLabel)
         offlineWarningLabel->setText(lm.getText("topbar.offline_warning"), juce::dontSendNotification);
-    
+    if (updateButton_)
+        updateButton_->setButtonText(lm.getText("update.pill_label"));
+
     repaint();
 }
 
@@ -941,6 +972,15 @@ juce::Rectangle<int> TopBar::getUserArea() const
     // User area positioned from the right with 10px margin
     auto bounds = getLocalBounds().withHeight(currentBarHeight - RESIZE_HANDLE_INACTIVE_HEIGHT);
     return bounds.removeFromRight(AVATAR_SIZE + 150).reduced(10, 0); // Right-justified with 10px margin
+}
+
+juce::Rectangle<int> TopBar::getUpdateButtonArea() const
+{
+    constexpr int kWidth = 84;
+    constexpr int kGap = 10;
+    auto userArea = getUserArea();
+    auto area = userArea.withX(userArea.getX() - kGap - kWidth).withWidth(kWidth);
+    return area.withSizeKeepingCentre(kWidth, 26); // slim pill, vertically centred in the row
 }
 
 //==============================================================================
