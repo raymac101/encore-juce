@@ -5,8 +5,7 @@
     Created: 19 Apr 2026
     Author:  GitHub Copilot
 
-    Left navigation bar with resizable width, menu items in top half,
-    and genre/playlist list in bottom half.
+    Left navigation bar with resizable width and menu items in top half.
 
   ==============================================================================
 */
@@ -48,7 +47,6 @@ enum class NavPage
 /**
     Left-hand navigation bar.
     - Top section: icon + label menu items, visibility governed by UserRole/AccessRights
-    - Bottom section: scrollable genre/playlist list (visible when Playlist access is granted)
     - Right edge: drag handle for resizing width
 */
 class NavBar : public juce::Component
@@ -91,9 +89,6 @@ public:
     /** Enable or disable company-mode pages. */
     void setCompanyContext(bool enabled, const juce::String& role = {});
 
-    /** Populate the genre/playlist list in the bottom half. */
-    void setGenreList(const juce::StringArray& genres);
-
     /** Re-read all translatable strings from LocalizationManager. */
     void updateAllText();
 
@@ -104,7 +99,6 @@ public:
     //==============================================================================
     // Callbacks
     std::function<void(NavPage)>        onPageSelected;
-    std::function<void(const juce::String&)> onGenreSelected;
     std::function<void(int)>            onWidthChanged;  // Fired while dragging
 
 private:
@@ -156,25 +150,6 @@ private:
     };
 
     juce::OwnedArray<NavButton> buttons;
-
-    //==============================================================================
-    // Genre / Playlist list (bottom half)
-    class GenreListModel : public juce::ListBoxModel
-    {
-    public:
-        int getNumRows() override { return items.size(); }
-        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
-        void listBoxItemClicked(int row, const juce::MouseEvent&) override;
-
-        juce::StringArray items;
-        int selectedRow = -1;
-        std::function<void(const juce::String&)> onItemClicked;
-    };
-
-    std::unique_ptr<juce::Label>   genreHeader;
-    std::unique_ptr<juce::ListBox> genreListBox;
-    GenreListModel                 genreModel;
-    bool                           genreSectionVisible = false;
 
     //==============================================================================
     // State

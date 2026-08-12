@@ -168,33 +168,6 @@ void NavBar::NavButton::mouseUp(const juce::MouseEvent& e)
 }
 
 //==============================================================================
-// GenreListModel
-//==============================================================================
-void NavBar::GenreListModel::paintListBoxItem(int row, juce::Graphics& g,
-                                               int w, int h, bool /*selected*/)
-{
-    if (row < 0 || row >= items.size()) return;
-
-    bool isSelected = (row == selectedRow);
-    if (isSelected)
-        g.fillAll(juce::Colour(0xff161616));
-
-    g.setColour(juce::Colour(0xffe0e0e0).withAlpha(isSelected ? 1.0f : 0.4f));
-    g.setFont(juce::Font(juce::FontOptions().withHeight(13.0f)));
-    g.drawText(items[row], 16, 0, w - 20, h, juce::Justification::centredLeft, true);
-}
-
-void NavBar::GenreListModel::listBoxItemClicked(int row, const juce::MouseEvent&)
-{
-    if (row >= 0 && row < items.size())
-    {
-        selectedRow = row;
-        if (onItemClicked)
-            onItemClicked(items[row]);
-    }
-}
-
-//==============================================================================
 // NavBar
 //==============================================================================
 NavBar::NavBar()
@@ -235,25 +208,6 @@ NavBar::NavBar()
     if (!buttons.isEmpty())
         buttons[0]->isActive = true;
 
-    // Genre header
-    genreHeader = std::make_unique<juce::Label>("genreHeader", LocalizationManager::getInstance().getText("nav.genres"));
-    genreHeader->setFont(juce::Font(juce::FontOptions().withHeight(12.0f)).boldened());
-    genreHeader->setColour(juce::Label::textColourId, textColour);
-    addChildComponent(genreHeader.get());
-
-    // Genre list
-    genreListBox = std::make_unique<juce::ListBox>("genres", &genreModel);
-    genreListBox->setRowHeight(28);
-    genreListBox->setColour(juce::ListBox::backgroundColourId, bgColour);
-    genreListBox->setColour(juce::ListBox::outlineColourId, juce::Colours::transparentBlack);
-    addChildComponent(genreListBox.get());
-
-    genreModel.onItemClicked = [this](const juce::String& name)
-    {
-        if (onGenreSelected)
-            onGenreSelected(name);
-    };
-
     // Apply default role visibility
     setUserRole(currentRole);
 }
@@ -292,18 +246,6 @@ void NavBar::paint(juce::Graphics& g)
     else
         g.setColour(separatorColour.withAlpha(0.3f));
     g.fillRect(handleRect);
-
-    // Separator between menu items and genre section
-    if (genreSectionVisible && !buttons.isEmpty())
-    {
-        int separatorY = 0;
-        for (auto* btn : buttons)
-            if (btn->isVisible())
-                separatorY = btn->getBottom();
-
-        g.setColour(separatorColour);
-        g.drawHorizontalLine(separatorY + 4, 8.0f, (float)(getWidth() - resizeHandleWidth - 8));
-    }
 }
 
 //==============================================================================
@@ -328,23 +270,6 @@ void NavBar::resized()
         {
             btn->setVisible(false);
         }
-    }
-
-    // Genre section fills remaining space
-    if (genreSectionVisible)
-    {
-        menuArea.removeFromTop(10); // spacing
-
-        genreHeader->setVisible(true);
-        genreHeader->setBounds(menuArea.removeFromTop(24).withTrimmedLeft(12));
-
-        genreListBox->setVisible(true);
-        genreListBox->setBounds(menuArea);
-    }
-    else
-    {
-        genreHeader->setVisible(false);
-        genreListBox->setVisible(false);
     }
 }
 
@@ -397,9 +322,6 @@ void NavBar::setUserRole(UserRole role)
             item.visible = false;
     }
 
-    // Playlist/genre section visible if user has Playlist right
-    genreSectionVisible = AccessRightsUtil::hasAccess(role, AccessRight::Playlist);
-
     resized();
     repaint();
 }
@@ -447,15 +369,6 @@ void NavBar::setCompanyContext(bool enabled, const juce::String& role)
 }
 
 //==============================================================================
-void NavBar::setGenreList(const juce::StringArray& genres)
-{
-    genreModel.items = genres;
-    genreModel.selectedRow = -1;
-    if (genreListBox)
-        genreListBox->updateContent();
-}
-
-//==============================================================================
 void NavBar::updateAllText()
 {
     auto& lm = LocalizationManager::getInstance();
@@ -473,10 +386,6 @@ void NavBar::updateAllText()
         if (i < (size_t) buttons.size())
             buttons[(int) i]->setLabel(menuItems[i].label);
     }
-
-    // Genre header
-    if (genreHeader)
-        genreHeader->setText(lm.getText("nav.genres"), juce::dontSendNotification);
 
     repaint();
 }

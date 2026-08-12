@@ -29,6 +29,7 @@
 #include "../Services/UpdateService.h"
 #include "../Services/IntroVoiceService.h"
 #include "../Services/SpotifyService.h"
+#include "../Services/RoomEqMeasurementService.h"
 #include "SpriteIcon.h"
 #include "EditSingerModal.h"
 #include <cmath>
@@ -533,10 +534,16 @@ void MainComponent::setupUI()
     // Create TopBar first
     topBar = std::make_unique<TopBar>();
     addAndMakeVisible(topBar.get());
+    // Restore a previously drag-resized height, if the host ever set one --
+    // -1 (never saved) leaves TopBar at its own built-in default.
+    if (const int savedTopHeight = UserPreferences::getInstance().getTopBarHeight(); savedTopHeight > 0)
+        topBar->setBarHeight(savedTopHeight);
 
     // Create BottomBar (music transport and waveform controls)
     bottomBar = std::make_unique<BottomBar>();
     addAndMakeVisible(bottomBar.get());
+    if (const int savedBottomHeight = UserPreferences::getInstance().getBottomBarHeight(); savedBottomHeight > 0)
+        bottomBar->setBarHeight(savedBottomHeight);
     
     // Set up TopBar callbacks
     topBar->onLogoClicked = [this]() {
@@ -602,11 +609,13 @@ void MainComponent::setupUI()
     topBar->onHeightChanged = [this](int newHeight) {
         DBG("TopBar height changed to: " + juce::String(newHeight));
         resized(); // Re-layout when TopBar height changes
+        UserPreferences::getInstance().setTopBarHeight(newHeight);
     };
 
     bottomBar->onHeightChanged = [this](int newHeight) {
         DBG("BottomBar height changed to: " + juce::String(newHeight));
         resized(); // Re-layout when BottomBar height changes
+        UserPreferences::getInstance().setBottomBarHeight(newHeight);
     };
     
     // Set initial TopBar identity from signed-in host profile.
@@ -1041,6 +1050,8 @@ void MainComponent::setupUI()
     // Create NavBar (left navigation)
     navBar = std::make_unique<NavBar>();
     addAndMakeVisible(navBar.get());
+    if (const int savedNavWidth = UserPreferences::getInstance().getNavBarWidth(); savedNavWidth > 0)
+        navBar->setBarWidth(savedNavWidth);
 
     // Create MainArea (central content area)
     mainArea = std::make_unique<MainArea>();
@@ -2433,22 +2444,22 @@ void MainComponent::setupUI()
     }
 
     // When NavBar width changes via drag, re-layout
-    navBar->onWidthChanged = [this](int /*newWidth*/) {
+    navBar->onWidthChanged = [this](int newWidth) {
         resized();
+        UserPreferences::getInstance().setNavBarWidth(newWidth);
     };
-
-    // Sample genre list for the bottom half of NavBar
-    navBar->setGenreList({ "Pop", "Rock", "Country", "R&B", "Hip Hop",
-                           "Dance", "Latin", "Jazz", "Classical", "Oldies" });
 
     DBG("NavBar and MainArea created and configured");
 
     // Create QueueBar (right-side singer queue)
     queueBar = std::make_unique<QueueBar>();
     addAndMakeVisible(queueBar.get());
+    if (const int savedQueueWidth = UserPreferences::getInstance().getQueueBarWidth(); savedQueueWidth > 0)
+        queueBar->setBarWidth(savedQueueWidth);
 
-    queueBar->onWidthChanged = [this](int /*newWidth*/) {
+    queueBar->onWidthChanged = [this](int newWidth) {
         resized();
+        UserPreferences::getInstance().setQueueBarWidth(newWidth);
     };
 
     queueBar->onExpandToggled = [this](bool expanded)
@@ -3451,9 +3462,13 @@ void MainComponent::timerCallback()
     if (audioEngine == nullptr)
         return;
 
-    // Feed real audio level into the VU meter.
+    // Feed real stereo levels + spectrum bands into the VU meter.
     if (topBar != nullptr)
-        topBar->setAudioLevel(juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevel() * 4.0f));
+    {
+        topBar->setAudioLevels(juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevel() * 4.0f),
+                               juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevelRight() * 4.0f));
+        topBar->setSpectrumLevels(audioEngine->getMasterSpectrumBands());
+    }
 
     // Feed real playback position into the BottomBar progress/time labels.
     if (bottomBar != nullptr)
@@ -5225,6 +5240,36 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                        0.05);
 
     activeVenueId_ = venueId;
+
+    // Room EQ Wizard: auto-load a previously saved profile tagged to this
+    // venue, if one exists, so a host returning to a room they've already
+    // measured gets the correction back with zero extra steps. Never force
+    // Room EQ off/on when nothing matches -- a host might be intentionally
+    // testing an unmeasured room with a leftover profile from elsewhere.
+    {
+        auto& prefs = UserPreferences::getInstance();
+        for (auto& profile : prefs.getRoomEqProfiles())
+        {
+            if (profile.venueId.isNotEmpty() && profile.venueId == venueId)
+            {
+                prefs.setSelectedRoomEqProfileId(profile.id);
+                prefs.setRoomEqBands(profile.bands);
+                prefs.setRoomEqEnabled(true);
+                if (audioEngine)
+                {
+                    audioEngine->setRoomEqBands(RoomEqMeasurementService::fromPrefBands(profile.bands));
+                    audioEngine->setRoomEqEnabled(true);
+                }
+                break;
+            }
+        }
+        if (mainArea)
+        {
+            mainArea->setVenueContext(venueId, {});
+            mainArea->refreshRoomEqProfilePicker();
+        }
+    }
+
     applyCurrentIdentityToUi();
     applyNavRoleForActiveVenue();
 
@@ -5277,6 +5322,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
 
             safe->activeVenueName_ = name;
             safe->pendingVenueCode_ = code;
+            if (safe->mainArea)
+                safe->mainArea->setVenueContext(venueId, name);
 
             safe->activeVenueNumStrikes_ = v.numStrikes;
 

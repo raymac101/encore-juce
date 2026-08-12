@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.22)
 # constant like ProjectInfo::versionString can't change between two
 # `cmake --build` runs of the same configure anyway, and a release's
 # reported version shouldn't drift just from recompiling unchanged code.
-set(ENCORE_VERSION_MAJOR_MINOR "1.1")
+set(ENCORE_VERSION_MAJOR_MINOR "3.1")
 set(ENCORE_BUILD_NUMBER_FILE "${CMAKE_SOURCE_DIR}/build_number.txt")
 
 if(EXISTS "${ENCORE_BUILD_NUMBER_FILE}")
@@ -77,6 +77,8 @@ target_sources(EncoreJUCE
         Source/Audio/AudioEngine.cpp
         Source/Audio/PitchShifter.cpp
         Source/Audio/ChannelPluginChain.cpp
+        Source/Audio/RoomCorrectionEq.cpp
+        Source/Audio/SpectrumAnalyzer.cpp
         Source/UI/MainComponent.cpp
         Source/UI/ResponsiveLayout.cpp
         Source/UI/TopBar.cpp
@@ -90,6 +92,7 @@ target_sources(EncoreJUCE
         Source/UI/StartTheNightConfigPanel.cpp
         Source/UI/SpriteIcon.cpp
         Source/UI/MixerPage.cpp
+        Source/UI/RoomEqWizard.cpp
         Source/UI/TestingPage.cpp
         Source/UI/QueueBar.cpp
         Source/UI/EditSingerModal.cpp
@@ -119,6 +122,7 @@ target_sources(EncoreJUCE
         Source/Services/SfxLibraryService.cpp
         Source/Services/IntroVoiceService.cpp
         Source/Services/SpotifyService.cpp
+        Source/Services/RoomEqMeasurementService.cpp
         Source/Services/VenueSessionService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
@@ -186,6 +190,7 @@ target_link_libraries(EncoreJUCE
         juce::juce_core
         juce::juce_cryptography
         juce::juce_data_structures
+        juce::juce_dsp
         juce::juce_events
         juce::juce_graphics
         juce::juce_gui_basics

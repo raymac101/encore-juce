@@ -95,6 +95,15 @@ public:
     /** Provide the background-music service to pages that need it (Mixer). */
     void setBackgroundMusicPlayer(BackgroundMusicPlayer* player);
 
+    /** Forwards to MixerPage::setVenueContext -- see that method's comment. */
+    void setVenueContext(const juce::String& venueId, const juce::String& venueName);
+
+    /** Forwards to MixerPage::refreshRoomEqProfilePicker -- called by
+        MainComponent::setVenueId() after a venue-auto-load check may have
+        changed the selected/applied Room EQ profile out from under the
+        Mixer page's picker. */
+    void refreshRoomEqProfilePicker();
+
 private:
     NavPage currentPage = NavPage::Home;
 

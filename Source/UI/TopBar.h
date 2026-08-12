@@ -14,7 +14,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include "../Localization/LocalizationManager.h"
+#include "../Audio/SpectrumAnalyzer.h"
 
 //==============================================================================
 /**
@@ -27,7 +29,8 @@ public:
     // Public constants
     static constexpr int MIN_BAR_HEIGHT = 60;   // Minimum height
     static constexpr int MAX_BAR_HEIGHT = 200;  // Maximum height
-    static constexpr int DEFAULT_BAR_HEIGHT = 80;   // Default height changed to 80px
+    static constexpr int DEFAULT_BAR_HEIGHT = 100;   // Raised from 80 so the logo+version stack (see
+                                                       // getLogoArea()/resized()) has room without clipping
     
     // Current height (adjustable)
     int currentBarHeight = DEFAULT_BAR_HEIGHT;
@@ -65,8 +68,13 @@ public:
     void setCoverArt(const juce::Image& coverImage);
     
     //==============================================================================
-    // Audio level updates
-    void setAudioLevel(float level); // 0.0 to 1.0
+    // Audio level updates -- real stereo, replacing the old single-value
+    // setAudioLevel(). 0.0 to 1.0 each.
+    void setAudioLevels(float left, float right);
+
+    /** Real per-band FFT levels (see SpectrumAnalyzer.h), 0.0-1.0 each, for
+        the "Spectrum Band" meter style. */
+    void setSpectrumLevels(const std::array<float, SpectrumAnalyzer::kNumBands>& levels);
     
     //==============================================================================
     // Connection status
@@ -90,7 +98,22 @@ private:
     //==============================================================================
     // Timer callback for VU meter animation
     void timerCallback() override;
-    
+
+    //==============================================================================
+    // Pure click target -- paints nothing itself. juce::TextButton's
+    // paintButton() always calls LookAndFeel_V4::drawButtonBackground(),
+    // which draws its own rounded-rect fill/outline regardless of
+    // buttonColourId being transparent -- that was the unwanted "box"
+    // around the avatar/name. userButton uses this instead since its only
+    // job is detecting the click; the avatar image (paint()) and
+    // userNameLabel already provide the visuals.
+    class InvisibleClickTarget : public juce::Button
+    {
+    public:
+        InvisibleClickTarget() : juce::Button({}) {}
+        void paintButton (juce::Graphics&, bool, bool) override {}
+    };
+
     //==============================================================================
     // UI Elements
     std::unique_ptr<juce::Label> versionLabel;
@@ -102,7 +125,7 @@ private:
     std::unique_ptr<juce::Label> bpmValueLabel;
     std::unique_ptr<juce::Label> offlineWarningLabel;
     std::unique_ptr<juce::Label> userNameLabel;
-    std::unique_ptr<juce::TextButton> userButton;
+    std::unique_ptr<InvisibleClickTarget> userButton;
     std::unique_ptr<juce::ImageButton> logoButton;
     
     //==============================================================================
@@ -110,30 +133,61 @@ private:
     juce::Image logoImage;
     juce::Image coverArtImage;
     juce::Image userAvatarImage;
-    juce::Image vuMeterOffImage;
-    juce::Image vuMeterOnImage;
     juce::Image defaultAvatarImage;
     juce::Image defaultAlbumArtImage;
-    
+    juce::Image vuMeterBackImage;  // Analog Needle style's dial-face background (both L/R gauges in one image)
+
     //==============================================================================
     // State variables
     juce::String currentTrackName;
-    juce::String currentArtistName; 
+    juce::String currentArtistName;
     juce::String currentVersion;
     juce::String currentKey;
     int currentBpm = 0;
-    float currentAudioLevel = 0.0f;
-    float targetAudioLevel = 0.0f;
     bool isOnlineStatus = true;
     juce::String userName;
+
+    //==============================================================================
+    // VU meter -- vector-drawn, real stereo L/R, four selectable styles
+    // cycled by clicking the meter (see mouseUp()/cycleVuMeterStyle()).
+    enum class VuMeterStyle { GradientBar = 0, SegmentedLed = 1, AnalogNeedle = 2, SpectrumBand = 3 };
+    static constexpr int kNumVuMeterStyles = 4;
+
+    VuMeterStyle vuMeterStyle_ = VuMeterStyle::GradientBar;
+    float currentLevelL_ = 0.0f, currentLevelR_ = 0.0f;
+    float targetLevelL_  = 0.0f, targetLevelR_  = 0.0f;
+    // Slow-decaying peak-hold marker (classic VU meter ballistics) drawn as
+    // a thin tick on the gradient-bar and segmented-LED styles.
+    float peakL_ = 0.0f, peakR_ = 0.0f;
+    std::array<float, SpectrumAnalyzer::kNumBands> spectrumLevels_ {};
+
+    void cycleVuMeterStyle();
+    void drawGradientBarMeter(juce::Graphics& g, juce::Rectangle<int> bounds) const;
+    void drawSegmentedLedMeter(juce::Graphics& g, juce::Rectangle<int> bounds) const;
+    void drawAnalogNeedleMeter(juce::Graphics& g, juce::Rectangle<int> bounds) const;
+    void drawSpectrumBandMeter(juce::Graphics& g, juce::Rectangle<int> bounds) const;
+    void drawSingleNeedleGauge(juce::Graphics& g, juce::Rectangle<int> bounds, float level) const;
+    static juce::Colour vuLevelColour(float level01);
+    /** "-10.8"-style dB readout for the left-side value labels on the
+        gradient-bar and segmented-LED styles. */
+    static juce::String formatLevelDb(float level01);
+    /** "600" / "1k" / "1.2k"-style compact readout for the spectrum-band
+        style's per-band frequency labels. */
+    static juce::String formatBandFrequency(double freqHz);
+    /** Draws `text` in a reserved top strip and shrinks `bounds`
+        accordingly -- shared by all four styles' titles. */
+    void drawMeterTitle(juce::Graphics& g, juce::Rectangle<int>& bounds, const juce::String& text) const;
     
     //==============================================================================
     // Layout constants
     // COVER_ART_SIZE is now dynamic based on currentBarHeight
-    static constexpr int LOGO_SIZE = 64;  // Increased logo size (was 48)
+    // Logo is no longer a fixed square: resized() sizes it from the actual
+    // asset's aspect ratio (a wide wordmark) so it fills the available
+    // column width instead of being letterboxed inside a square button --
+    // see resized()'s kMaxLogoHeight for the effective size cap.
     static constexpr int AVATAR_SIZE = 40;
-    static constexpr int VU_METER_WIDTH = 150;  // Increased width (was 100)
-    static constexpr int VU_METER_HEIGHT = 30;  // Increased height (was 20)
+    static constexpr int VU_METER_WIDTH = 240;   // Widened for the spectrum-band style's bars (was 180/150, originally 100)
+    static constexpr int VU_METER_HEIGHT = 64;   // Taller to comfortably fit two stereo rows (was 40/30, originally 20)
     
     //==============================================================================
     // Resize handle - Visual Studio style with highlight

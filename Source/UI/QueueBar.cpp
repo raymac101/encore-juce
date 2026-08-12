@@ -100,17 +100,15 @@ void QueueBar::ExpandArrowButton::paintButton(juce::Graphics& g,
                                               bool shouldDrawButtonAsDown)
 {
     auto r = getLocalBounds().toFloat().reduced(1.0f);
-    auto bg = juce::Colour(0xff333333);
+
+    // No circle background/border -- just the chevron itself, slightly
+    // brightened on hover/press so it still gives interactive feedback.
+    juce::Colour chevronColour(0xffa3a6a8);
     if (shouldDrawButtonAsDown)
-        bg = bg.brighter(0.12f);
+        chevronColour = chevronColour.brighter(0.3f);
     else if (shouldDrawButtonAsHighlighted)
-        bg = bg.brighter(0.08f);
-
-    g.setColour(bg);
-    g.fillEllipse(r);
-
-    g.setColour(juce::Colour(0xffa3a6a8));
-    g.drawEllipse(r, 1.0f);
+        chevronColour = chevronColour.brighter(0.15f);
+    g.setColour(chevronColour);
 
     juce::Path chevron;
     const float cx = r.getCentreX();
@@ -794,15 +792,18 @@ QueueBar::QueueBar()
     };
     addAndMakeVisible(*expandButton);
 
-    // Venue header labels
+    // Venue header labels -- name and code now share one row next to the
+    // chevron (see resized()), so bigger fonts fit comfortably.
     venueNameLabel = std::make_unique<juce::Label>("venueName", "");
     venueNameLabel->setColour(juce::Label::textColourId, textColour);
-    venueNameLabel->setFont(juce::Font(14.f).boldened());
+    venueNameLabel->setFont(juce::Font(18.f).boldened());
+    venueNameLabel->setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(*venueNameLabel);
 
     venueCodeLabel = std::make_unique<juce::Label>("venueCode", "");
     venueCodeLabel->setColour(juce::Label::textColourId, accentColour);
-    venueCodeLabel->setFont(juce::Font(12.f));
+    venueCodeLabel->setFont(juce::Font(19.f).boldened());
+    venueCodeLabel->setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(*venueCodeLabel);
 
     nowSingingLabel = std::make_unique<juce::Label>("nowSinging", "Now Singing:");
@@ -942,9 +943,11 @@ void QueueBar::resized()
     auto headerArea = bounds.removeFromTop(venueHeaderHeight);
     auto arrowArea = headerArea.removeFromLeft(42).reduced(6, 10);
     expandButton->setBounds(arrowArea);
-    auto headerLeft = headerArea.reduced(8, 4);
-    venueNameLabel->setBounds(headerLeft.removeFromTop(headerLeft.getHeight() / 2));
-    venueCodeLabel->setBounds(headerLeft);
+    // Name (left-justified, right next to the chevron) and code
+    // (right-justified) share this one row rather than stacking.
+    auto headerLeft = headerArea.reduced(8, 0);
+    venueCodeLabel->setBounds(headerLeft.removeFromRight(110));
+    venueNameLabel->setBounds(headerLeft);
 
     //--- Now Singing ---
     auto npArea = bounds.removeFromTop(nowPlayingHeight);

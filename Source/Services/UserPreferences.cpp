@@ -190,6 +190,59 @@ void UserPreferences::setShowTitleBar(bool show)
 }
 
 //==============================================================================
+int UserPreferences::getTopBarHeight() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (int) root_.getProperty("topBarHeight", -1);
+}
+
+void UserPreferences::setTopBarHeight(int height)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("topBarHeight", height);
+    save();
+}
+
+int UserPreferences::getBottomBarHeight() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (int) root_.getProperty("bottomBarHeight", -1);
+}
+
+void UserPreferences::setBottomBarHeight(int height)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("bottomBarHeight", height);
+    save();
+}
+
+int UserPreferences::getNavBarWidth() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (int) root_.getProperty("navBarWidth", -1);
+}
+
+void UserPreferences::setNavBarWidth(int width)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("navBarWidth", width);
+    save();
+}
+
+int UserPreferences::getQueueBarWidth() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (int) root_.getProperty("queueBarWidth", -1);
+}
+
+void UserPreferences::setQueueBarWidth(int width)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("queueBarWidth", width);
+    save();
+}
+
+//==============================================================================
 juce::String UserPreferences::getLanguage() const
 {
     const juce::ScopedLock sl(lock_);
@@ -841,6 +894,169 @@ void UserPreferences::setSelectedIntroId(const juce::String& id)
 {
     const juce::ScopedLock sl(lock_);
     asObj(root_)->setProperty("selectedIntroId", id);
+    save();
+}
+
+//==============================================================================
+namespace
+{
+    juce::var roomEqBandsToVar(const std::vector<UserPreferences::RoomEqBandPref>& bands)
+    {
+        juce::Array<juce::var> arr;
+        for (auto& b : bands)
+        {
+            juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+            obj->setProperty("frequencyHz", b.frequencyHz);
+            obj->setProperty("gainDb",      b.gainDb);
+            obj->setProperty("q",           b.q);
+            arr.add(juce::var(obj.get()));
+        }
+        return juce::var(arr);
+    }
+
+    std::vector<UserPreferences::RoomEqBandPref> roomEqBandsFromVar(const juce::var& arr)
+    {
+        std::vector<UserPreferences::RoomEqBandPref> out;
+        if (! arr.isArray())
+            return out;
+
+        for (int i = 0; i < arr.size(); ++i)
+        {
+            auto entry = arr[i];
+            UserPreferences::RoomEqBandPref b;
+            b.frequencyHz = (double) entry.getProperty("frequencyHz", 1000.0);
+            b.gainDb       = (float)  entry.getProperty("gainDb", 0.0);
+            b.q             = (double) entry.getProperty("q", 1.4);
+            out.push_back(b);
+        }
+        return out;
+    }
+}
+
+std::vector<UserPreferences::RoomEqProfile> UserPreferences::getRoomEqProfiles() const
+{
+    const juce::ScopedLock sl(lock_);
+    std::vector<RoomEqProfile> out;
+
+    auto arr = root_.getProperty("roomEqProfiles", juce::var());
+    if (! arr.isArray())
+        return out;
+
+    for (int i = 0; i < arr.size(); ++i)
+    {
+        auto entry = arr[i];
+        RoomEqProfile p;
+        p.id          = entry.getProperty("id", "").toString();
+        p.label       = entry.getProperty("label", "").toString();
+        p.venueId     = entry.getProperty("venueId", "").toString();
+        p.micType     = entry.getProperty("micType", "").toString();
+        p.bands       = roomEqBandsFromVar(entry.getProperty("bands", juce::var()));
+        p.createdAtMs = (juce::int64) entry.getProperty("createdAtMs", 0);
+
+        if (p.id.isNotEmpty())
+            out.push_back(std::move(p));
+    }
+
+    // Newest first.
+    std::sort(out.begin(), out.end(), [](const RoomEqProfile& a, const RoomEqProfile& b)
+    {
+        return a.createdAtMs > b.createdAtMs;
+    });
+
+    return out;
+}
+
+void UserPreferences::addRoomEqProfile(const RoomEqProfile& profile)
+{
+    const juce::ScopedLock sl(lock_);
+
+    juce::Array<juce::var> arr;
+    auto existing = root_.getProperty("roomEqProfiles", juce::var());
+    if (existing.isArray())
+        for (int i = 0; i < existing.size(); ++i)
+            arr.add(existing[i]);
+
+    juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+    obj->setProperty("id",          profile.id);
+    obj->setProperty("label",       profile.label);
+    obj->setProperty("venueId",     profile.venueId);
+    obj->setProperty("micType",     profile.micType);
+    obj->setProperty("bands",       roomEqBandsToVar(profile.bands));
+    obj->setProperty("createdAtMs", profile.createdAtMs);
+    arr.add(juce::var(obj.get()));
+
+    asObj(root_)->setProperty("roomEqProfiles", arr);
+    save();
+}
+
+void UserPreferences::deleteRoomEqProfile(const juce::String& id)
+{
+    const juce::ScopedLock sl(lock_);
+
+    juce::Array<juce::var> arr;
+    auto existing = root_.getProperty("roomEqProfiles", juce::var());
+    if (existing.isArray())
+        for (int i = 0; i < existing.size(); ++i)
+        {
+            auto entry = existing[i];
+            if (entry.getProperty("id", "").toString() != id)
+                arr.add(entry);
+        }
+
+    asObj(root_)->setProperty("roomEqProfiles", arr);
+    save();
+}
+
+juce::String UserPreferences::getSelectedRoomEqProfileId() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("selectedRoomEqProfileId", juce::var()).toString();
+}
+
+void UserPreferences::setSelectedRoomEqProfileId(const juce::String& id)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("selectedRoomEqProfileId", id);
+    save();
+}
+
+std::vector<UserPreferences::RoomEqBandPref> UserPreferences::getRoomEqBands() const
+{
+    const juce::ScopedLock sl(lock_);
+    return roomEqBandsFromVar(root_.getProperty("roomEqBands", juce::var()));
+}
+
+void UserPreferences::setRoomEqBands(const std::vector<RoomEqBandPref>& bands)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("roomEqBands", roomEqBandsToVar(bands));
+    save();
+}
+
+bool UserPreferences::getRoomEqEnabled() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("roomEqEnabled", false);
+}
+
+void UserPreferences::setRoomEqEnabled(bool enabled)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("roomEqEnabled", enabled);
+    save();
+}
+
+//==============================================================================
+int UserPreferences::getVuMeterStyle() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (int) root_.getProperty("vuMeterStyle", 0);
+}
+
+void UserPreferences::setVuMeterStyle(int style)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("vuMeterStyle", style);
     save();
 }
 

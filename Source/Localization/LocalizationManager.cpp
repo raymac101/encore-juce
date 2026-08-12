@@ -497,7 +497,6 @@ void LocalizationManager::loadFallbackTranslations()
     translations["nav.locations"] = "Locations";
     translations["nav.queue"] = "Queue";
     translations["nav.songs"] = "Songs";
-    translations["nav.genres"] = "GENRES:";
 
     // ── TopBar ──
     translations["topbar.key"] = "KEY";

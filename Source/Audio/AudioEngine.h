@@ -23,6 +23,8 @@
 #include <JuceHeader.h>
 #include "PitchShifter.h"
 #include "ChannelPluginChain.h"
+#include "RoomCorrectionEq.h"
+#include "SpectrumAnalyzer.h"
 #include "../Services/UserPreferences.h"
 #include <array>
 #include <atomic>
@@ -140,6 +142,33 @@ public:
     float getMasterInsertDrive() const noexcept { return masterInsertDrive.load(); }
 
     //==========================================================================
+    // Room Correction EQ (Room EQ Wizard, Source/UI/RoomEqWizard.h) -- up to
+    // 10 parametric cut bands on the TRUE final master bus (music + live
+    // vocals + SFX summed together), unlike the 3-band Master EQ above
+    // which only ever touches the music channel. See RoomCorrectionEq.h.
+    void setRoomEqBands (const std::vector<RoomEqBand>& bands) { roomCorrectionEq_.setBands (bands); }
+    void setRoomEqEnabled (bool enabled) { roomCorrectionEq_.setEnabled (enabled); }
+    bool isRoomEqEnabled() const noexcept { return roomCorrectionEq_.isEnabled(); }
+
+    /** Plays `sweepBuffer` (mono or stereo) through the master output --
+        bypassing Room EQ/plugins/dynamics so what's measured reflects the
+        room's true response, not whatever correction/processing happens to
+        already be configured -- while simultaneously recording micIndex's
+        (1 or 2) raw captured input for the sweep's duration plus a short
+        tail, for the Room EQ Wizard's measurement step. That mic's own
+        live-reinforcement gain is temporarily forced to 0 for the
+        duration (restored afterwards) so the room's natural response
+        isn't muddied by the mic's own signal also being fed back out the
+        speakers at the same time. Requires isLiveVocalInputActive() to
+        already be true. onDone is always called, on the message thread,
+        with the recorded mono buffer (empty if capture wasn't active or
+        the mic index was invalid). Returns false immediately (onDone
+        still called, with an empty buffer) if a sweep is already in
+        progress or the engine isn't initialized. */
+    bool playAndRecordSweep (const juce::AudioBuffer<float>& sweepBuffer, int micIndex,
+                            std::function<void (juce::AudioBuffer<float> recordedMic)> onDone);
+
+    //==========================================================================
     // Master dynamics (always-on on the master bus)
     void setMasterCompressorThreshold(float db); // -48 to 0 dB
     void setMasterCompressorRatio(float ratio);  // 1 to 20
@@ -178,8 +207,18 @@ public:
     void enableFrequencyAnalysis(bool enabled);
     const std::vector<float>& getFrequencySpectrum() const { return frequencyData; }
     float getCurrentLevel() const noexcept { return currentAudioLevel.load(); }
+    /** Right-channel counterpart to getCurrentLevel() -- mirrors the left/
+        channel-0 value when the master bus is mono. Both feed the TopBar
+        VU meter's real stereo display (Source/UI/TopBar.cpp). */
+    float getCurrentLevelRight() const noexcept { return currentAudioLevelR.load(); }
     float getMasterCompressorOutputMeter() const noexcept { return masterCompOutputMeter.load(); }
     float getMasterLimiterReductionMeter() const noexcept { return masterLimiterReductionMeter.load(); }
+
+    /** Real per-band FFT levels (0..1, smoothed) of the true master bus --
+        see SpectrumAnalyzer.h. Powers the TopBar VU meter's "Spectrum
+        Band" style; unrelated to the legacy getFrequencySpectrum() stub
+        above, which is a fake rms*decay curve nothing currently reads. */
+    std::array<float, SpectrumAnalyzer::kNumBands> getMasterSpectrumBands() const { return masterSpectrum_.getBandLevels(); }
 
     //==========================================================================
     // Song-end callback — fired on the message thread when playback reaches
@@ -389,6 +428,12 @@ private:
     bool               frequencyAnalysisEnabled = false;
     std::vector<float> frequencyData;
     std::atomic<float> currentAudioLevel { 0.0f };
+    std::atomic<float> currentAudioLevelR { 0.0f };
+    SpectrumAnalyzer masterSpectrum_;
+    // Reused across callbacks (resize() only reallocates if the block size
+    // actually changes) so feeding the spectrum analyzer doesn't allocate
+    // on the audio thread.
+    std::vector<float> monoScratch_;
     std::atomic<float> masterCompOutputMeter { 0.0f };
     std::atomic<float> masterLimiterReductionMeter { 0.0f };
 
@@ -398,6 +443,25 @@ private:
     juce::AudioBuffer<float> oneShotSfxBuffer;
     int oneShotSfxReadPos = 0;
     std::atomic<bool> oneShotSfxActive { false };
+
+    //==========================================================================
+    // Room EQ Wizard measurement sweep -- deliberately separate from the SFX
+    // one-shot slot above so triggering a sound pad mid-measurement can
+    // never collide with it. Injected as the very last stage in
+    // getNextAudioBlock (after Room EQ / plugins / master dynamics), so a
+    // measurement always reflects the room's true response regardless of
+    // whatever correction/processing happens to already be configured.
+    RoomCorrectionEq roomCorrectionEq_;
+    std::mutex sweepMutex_;
+    juce::AudioBuffer<float> sweepBuffer_;
+    int sweepReadPos_ = 0;
+    juce::AudioBuffer<float> sweepCaptureBuffer_;
+    int sweepCaptureWritePos_ = 0;
+    int sweepCaptureMicIndex_ = 0; // 1 or 2, matches playAndRecordSweep's micIndex
+    float sweepSavedMicGain_ = 0.0f;
+    std::function<void (juce::AudioBuffer<float>)> sweepCompletionCallback_; // set on message thread, consumed once on audio thread
+    std::atomic<bool> sweepActive_ { false };
+    bool mixMeasurementSweep (juce::AudioBuffer<float>& buffer, int numSamples);
 
     //==========================================================================
     // Per-channel plugin chains (Phase B) and their scratch buffers. Sized

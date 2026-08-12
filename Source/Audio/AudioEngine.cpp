@@ -7,7 +7,9 @@
 */
 
 #include "AudioEngine.h"
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
@@ -541,6 +543,51 @@ bool AudioEngine::triggerOneShotSfx(const juce::File& audioFile)
     return true;
 }
 
+bool AudioEngine::playAndRecordSweep (const juce::AudioBuffer<float>& sweepBuffer, int micIndex,
+                                      std::function<void (juce::AudioBuffer<float>)> onDone)
+{
+    auto fail = [&onDone]()
+    {
+        if (onDone)
+            juce::MessageManager::callAsync ([onDone] { onDone (juce::AudioBuffer<float>()); });
+        return false;
+    };
+
+    if (! initialized || (micIndex != 1 && micIndex != 2) || sweepBuffer.getNumSamples() <= 0)
+        return fail();
+    if (! micCaptureRegistered.load() || sweepActive_.load())
+        return fail();
+
+    // A little tail beyond the sweep's own length so the room's decay/
+    // reflections after the sweep itself has stopped playing are captured
+    // too, not cut off exactly when playback ends.
+    constexpr double kCaptureTailSeconds = 0.5;
+    const int tailSamples = (int) (kCaptureTailSeconds * getCurrentSampleRate());
+
+    {
+        const std::lock_guard<std::mutex> lock (sweepMutex_);
+        sweepBuffer_ = sweepBuffer;
+        sweepReadPos_ = 0;
+        sweepCaptureBuffer_.setSize (1, sweepBuffer.getNumSamples() + tailSamples);
+        sweepCaptureBuffer_.clear();
+        sweepCaptureWritePos_ = 0;
+        sweepCaptureMicIndex_ = micIndex;
+        sweepCompletionCallback_ = std::move (onDone);
+
+        // Mute this mic's own live-reinforcement path for the duration --
+        // direct atomic write, NOT the public setVocal1Gain/setVocal2Gain
+        // setters, since those persist to UserPreferences and this is a
+        // temporary measurement-time override, not a real user setting.
+        auto& gainAtomic = (micIndex == 1 ? vocal1Gain : vocal2Gain);
+        sweepSavedMicGain_ = gainAtomic.load();
+        gainAtomic = 0.0f;
+
+        sweepActive_ = true;
+    }
+
+    return true;
+}
+
 void AudioEngine::setMasterEqLow(float db)
 {
     masterEqLowDb = juce::jlimit(-18.0f, 18.0f, db);
@@ -789,9 +836,19 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     // not only while a song is playing.
     if (! programActive && ! sfxActive && ! micActive)
     {
-        currentAudioLevel = 0.0f;
+        currentAudioLevel  = 0.0f;
+        currentAudioLevelR = 0.0f;
         masterCompOutputMeter = 0.0f;
         masterLimiterReductionMeter = 0.0f;
+
+        // Feed silence to the spectrum analyzer too, rather than simply
+        // not calling it -- that would leave its bands frozen at whatever
+        // they last showed instead of decaying back to 0 via its normal
+        // release ballistics (see SpectrumAnalyzer::runAnalysis).
+        monoScratch_.resize((size_t) numSamples);
+        std::fill(monoScratch_.begin(), monoScratch_.end(), 0.0f);
+        masterSpectrum_.pushSamples(monoScratch_.data(), numSamples, getCurrentSampleRate());
+
         return;
     }
 
@@ -808,6 +865,11 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
         buf.addFrom(ch, bufferToFill.startSample, vocal2Buf_, ch, 0, numSamples, master);
         buf.addFrom(ch, bufferToFill.startSample, sfxBuf_,    ch, 0, numSamples, master);
     }
+
+    // Room correction EQ (Room EQ Wizard) — the true master bus, so a
+    // host-loaded plugin below always sees the corrected signal. Kept
+    // separate from applyMasterEq above, which is scoped to Music only.
+    roomCorrectionEq_.process(buf, getCurrentSampleRate());
 
     // Master's own optional plugin chain (Phase B) — deliberately placed
     // *before* the always-on compressor/limiter below, so the safety
@@ -826,11 +888,32 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
     if (frequencyAnalysisEnabled)
         performFrequencyAnalysis(buf);
 
-    currentAudioLevel = buf.getRMSLevel(0, bufferToFill.startSample, bufferToFill.numSamples);
+    currentAudioLevel  = buf.getRMSLevel(0, bufferToFill.startSample, bufferToFill.numSamples);
+    currentAudioLevelR = numChannels > 1
+        ? buf.getRMSLevel(1, bufferToFill.startSample, bufferToFill.numSamples)
+        : currentAudioLevel.load();
+
+    // Feed the TopBar VU meter's real-time spectrum-band style -- mono mix
+    // of whatever's on the true master bus, post-EQ/plugins/dynamics (the
+    // same point currentAudioLevel is measured from).
+    {
+        auto* left  = buf.getReadPointer(0, bufferToFill.startSample);
+        auto* right = numChannels > 1 ? buf.getReadPointer(1, bufferToFill.startSample) : nullptr;
+        monoScratch_.resize((size_t) numSamples);
+        for (int i = 0; i < numSamples; ++i)
+            monoScratch_[(size_t) i] = right != nullptr ? 0.5f * (left[i] + right[i]) : left[i];
+        masterSpectrum_.pushSamples(monoScratch_.data(), numSamples, getCurrentSampleRate());
+    }
 
     // CDG sync callback.
     if (programActive && cdgLoaded && cdgSyncCallback)
         cdgSyncCallback(currentPosition.load(), {});
+
+    // Room EQ Wizard measurement sweep — injected as the absolute last
+    // stage, after Room EQ/plugins/dynamics, so what's captured reflects
+    // the room's true response, not whatever correction is currently
+    // configured. Unity-gain playback, independent of masterVolume.
+    mixMeasurementSweep(buf, numSamples);
 }
 
 bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
@@ -874,6 +957,80 @@ bool AudioEngine::mixOneShotSfx(juce::AudioBuffer<float>& buffer, int startSampl
         oneShotSfxActive = false;
         oneShotSfxReadPos = 0;
         oneShotSfxBuffer.setSize(0, 0);
+    }
+
+    return true;
+}
+
+bool AudioEngine::mixMeasurementSweep (juce::AudioBuffer<float>& buffer, int numSamples)
+{
+    if (! sweepActive_.load() || numSamples <= 0)
+        return false;
+
+    const std::lock_guard<std::mutex> lock (sweepMutex_);
+    if (! sweepActive_.load() || sweepBuffer_.getNumSamples() <= 0)
+        return false;
+
+    // --- Playback: unity gain -- a measurement needs a known, fixed level,
+    // not whatever the master/music faders happen to be sitting at. ---
+    const int availablePlay = sweepBuffer_.getNumSamples() - sweepReadPos_;
+    const int toMixPlay = juce::jmin (numSamples, juce::jmax (0, availablePlay));
+    const int srcChannels = juce::jmax (1, sweepBuffer_.getNumChannels());
+    const int dstChannels = juce::jmin (buffer.getNumChannels(), 2);
+
+    for (int ch = 0; ch < dstChannels; ++ch)
+    {
+        const int srcCh = juce::jmin (ch, srcChannels - 1);
+        auto* dst = buffer.getWritePointer (ch);
+        const auto* src = sweepBuffer_.getReadPointer (srcCh, sweepReadPos_);
+        for (int i = 0; i < toMixPlay; ++i)
+            dst[i] += src[i];
+    }
+    sweepReadPos_ += toMixPlay;
+
+    // --- Capture: tap the mic's raw input for this same callback window,
+    // continuing past the end of playback to catch the room's tail. ---
+    const int micIdx = sweepCaptureMicIndex_ - 1;
+    if (micIdx == 0 || micIdx == 1)
+    {
+        const int availableCap = sweepCaptureBuffer_.getNumSamples() - sweepCaptureWritePos_;
+        const int toCap = juce::jmin (numSamples, juce::jmax (0, availableCap));
+        if (toCap > 0)
+        {
+            const int micAvail = micCapture.getCapturedSamples();
+            const int actualCap = juce::jmin (toCap, micAvail);
+            auto* dst = sweepCaptureBuffer_.getWritePointer (0, sweepCaptureWritePos_);
+            if (actualCap > 0)
+                std::memcpy (dst, micCapture.getChannelData (micIdx), (size_t) actualCap * sizeof (float));
+            if (actualCap < toCap)
+                std::fill (dst + actualCap, dst + toCap, 0.0f);
+            sweepCaptureWritePos_ += toCap;
+        }
+    }
+
+    const bool playbackDone = sweepReadPos_ >= sweepBuffer_.getNumSamples();
+    const bool captureDone = sweepCaptureWritePos_ >= sweepCaptureBuffer_.getNumSamples();
+
+    if (playbackDone && captureDone)
+    {
+        sweepActive_ = false;
+
+        auto& gainAtomic = (sweepCaptureMicIndex_ == 1 ? vocal1Gain : vocal2Gain);
+        gainAtomic = sweepSavedMicGain_;
+
+        auto captured = std::move (sweepCaptureBuffer_);
+        auto callback = std::move (sweepCompletionCallback_);
+        sweepCompletionCallback_ = nullptr;
+        sweepBuffer_.setSize (0, 0);
+        sweepCaptureBuffer_.setSize (0, 0);
+        sweepReadPos_ = 0;
+        sweepCaptureWritePos_ = 0;
+
+        if (callback)
+            juce::MessageManager::callAsync ([callback, recorded = std::move (captured)]() mutable
+            {
+                callback (std::move (recorded));
+            });
     }
 
     return true;

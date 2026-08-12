@@ -271,3 +271,15 @@ void MainArea::setBackgroundMusicPlayer(BackgroundMusicPlayer* player)
     if (mixerPage)
         mixerPage->setBackgroundMusicPlayer(player);
 }
+
+void MainArea::setVenueContext(const juce::String& venueId, const juce::String& venueName)
+{
+    if (mixerPage)
+        mixerPage->setVenueContext(venueId, venueName);
+}
+
+void MainArea::refreshRoomEqProfilePicker()
+{
+    if (mixerPage)
+        mixerPage->refreshRoomEqProfilePicker();
+}

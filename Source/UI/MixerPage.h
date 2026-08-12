@@ -15,6 +15,7 @@
 #include "../Services/BackgroundMusicPlayer.h"
 #include "../Services/PluginHostService.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/RoomEqMeasurementService.h"
 #include "../Localization/LocalizationManager.h"
 #include <array>
 #include <vector>
@@ -32,6 +33,23 @@ public:
     void setAudioEngine(AudioEngine* engine);
     void setBackgroundMusicPlayer(BackgroundMusicPlayer* player);
     void updateAllText();
+
+    /** Called by MainComponent::setVenueId() so the Room EQ Wizard can tag
+        a saved profile with the venue it was measured at, and so a newly
+        launched wizard's profile-name field defaults to something
+        sensible. Does NOT itself trigger any profile auto-load/apply --
+        that happens in MainComponent (see the plan's "venue auto-load"
+        section) before MixerPage even sees the new venue, so by the time
+        this is called the engine/UserPreferences state it should reflect
+        is already in place; this call just updates what the Wizard will
+        tag new profiles with going forward. */
+    void setVenueContext(const juce::String& venueId, const juce::String& venueName);
+
+    /** Re-reads saved Room EQ profiles from UserPreferences and rebuilds
+        the picker -- called after the wizard saves a new one, and after
+        MainComponent applies/changes a profile out-of-band (venue
+        auto-load) so the picker's selection stays in sync. */
+    void refreshRoomEqProfilePicker();
 
 private:
     enum StripIndex
@@ -83,6 +101,17 @@ private:
     bool restoredAudioEngineSlots_ = false;
     bool restoredBgMusicSlots_ = false;
     bool allPluginsBypassed_ = false;
+
+    //--- Room EQ Wizard (Source/UI/RoomEqWizard.h) ------------------------------
+    juce::String activeVenueId_;
+    juce::String activeVenueName_;
+    bool restoredRoomEq_ = false;
+    std::vector<UserPreferences::RoomEqProfile> roomEqProfiles_;
+    std::unique_ptr<juce::Label>      roomEqTitleLabel_;
+    std::unique_ptr<juce::ToggleButton> roomEqToggle_;
+    std::unique_ptr<juce::ComboBox>   roomEqProfileCombo_;
+    std::unique_ptr<juce::TextButton> roomEqWizardBtn_;
+    void onRoomEqProfileSelected();
 
     void buildStrip(int index, const juce::String& name, juce::Colour accent);
     void bindControlCallbacks();

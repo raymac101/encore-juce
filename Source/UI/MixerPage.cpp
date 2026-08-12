@@ -8,6 +8,7 @@
 
 #include "MixerPage.h"
 #include "MenuTheme.h"
+#include "RoomEqWizard.h"
 
 namespace
 {
@@ -275,6 +276,42 @@ MixerPage::MixerPage()
     bypassAllButton_.setClickingTogglesState(false);
     contentHolder_->addAndMakeVisible(bypassAllButton_);
 
+    roomEqTitleLabel_ = std::make_unique<juce::Label>("roomEqTitle", "Room EQ");
+    roomEqTitleLabel_->setFont(juce::Font(14.0f, juce::Font::bold));
+    roomEqTitleLabel_->setColour(juce::Label::textColourId, juce::Colour(0xffc6d1df));
+    contentHolder_->addAndMakeVisible(*roomEqTitleLabel_);
+
+    roomEqToggle_ = std::make_unique<juce::ToggleButton>();
+    roomEqToggle_->onClick = [this]
+    {
+        const bool on = roomEqToggle_->getToggleState();
+        UserPreferences::getInstance().setRoomEqEnabled(on);
+        if (audioEngine)
+            audioEngine->setRoomEqEnabled(on);
+    };
+    contentHolder_->addAndMakeVisible(*roomEqToggle_);
+
+    roomEqProfileCombo_ = std::make_unique<juce::ComboBox>("roomEqProfile");
+    roomEqProfileCombo_->onChange = [this] { onRoomEqProfileSelected(); };
+    contentHolder_->addAndMakeVisible(*roomEqProfileCombo_);
+
+    roomEqWizardBtn_ = std::make_unique<juce::TextButton>("Room EQ Wizard...");
+    roomEqWizardBtn_->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2735));
+    roomEqWizardBtn_->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd3dce9));
+    roomEqWizardBtn_->onClick = [this]
+    {
+        if (audioEngine == nullptr)
+            return;
+
+        juce::Component::SafePointer<MixerPage> safe(this);
+        RoomEqWizard::launch(this, *audioEngine, activeVenueId_, activeVenueName_, [safe]
+        {
+            if (safe != nullptr)
+                safe->refreshRoomEqProfilePicker();
+        });
+    };
+    contentHolder_->addAndMakeVisible(*roomEqWizardBtn_);
+
     buildStrip(stripMusic,  {}, juce::Colour(0xff2ea8ff));
     buildStrip(stripVocal1, {}, juce::Colour(0xffeaa700));
     buildStrip(stripVocal2, {}, juce::Colour(0xffd47f1a));
@@ -363,7 +400,70 @@ void MixerPage::setAudioEngine(AudioEngine* engine)
             restorePluginSlotsForChannel(stripIdx);
     }
 
+    if (! restoredRoomEq_ && audioEngine != nullptr)
+    {
+        restoredRoomEq_ = true;
+        auto& prefs = UserPreferences::getInstance();
+        audioEngine->setRoomEqBands(RoomEqMeasurementService::fromPrefBands(prefs.getRoomEqBands()));
+        audioEngine->setRoomEqEnabled(prefs.getRoomEqEnabled());
+        roomEqToggle_->setToggleState(prefs.getRoomEqEnabled(), juce::dontSendNotification);
+        refreshRoomEqProfilePicker();
+    }
+
     refreshPluginPickers();
+}
+
+void MixerPage::setVenueContext(const juce::String& venueId, const juce::String& venueName)
+{
+    activeVenueId_   = venueId;
+    activeVenueName_ = venueName;
+}
+
+void MixerPage::refreshRoomEqProfilePicker()
+{
+    roomEqProfiles_ = UserPreferences::getInstance().getRoomEqProfiles();
+
+    auto& lm = LocalizationManager::getInstance();
+    roomEqProfileCombo_->clear(juce::dontSendNotification);
+    roomEqProfileCombo_->addItem(lm.getText("mixer.roomeq.profile.none"), 1);
+    for (size_t i = 0; i < roomEqProfiles_.size(); ++i)
+        roomEqProfileCombo_->addItem(roomEqProfiles_[i].label, (int) i + 2);
+
+    const auto selectedId = UserPreferences::getInstance().getSelectedRoomEqProfileId();
+    int toSelect = 1;
+    for (size_t i = 0; i < roomEqProfiles_.size(); ++i)
+        if (roomEqProfiles_[i].id == selectedId) { toSelect = (int) i + 2; break; }
+    roomEqProfileCombo_->setSelectedId(toSelect, juce::dontSendNotification);
+
+    roomEqToggle_->setToggleState(UserPreferences::getInstance().getRoomEqEnabled(), juce::dontSendNotification);
+}
+
+void MixerPage::onRoomEqProfileSelected()
+{
+    const int id = roomEqProfileCombo_->getSelectedId();
+    auto& prefs = UserPreferences::getInstance();
+
+    if (id <= 1)
+    {
+        prefs.setSelectedRoomEqProfileId({});
+        return;
+    }
+
+    const size_t idx = (size_t) id - 2;
+    if (idx >= roomEqProfiles_.size())
+        return;
+
+    auto& profile = roomEqProfiles_[idx];
+    prefs.setSelectedRoomEqProfileId(profile.id);
+    prefs.setRoomEqBands(profile.bands);
+    prefs.setRoomEqEnabled(true);
+
+    if (audioEngine)
+    {
+        audioEngine->setRoomEqBands(RoomEqMeasurementService::fromPrefBands(profile.bands));
+        audioEngine->setRoomEqEnabled(true);
+    }
+    roomEqToggle_->setToggleState(true, juce::dontSendNotification);
 }
 
 void MixerPage::setBackgroundMusicPlayer(BackgroundMusicPlayer* player)
@@ -483,6 +583,11 @@ void MixerPage::updateAllText()
 
     titleLabel.setText(lm.getText("mixer.title"), juce::dontSendNotification);
     subtitleLabel.setText(lm.getText("mixer.subtitle"), juce::dontSendNotification);
+
+    roomEqTitleLabel_->setText(lm.getText("mixer.roomeq.title"), juce::dontSendNotification);
+    roomEqWizardBtn_->setButtonText(lm.getText("mixer.roomeq.wizard"));
+    if (roomEqProfileCombo_->getNumItems() > 0)
+        roomEqProfileCombo_->changeItemText(1, lm.getText("mixer.roomeq.profile.none"));
 
     static const char* stripKeys[] = {
         "mixer.channel.music",
@@ -973,11 +1078,20 @@ void MixerPage::layoutContent()
 {
     auto area = contentHolder_->getLocalBounds().reduced(14);
 
-    auto head = area.removeFromTop(68);
+    auto head = area.removeFromTop(108);
     auto bypassArea = head.removeFromRight(180).removeFromTop(30);
     bypassAllButton_.setBounds(bypassArea.reduced(4, 2));
     titleLabel.setBounds(head.removeFromTop(30));
     subtitleLabel.setBounds(head.removeFromTop(22));
+
+    head.removeFromTop(8);
+    auto roomEqRow = head.removeFromTop(30);
+    roomEqTitleLabel_->setBounds(roomEqRow.removeFromLeft(70));
+    roomEqToggle_->setBounds(roomEqRow.removeFromLeft(44));
+    roomEqRow.removeFromLeft(12);
+    roomEqWizardBtn_->setBounds(roomEqRow.removeFromRight(160));
+    roomEqRow.removeFromRight(12);
+    roomEqProfileCombo_->setBounds(roomEqRow);
 
     const int stripW = area.getWidth() / stripCount;
 

@@ -44,6 +44,20 @@ public:
     juce::String getLanguage() const;
     void setLanguage(const juce::String& languageCode);
 
+    //--- Resizable bar sizes ----------------------------------------------------
+    // TopBar/BottomBar heights and NavBar/QueueBar widths, persisted
+    // per-machine so a host's drag-to-resize choices survive logging out
+    // and back in. -1 means "never saved" -- callers should leave the bar
+    // at its own built-in default in that case rather than clamping to it.
+    int getTopBarHeight() const;
+    void setTopBarHeight(int height);
+    int getBottomBarHeight() const;
+    void setBottomBarHeight(int height);
+    int getNavBarWidth() const;
+    void setNavBarWidth(int width);
+    int getQueueBarWidth() const;
+    void setQueueBarWidth(int width);
+
     //--- Venue -----------------------------------------------------------------
     juce::String getVenueId() const;
     void setVenueId(const juce::String& id);
@@ -251,6 +265,46 @@ public:
     juce::String getSelectedIntroId() const;
     void setSelectedIntroId(const juce::String& id);
 
+    //--- Room EQ Wizard (Source/UI/RoomEqWizard.h) ------------------------------
+    // A correction curve derived from a Room EQ Wizard measurement run --
+    // per-machine, since it's tied to wherever this PC's PA physically
+    // lives (see RoomCorrectionEq.h). Mirrors SavedIntro's exact
+    // named-list/JSON-array-of-objects shape above.
+    struct RoomEqBandPref
+    {
+        double frequencyHz = 1000.0;
+        float  gainDb       = 0.0f;
+        double q             = 1.4;
+    };
+
+    struct RoomEqProfile
+    {
+        juce::String id;             // stable, timestamp-based
+        juce::String label;          // host-chosen name, defaults to the active venue's name
+        juce::String venueId;        // the venue active when this was measured, if any -- empty if none
+        juce::String micType;        // "dynamic" / "condenser" / "flat"
+        std::vector<RoomEqBandPref> bands;
+        juce::int64  createdAtMs = 0;
+    };
+
+    // Newest first.
+    std::vector<RoomEqProfile> getRoomEqProfiles() const;
+    void addRoomEqProfile(const RoomEqProfile& profile);
+    void deleteRoomEqProfile(const juce::String& id);
+
+    // Which saved profile (by id) is currently applied. Empty if none
+    // selected yet, or if the selected one was since deleted.
+    juce::String getSelectedRoomEqProfileId() const;
+    void setSelectedRoomEqProfileId(const juce::String& id);
+
+    // The last-applied set of bands + on/off state, independent of any
+    // saved profile -- so a manual tweak or an ad-hoc wizard run that
+    // wasn't saved as a profile still survives an app restart.
+    std::vector<RoomEqBandPref> getRoomEqBands() const;
+    void setRoomEqBands(const std::vector<RoomEqBandPref>& bands);
+    bool getRoomEqEnabled() const;
+    void setRoomEqEnabled(bool enabled);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.
@@ -284,6 +338,14 @@ public:
 
     /** Removes the saved entry for a slot, e.g. when the user picks "None". */
     void clearPluginSlotState(const juce::String& channelId, int slotIndex);
+
+    //--- TopBar VU meter style ---------------------------------------------------
+    // Cycled by clicking the meter itself (Source/UI/TopBar.cpp) -- stored
+    // as a plain int (TopBar::VuMeterStyle's underlying value) rather than
+    // a string, since it's an internal display choice, not something
+    // hand-edited. Defaults to 0 (TopBar::VuMeterStyle::GradientBar).
+    int getVuMeterStyle() const;
+    void setVuMeterStyle(int style);
 
     //--- Low-level access ------------------------------------------------------
     /** Get the path of the preferences JSON file. */
