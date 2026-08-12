@@ -749,7 +749,7 @@ void TopBar::drawSegmentedLedMeter(juce::Graphics& g, juce::Rectangle<int> bound
     constexpr int kNumSegments = 24;
     constexpr float kSegGapFrac = 0.18f;
 
-    auto drawRow = [] (juce::Graphics& g2, juce::Rectangle<int> row, float level)
+    auto drawRow = [kNumSegments, kSegGapFrac] (juce::Graphics& g2, juce::Rectangle<int> row, float level)
     {
         // Leave room on the left for the "L"/"R" tag + dB value drawn
         // once, below, outside the segment grid.
