@@ -64,9 +64,10 @@ public:
         detached helper that waits for this process to fully exit before
         launching the verified installer -- never races the installer
         against our own teardown (Windows in particular locks the running
-        exe). Must be called from the message thread. No-op if no verified
-        installer is pending. */
-    void restartAndInstall();
+        exe). Must be called from the message thread. No-op (returns false)
+        if no verified installer is pending; returns true once shutdown has
+        been kicked off. */
+    bool restartAndInstall();
 
 private:
     UpdateService() = default;

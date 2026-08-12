@@ -665,6 +665,7 @@ settings.plugin_scan_never=No scan yet — click Rescan Plugins.
 # Auto-update -- persistent TopBar pill (see TopBar::setUpdateAvailable)
 update.banner_available=Update available:
 update.pill_label=Update
+update.pill_restarting=Restarting…
 update.btn_later=Later
 
 # Manual "Check for Updates" (File menu)

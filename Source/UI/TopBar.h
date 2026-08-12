@@ -92,6 +92,13 @@ public:
         a one-off pop-up that can be missed or that interrupts a show. */
     void setUpdateAvailable(bool available, const juce::String& version = {});
 
+    /** Puts the pill into a disabled, non-clickable "in progress" state
+        (e.g. "Restarting…") when busy is true, or restores the normal
+        clickable "Update" label when false -- lets the click handler give
+        immediate feedback instead of the pill just sitting there while the
+        app quits/restarts in the background. */
+    void setUpdateButtonBusy(bool busy, const juce::String& busyText = {});
+
     //==============================================================================
     // Callbacks
     std::function<void()> onUserButtonClicked;

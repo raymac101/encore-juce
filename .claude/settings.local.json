@@ -44,7 +44,8 @@
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/start/**)",
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/create-venue-modal/**)",
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/venue-users/**)",
-      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/**)"
+      "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/**)",
+      "mcp__plugin_claude-mem_mcp-search__get_observations"
     ]
   }
 }

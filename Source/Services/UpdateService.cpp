@@ -273,12 +273,12 @@ bool UpdateService::downloadAndVerify (const juce::URL& fileUrl,
     return true;
 }
 
-void UpdateService::restartAndInstall()
+bool UpdateService::restartAndInstall()
 {
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     if (! readyToInstall_.load() || ! pendingInstallerFile_.existsAsFile())
-        return;
+        return false;
 
     const auto installerPath = pendingInstallerFile_.getFullPathName();
 
@@ -309,4 +309,5 @@ void UpdateService::restartAndInstall()
     // close button (Main.cpp's MainWindow::closeButtonPressed()) -- no
     // separate teardown logic to keep in sync.
     juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    return true;
 }

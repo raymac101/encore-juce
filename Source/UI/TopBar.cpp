@@ -153,8 +153,8 @@ void TopBar::setupUI()
         if (onUpdateButtonClicked)
             onUpdateButtonClicked();
     };
-    updateButton_->setVisible(false);
     addAndMakeVisible(updateButton_.get());
+    updateButton_->setVisible(false); // addAndMakeVisible() forces visible(true), so this must come after
 
     // Logo button
     logoButton = std::make_unique<juce::ImageButton>("Logo");
@@ -585,6 +585,15 @@ void TopBar::setUpdateAvailable(bool available, const juce::String& version)
     updateButton_->setTooltip(available
         ? LocalizationManager::getInstance().getText("update.banner_available") + " " + version
         : juce::String());
+    resized();
+    repaint();
+}
+
+void TopBar::setUpdateButtonBusy(bool busy, const juce::String& busyText)
+{
+    updateButton_->setEnabled(!busy);
+    updateButton_->setButtonText(busy ? busyText
+                                       : LocalizationManager::getInstance().getText("update.pill_label"));
     resized();
     repaint();
 }

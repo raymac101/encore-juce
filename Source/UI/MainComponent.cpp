@@ -3058,7 +3058,19 @@ void MainComponent::setupUI()
     // avatar, VS Code-style) rather than a dismissible pop-up -- see
     // TopBar::setUpdateAvailable()/showUpdateAvailableBanner() below.
     if (topBar != nullptr)
-        topBar->onUpdateButtonClicked = [] { UpdateService::getInstance().restartAndInstall(); };
+        topBar->onUpdateButtonClicked = [this] {
+            if (topBar == nullptr)
+                return;
+
+            topBar->setUpdateButtonBusy (true, LocalizationManager::getInstance().getText ("update.pill_restarting"));
+
+            // restartAndInstall() only returns false if the installer somehow
+            // stopped being ready between the pill appearing and this click
+            // (e.g. its file got removed) -- restore the clickable label so
+            // the user isn't stuck looking at "Restarting..." forever.
+            if (! UpdateService::getInstance().restartAndInstall())
+                topBar->setUpdateButtonBusy (false);
+        };
 
     // Covers the case where the download (kicked off at launch, before
     // login) already finished while the user was still on the login/venue
