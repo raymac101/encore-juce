@@ -45,7 +45,22 @@
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/create-venue-modal/**)",
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/venue-users/**)",
       "Read(//Users/ray/Projects/Code Projects/encore/src/app/components/settings/**)",
-      "mcp__plugin_claude-mem_mcp-search__get_observations"
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "WebSearch",
+      "Bash(security dump-keychain *)",
+      "Bash(cmake --build build --config Release)",
+      "Bash(export NOTARY_KEYCHAIN_PROFILE=\"AC_NOTARY\")",
+      "Bash(packaging/macos/build_dmg.sh 'build/EncoreJUCE_artefacts/Release/Encore Karaoke.app' 3.1.249 'Developer ID Application: Viracicom Entertainment Group LTD \\(9A3YNFA752\\)')",
+      "Bash(shasum -a 256 \"dist/EncoreKaraoke-3.1.249-mac.dmg\")",
+      "Bash(gsutil ls *)",
+      "Bash(echo \"write-test\")",
+      "Bash(curl -s -X POST --data-binary @/tmp/_write_test.txt -H 'Content-Type: text/plain' 'https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o?uploadType=media&name=Installers%2F_write_test.txt')",
+      "Bash(curl -s \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2F_write_test.txt?alt=media\")",
+      "Bash(curl -s -X DELETE \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2F_write_test.txt\" -o /dev/null -w \"delete status: %{http_code}\\\\n\")",
+      "Bash(curl -sS -X POST --data-binary @dist/EncoreKaraoke-3.1.249-mac.dmg -H 'Content-Type: application/octet-stream' 'https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o?uploadType=media&name=Installers%2FEncoreKaraoke-3.1.249-mac.dmg' -o /tmp/upload_response.json -w 'HTTP %{http_code}\\\\n')",
+      "Bash(curl -sS \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.249-mac.dmg?alt=media\" -o /tmp/verify_download.dmg -w \"HTTP %{http_code}, size %{size_download}\\\\n\")",
+      "Bash(shasum -a 256 /tmp/verify_download.dmg)",
+      "Bash(rm /tmp/verify_download.dmg)"
     ]
   }
 }

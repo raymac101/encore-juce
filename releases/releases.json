@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.1.243",
+    "releaseNotesUrl": "",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-1.1.220-win64.exe?alt=media",
+        "sha256": "45e2cda80b1d4894c8d9aac1e0bdfc4f34512d14500036fbdea29e9296781dde"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-1.1.243-mac.dmg?alt=media",
+        "sha256": "PENDING_BUILD"
+      }
+    }
+  },
+  {
     "version": "1.1.200",
     "releaseNotesUrl": "",
     "platforms": {
