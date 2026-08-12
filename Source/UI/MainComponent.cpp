@@ -6010,7 +6010,7 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
     {
         DBG ("[Pipeline] new -> reject (queue closed): " << juce::String(item.songName));
         RequestService::getInstance().patchStatus (venueId, juce::String(item.id),
-            "rejected", "No longer accepting song requests.  Please come back next time!");
+            "rejected", "The queue is now closed.");
         return;
     }
 

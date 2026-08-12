@@ -165,9 +165,8 @@ settings.language=Langue
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Chante actuellement :
 queue.clear_queue=Vider la file
-queue.queue_label=File d'attente
-queue.auto_play=Lecture auto
-queue.delay_label=Délai (sec) :
+queue.queue_open=File d'attente ouverte
+queue.queue_closed=File d'attente fermée
 queue.clear.no_venue_title=Aucun lieu actif
 queue.clear.no_venue_body=Veuillez sélectionner un lieu avant de vider la file.
 queue.clear.confirm_title=Vider la file

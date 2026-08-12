@@ -573,9 +573,8 @@ void LocalizationManager::loadFallbackTranslations()
     // ── QueueBar ──
     translations["queue.now_singing"] = "Now Singing:";
     translations["queue.clear_queue"] = "Clear Queue";
-    translations["queue.queue_label"] = "Queue";
-    translations["queue.auto_play"] = "Auto Play";
-    translations["queue.delay_label"] = "Delay (sec):";
+    translations["queue.queue_open"] = "Queue Open";
+    translations["queue.queue_closed"] = "Queue Closed";
 
     // ── Menu bar ──
     translations["menu.window"] = "Window";

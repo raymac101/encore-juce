@@ -140,13 +140,15 @@ void TopBar::setupUI()
     addAndMakeVisible(userButton.get());
 
     // Update pill -- VS Code-style persistent title-bar button, hidden
-    // until setUpdateAvailable(true, ...) is called. Colour matches the
-    // app's existing update-notice blue (was MainComponent::UpdateBanner's
-    // "Restart Now" button, now replaced by this).
+    // until setUpdateAvailable(true, ...) is called. Coloured with the
+    // app's primary accent (same cyan as ACCENT_COLOR / QueueBar's
+    // "Clear Queue" button) with black text for contrast, matching that
+    // button's look exactly.
     updateButton_ = std::make_unique<juce::TextButton>("Update");
     updateButton_->setButtonText(LocalizationManager::getInstance().getText("update.pill_label"));
-    updateButton_->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2f6fed));
-    updateButton_->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    updateButton_->setColour(juce::TextButton::buttonColourId, ACCENT_COLOR);
+    updateButton_->setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+    updateButton_->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
     updateButton_->onClick = [this]() {
         if (onUpdateButtonClicked)
             onUpdateButtonClicked();

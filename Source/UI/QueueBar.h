@@ -10,8 +10,8 @@
     - "Now Singing" card with play/pause overlay on avatar
     - Drag-reorderable singer list with round indicators (blue first, red last)
     - Each singer card shows avatar, name, performance icons, and 1-5 song chips
-    - Bottom status bar: singer count, song count, total time, queue toggle,
-      auto-play toggle, delay slider, clear queue button
+    - Bottom status bar: singer count, song count, total time, Queue Open/
+      Closed toggle, clear queue button
     - Left-edge resize handle
 
   ==============================================================================
@@ -68,21 +68,25 @@ public:
 
     // State
     void setPlaying(bool playing);
-    void setQueueRunning(bool running);
-    void setAutoPlay(bool enabled);
-    void setDelaySec(int seconds);
 
     // Countdown (shown between songs when autoplay + delay > 0)
     void startCountdown(int seconds);
     void stopCountdown();
 
-    // Read-only accessors used by MainComponent
+    // Read-only accessors used by MainComponent -- Auto Play/Delay no
+    // longer have a UI (see the Queue toggle below, which replaced them),
+    // so these are permanently false/0 now; kept only because
+    // MainComponent::handleSongFinished() still calls them and the
+    // no-auto-play/no-delay path they take is exactly the desired
+    // always-manual-advance behaviour.
     bool isAutoPlayEnabled() const noexcept { return autoPlayEnabled; }
     int  getDelaySec()       const noexcept { return delaySec; }
 
-    // When true, all incoming requests from mobile (TAGG) are auto-rejected
-    // with a "no longer accepting song requests" reason. Defaults to false.
-    void setQueueClosed (bool closed) { queueClosed = closed; }
+    // When true (checkbox unchecked, showing "Queue Closed"), all incoming
+    // requests from mobile (TAGG) are auto-rejected with a "queue is
+    // closed" reason -- see MainComponent::onIncomingNewRequest(). Defaults
+    // to false (queue open).
+    void setQueueClosed (bool closed);
     bool isQueueClosed() const noexcept { return queueClosed; }
 
     // Read-only access to the live queue state — needed for the
@@ -109,8 +113,6 @@ public:
     std::function<void(int from, int to)>             onReorder;
     std::function<void()>                             onClearQueue;
     std::function<void(bool)>                         onQueueToggled;
-    std::function<void(bool)>                         onAutoPlayToggled;
-    std::function<void(int)>                          onDelayChanged;
     std::function<void(int singerIdx, int songIdx)>   onSongClicked;
     std::function<void(int)>                          onWidthChanged;
     std::function<void(bool)>                         onExpandToggled;
@@ -283,10 +285,7 @@ private:
     std::unique_ptr<juce::TextButton> addSingerButton;
     std::unique_ptr<juce::TextButton> rotateBackButton;
     std::unique_ptr<juce::TextButton> rotateForwardButton;
-    std::unique_ptr<juce::ToggleButton> queueToggle;
-    std::unique_ptr<juce::ToggleButton> autoPlayToggle;
-    std::unique_ptr<juce::Slider>     delaySlider;
-    std::unique_ptr<juce::Label>      delayLabel;
+    std::unique_ptr<juce::ToggleButton> queueToggle;   // "Queue Open" / "Queue Closed"
     std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 
     //==============================================================================
@@ -295,7 +294,6 @@ private:
     Singers              currentSinger;
     bool                 hasCurrentSinger = false;
     bool                 isPlayingState = false;
-    bool                 queueRunning = false;
     bool                 autoPlayEnabled = false;
     int                  delaySec = 0;
     bool                 queueClosed = false;
@@ -313,6 +311,7 @@ private:
 
     // Colours
     juce::Colour bgColour          { 0xff262626 };
+    juce::Colour closedBgColour    { 0xff3a1414 };  // dark red -- shown instead of bgColour while queueClosed
     juce::Colour headerBgColour    { 0xff333333 };
     juce::Colour nowPlayingBg      { 0xff30daff };
     juce::Colour cardBgColour      { 0xff262626 };
@@ -333,7 +332,7 @@ private:
 
     static constexpr int venueHeaderHeight   = 56;
     static constexpr int nowPlayingHeight    = 100;
-    static constexpr int statusBarHeight     = 138;
+    static constexpr int statusBarHeight     = 110;  // was 138 -- shrunk by one row after removing Auto Play/Delay
     static constexpr int singerRowHeight     = 64;
     static constexpr int expandedCardWidth   = 320;
     static constexpr int expandedCardHeight  = 84;

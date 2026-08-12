@@ -834,44 +834,20 @@ QueueBar::QueueBar()
     clearQueueButton->onClick = [this]() { if (onClearQueue) onClearQueue(); };
     addAndMakeVisible(*clearQueueButton);
 
-    queueToggle = std::make_unique<juce::ToggleButton>("Queue");
+    // "Queue Open" / "Queue Closed" -- checked = open (default). Directly
+    // drives queueClosed (see setQueueClosed()), which gates incoming
+    // mobile (TAGG) song requests in MainComponent::onIncomingNewRequest().
+    queueToggle = std::make_unique<juce::ToggleButton>(LocalizationManager::getInstance().getText("queue.queue_open"));
     queueToggle->setToggleState(true, juce::dontSendNotification);
     queueToggle->setColour(juce::ToggleButton::textColourId, textColour);
     queueToggle->setColour(juce::ToggleButton::tickColourId, accentColour);
     queueToggle->onClick = [this]()
     {
-        if (onQueueToggled) onQueueToggled(queueToggle->getToggleState());
+        const bool open = queueToggle->getToggleState();
+        setQueueClosed (! open);
+        if (onQueueToggled) onQueueToggled(open);
     };
     addAndMakeVisible(*queueToggle);
-
-    autoPlayToggle = std::make_unique<juce::ToggleButton>("Auto Play");
-    autoPlayToggle->setColour(juce::ToggleButton::textColourId, textColour);
-    autoPlayToggle->setColour(juce::ToggleButton::tickColourId, accentColour);
-    autoPlayToggle->onClick = [this]()
-    {
-        if (onAutoPlayToggled) onAutoPlayToggled(autoPlayToggle->getToggleState());
-    };
-    addAndMakeVisible(*autoPlayToggle);
-
-    delaySlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal,
-                                                  juce::Slider::TextBoxLeft);
-    delaySlider->setRange(0, 60, 1);
-    delaySlider->setValue(0, juce::dontSendNotification);
-    delaySlider->setColour(juce::Slider::thumbColourId, accentColour);
-    delaySlider->setColour(juce::Slider::trackColourId, juce::Colour(0xff474747));
-    delaySlider->setColour(juce::Slider::textBoxTextColourId, textColour);
-    delaySlider->setTextBoxStyle(juce::Slider::TextBoxLeft, false, 36, 20);
-    delaySlider->onValueChange = [this]()
-    {
-        delaySec = (int)delaySlider->getValue();
-        if (onDelayChanged) onDelayChanged(delaySec);
-    };
-    addAndMakeVisible(*delaySlider);
-
-    delayLabel = std::make_unique<juce::Label>("delay", "Delay (sec):");
-    delayLabel->setColour(juce::Label::textColourId, textColour);
-    delayLabel->setFont(juce::Font(11.f));
-    addAndMakeVisible(*delayLabel);
 
     addSingerButton = std::make_unique<juce::TextButton>("+ Add Singer");
     addSingerButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
@@ -909,8 +885,9 @@ void QueueBar::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
 
-    // Full background
-    g.setColour(bgColour);
+    // Full background -- dark red while the queue is closed, as a
+    // clear at-a-glance signal that TAGG requests are being rejected.
+    g.setColour(queueClosed ? closedBgColour : bgColour);
     g.fillRect(bounds);
 
     // Venue header background
@@ -967,12 +944,7 @@ void QueueBar::resized()
         totalTimeLabel->setBounds(row1);
 
         auto row2 = statusArea.removeFromTop(28).reduced(8, 2);
-        queueToggle->setBounds(row2.removeFromLeft(row2.getWidth() / 2));
-        autoPlayToggle->setBounds(row2);
-
-        auto row3 = statusArea.removeFromTop(28).reduced(8, 2);
-        delayLabel->setBounds(row3.removeFromLeft(80));
-        delaySlider->setBounds(row3);
+        queueToggle->setBounds(row2);
 
         auto row4 = statusArea.removeFromTop(28).reduced(8, 2);
         auto row4Left  = row4.removeFromLeft(row4.getWidth() / 2 - 2);
@@ -1213,22 +1185,17 @@ void QueueBar::setPlaying(bool playing)
     nowPlayingCard->repaint();
 }
 
-void QueueBar::setQueueRunning(bool running)
+void QueueBar::setQueueClosed(bool closed)
 {
-    queueRunning = running;
-    queueToggle->setToggleState(running, juce::dontSendNotification);
-}
-
-void QueueBar::setAutoPlay(bool enabled)
-{
-    autoPlayEnabled = enabled;
-    autoPlayToggle->setToggleState(enabled, juce::dontSendNotification);
-}
-
-void QueueBar::setDelaySec(int seconds)
-{
-    delaySec = seconds;
-    delaySlider->setValue(seconds, juce::dontSendNotification);
+    queueClosed = closed;
+    if (queueToggle)
+    {
+        auto& lm = LocalizationManager::getInstance();
+        queueToggle->setToggleState(! closed, juce::dontSendNotification);
+        queueToggle->setButtonText(closed ? lm.getText("queue.queue_closed")
+                                           : lm.getText("queue.queue_open"));
+    }
+    repaint();
 }
 
 void QueueBar::setBarWidth(int w)
@@ -1436,9 +1403,8 @@ void QueueBar::updateAllText()
     clearQueueButton->setButtonText(lm.getText("queue.clear_queue"));
     rotateBackButton->setButtonText(lm.getText("queue.rotate_back"));
     rotateForwardButton->setButtonText(lm.getText("queue.rotate_forward"));
-    queueToggle->setButtonText(lm.getText("queue.queue_label"));
-    autoPlayToggle->setButtonText(lm.getText("queue.auto_play"));
-    delayLabel->setText(lm.getText("queue.delay_label"), juce::dontSendNotification);
+    queueToggle->setButtonText(queueClosed ? lm.getText("queue.queue_closed")
+                                            : lm.getText("queue.queue_open"));
     updateStatusLabels();
 }
 
