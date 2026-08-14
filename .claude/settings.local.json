@@ -60,7 +60,23 @@
       "Bash(curl -sS -X POST --data-binary @dist/EncoreKaraoke-3.1.249-mac.dmg -H 'Content-Type: application/octet-stream' 'https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o?uploadType=media&name=Installers%2FEncoreKaraoke-3.1.249-mac.dmg' -o /tmp/upload_response.json -w 'HTTP %{http_code}\\\\n')",
       "Bash(curl -sS \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.249-mac.dmg?alt=media\" -o /tmp/verify_download.dmg -w \"HTTP %{http_code}, size %{size_download}\\\\n\")",
       "Bash(shasum -a 256 /tmp/verify_download.dmg)",
-      "Bash(rm /tmp/verify_download.dmg)"
+      "Bash(rm /tmp/verify_download.dmg)",
+      "Bash(cmake --version)",
+      "Bash(xcode-select -p)",
+      "Bash(brew --version)",
+      "Bash(brew search *)",
+      "Bash(brew info *)",
+      "Bash(brew install *)",
+      "Bash(mkdir -p \"/Volumes/MediaDrive/CodeProjects/Encore/EncoreAiConverterPoC/src\" \"/Volumes/MediaDrive/CodeProjects/Encore/EncoreAiConverterPoC/.vscode\")",
+      "Bash(brew --prefix onnxruntime)",
+      "Bash(find /opt/homebrew/opt/onnxruntime -maxdepth 3 | sort)",
+      "Read(//opt/homebrew/Cellar/onnxruntime/1.29.0/**)",
+      "Bash(readlink /opt/homebrew/opt/onnxruntime; find -L /opt/homebrew/opt/onnxruntime -maxdepth 4 | sort)",
+      "Bash(grep -i \"add_library\\\\|onnxruntime::\" /opt/homebrew/opt/onnxruntime/lib/cmake/onnxruntime/onnxruntimeTargets.cmake | head -10)",
+      "Read(//opt/homebrew/Cellar/onnxruntime/1.29.0/lib/cmake/onnxruntime/**)",
+      "Bash(cmake -S . -B build -G Ninja)",
+      "Bash(cmake --build build)",
+      "Bash(./build/converter_poc)"
     ]
   }
 }
