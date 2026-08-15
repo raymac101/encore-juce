@@ -89,23 +89,26 @@ namespace
             }
         }
 
-        // Canonical source: Firebase Storage folder Venues/<venueId>/Ads/.
-        const juce::String prefix = "Venues/" + venueId + "/Ads/";
-        const juce::String listUrl = "https://firebasestorage.googleapis.com/v0/b/"
-                                   + FirebaseConfig::storageBucket
-                                   + "/o?prefix="
-                                   + juce::URL::addEscapeChars (prefix, true);
-
         juce::StringArray headers;
-        const auto token = FirestoreClient::getInstance().getIdToken();
+        const auto token = FirestoreClient::getInstance().getFreshIdToken();
         if (token.isNotEmpty())
             headers.add ("Authorization: Bearer " + token);
 
-        int status = 0;
-        const auto listJson = httpGetJson (juce::URL (listUrl), headers, &status);
-
-        if (status >= 200 && status < 300 && listJson.isObject())
+        auto appendFromPrefix = [&] (const juce::String& prefix)
         {
+            const juce::String listUrl = "https://firebasestorage.googleapis.com/v0/b/"
+                                       + FirebaseConfig::storageBucket
+                                       + "/o?prefix="
+                                       + juce::URL::addEscapeChars (prefix, true);
+
+            int status = 0;
+            const auto listJson = httpGetJson (juce::URL (listUrl), headers, &status);
+            if (! (status >= 200 && status < 300) || ! listJson.isObject())
+            {
+                DBG ("LyricDisplay: ad list failed for prefix " + prefix + " (HTTP " + juce::String (status) + ")");
+                return;
+            }
+
             const auto items = listJson.getProperty ("items", juce::var());
             if (auto* arr = items.getArray())
             {
@@ -151,7 +154,12 @@ namespace
                         out.push_back (ad);
                 }
             }
-        }
+        };
+
+        // Canonical source: Firebase Storage folder Venues/<venueId>/Ads/.
+        // Also scan lowercase "ads" for venues created with legacy casing.
+        appendFromPrefix ("Venues/" + venueId + "/Ads/");
+        appendFromPrefix ("Venues/" + venueId + "/ads/");
 
         std::sort (out.begin(), out.end(), [] (const LyricDisplayComponent::AdEntry& a,
                                                const LyricDisplayComponent::AdEntry& b)

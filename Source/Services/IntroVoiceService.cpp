@@ -14,7 +14,7 @@ namespace
     // ElevenLabs' core synthesize/voice-list endpoints -- stable for a long
     // time, but worth a quick check against their current docs if either
     // ever starts returning unexpected errors.
-    constexpr const char* kVoicesUrl = "https://api.elevenlabs.io/v1/voices";
+    constexpr const char* kVoicesUrl = "https://api.elevenlabs.io/v2/voices";
     constexpr const char* kTtsUrlPrefix = "https://api.elevenlabs.io/v1/text-to-speech/";
     constexpr const char* kModelId = "eleven_multilingual_v2";
     constexpr int kConnectionTimeoutMs = 20000;
@@ -112,7 +112,9 @@ void IntroVoiceService::fetchAvailableVoices (const juce::String& apiKey,
     {
         const juce::URL url (kVoicesUrl);
         int status = 0;
-        const auto headers = juce::String ("xi-api-key: ") + apiKey;
+        const auto headers = juce::String ("xi-api-key: ") + apiKey +
+                             "\r\nAccept: application/json" +
+                             "\r\nUser-Agent: EncoreKaraoke/1.0";
 
         auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
                         .withConnectionTimeoutMs (kConnectionTimeoutMs)
@@ -121,17 +123,27 @@ void IntroVoiceService::fetchAvailableVoices (const juce::String& apiKey,
                         .withStatusCode (&status);
 
         auto stream = std::unique_ptr<juce::InputStream> (url.createInputStream (opts));
+        const auto responseBody = stream != nullptr ? stream->readEntireStreamAsString() : juce::String();
         if (stream == nullptr || status != 200)
         {
             if (onDone)
-                juce::MessageManager::callAsync ([onDone, status]
+                juce::MessageManager::callAsync ([onDone, status, responseBody]
                 {
-                    onDone (false, {}, "Could not reach ElevenLabs (HTTP " + juce::String (status) + ")");
+                    juce::String details;
+                    if (responseBody.isNotEmpty())
+                    {
+                        details = responseBody.replaceCharacters ("\r\n", "  ").trim();
+                        if (details.length() > 180)
+                            details = details.substring (0, 180) + "...";
+                        details = " - " + details;
+                    }
+
+                    onDone (false, {}, "Could not reach ElevenLabs (HTTP " + juce::String (status) + ")" + details);
                 });
             return;
         }
 
-        const auto parsed = juce::JSON::parse (stream->readEntireStreamAsString());
+        const auto parsed = juce::JSON::parse (responseBody);
         const auto voicesVar = parsed.getProperty ("voices", {});
         if (! voicesVar.isArray())
         {
