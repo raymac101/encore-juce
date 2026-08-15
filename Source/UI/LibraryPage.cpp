@@ -213,9 +213,15 @@ LibraryPage::LibraryPage()
     // staying fixed while the text/buttons scroll past them.
     contentHolder_->onPaint = [this](juce::Graphics& g)
     {
-        auto bounds = contentHolder_->getLocalBounds();
-        auto header = bounds.reduced(20, 16).removeFromTop(128);
-        MenuTheme::drawHeaderPanel(g, header);
+        auto bounds  = contentHolder_->getLocalBounds();
+        auto reduced = bounds.reduced(20, 16);
+
+        // Header panel height tracks its actual content (title/path/progress-or-message)
+        // rather than a fixed constant, so it doesn't overlap the button row when the
+        // progress bar is hidden and the content above the buttons is shorter.
+        int headerTop    = reduced.getY();
+        int headerHeight = juce::jmax(80, initialSongLoadBtn_->getY() - 20 - headerTop);
+        MenuTheme::drawHeaderPanel(g, juce::Rectangle<int>(reduced.getX(), headerTop, reduced.getWidth(), headerHeight));
 
         // Stats panel starts below the buttons, with spacing
         int panelY = initialSongLoadBtn_->getBottom() + 20;
@@ -537,45 +543,50 @@ void LibraryPage::resized()
 void LibraryPage::layoutContent()
 {
     auto area   = contentHolder_->getLocalBounds().reduced(20, 16);
-    int  w      = area.getWidth();
+
+    // Inset all content from the decorative panel borders drawn in onPaint
+    // (which sit at the `area` edges) so text/controls never touch the box.
+    const int innerPad = 16;
+    int  contentX = area.getX() + innerPad;
+    int  w        = area.getWidth() - innerPad * 2;
     int  lineH  = 24;
     int  btnH   = 32;
     int  gap    = 12;
     int  y      = area.getY();
 
     // Title
-    titleLabel_->setBounds(area.getX(), y, w, 30);
+    titleLabel_->setBounds(contentX, y, w, 30);
     y += 34;
 
     // Path label
-    pathLabel_->setBounds(area.getX(), y, w, lineH);
+    pathLabel_->setBounds(contentX, y, w, lineH);
     y += lineH + 4;
 
     // Path editor + browse button
     int browseW = 36;
-    pathEditor_->setBounds(area.getX(), y, w - browseW - 4, lineH);
-    browseBtn_->setBounds(area.getX() + w - browseW, y, browseW, lineH);
+    pathEditor_->setBounds(contentX, y, w - browseW - 4, lineH);
+    browseBtn_->setBounds(contentX + w - browseW, y, browseW, lineH);
     y += lineH + gap;
 
     // Progress section
     if (progressBar_->isVisible())
     {
-        progressLabel_->setBounds(area.getX(), y, 100, lineH);
-        progressBar_->setBounds(area.getX() + 104, y, w - 104, lineH);
+        progressLabel_->setBounds(contentX, y, 100, lineH);
+        progressBar_->setBounds(contentX + 104, y, w - 104, lineH);
         y += lineH + 6;
-        currentSongLabel_->setBounds(area.getX(), y, w, lineH - 4);
+        currentSongLabel_->setBounds(contentX, y, w, lineH - 4);
         y += lineH + gap;
     }
 
     // Message label
-    messageLabel_->setBounds(area.getX(), y, w, lineH - 4);
+    messageLabel_->setBounds(contentX, y, w, lineH - 4);
     y += messageLabel_->isVisible() ? (lineH - 4 + 8) : 8;
 
     // Button bar (4 buttons equally spaced)
     int btnGap  = 8;
     int numBtns = 4;
     int btnW    = (w - btnGap * (numBtns - 1)) / numBtns;
-    int bx      = area.getX();
+    int bx      = contentX;
 
     initialSongLoadBtn_->setBounds(bx, y, btnW, btnH); bx += btnW + btnGap;
     addSongsBtn_       ->setBounds(bx, y, btnW, btnH); bx += btnW + btnGap;
@@ -584,8 +595,8 @@ void LibraryPage::layoutContent()
     y += btnH + gap + 8;
 
     // Stats panel — two columns
-    int statsX    = area.getX() + 16;
-    int statsW    = (w - 48) / 2;
+    int statsX    = contentX;
+    int statsW    = (w - 16) / 2;
     int statsLineH = 22;
 
     auto placeStat = [&](juce::Label* lbl, int col) {

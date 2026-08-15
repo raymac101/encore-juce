@@ -76,7 +76,8 @@
       "Read(//opt/homebrew/Cellar/onnxruntime/1.29.0/lib/cmake/onnxruntime/**)",
       "Bash(cmake -S . -B build -G Ninja)",
       "Bash(cmake --build build)",
-      "Bash(./build/converter_poc)"
+      "Bash(./build/converter_poc)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
