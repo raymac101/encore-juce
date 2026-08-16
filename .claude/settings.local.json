@@ -77,7 +77,28 @@
       "Bash(cmake -S . -B build -G Ninja)",
       "Bash(cmake --build build)",
       "Bash(./build/converter_poc)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(cp /Users/raymac/Library/EncoreKaraoke/user-preferences.json /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/user-preferences.json.bak)",
+      "Bash(log show *)",
+      "Bash(python3 -c \"import Quartz; print\\('Quartz OK'\\)\")",
+      "Bash(open \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Debug/Encore Karaoke.app\" --args --dev-skip-login)",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Encore Karaoke\" to get {position, size} of window 1')",
+      "Bash(screencapture -x -R920,263,720,852 /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/ribbon_check.png)",
+      "Bash(osascript -e 'tell application \"System Events\" *)",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Encore Karaoke\" to get name of every window')",
+      "Bash(\"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Debug/Encore Karaoke.app/Contents/MacOS/Encore Karaoke\" --dev-skip-login)",
+      "Bash(osascript -e 'tell application \"System Events\" to get {name, unix id} of every process whose name is \"Encore Karaoke\"')",
+      "Bash(osascript -e ' *)",
+      "Bash(screencapture -x -R920,263,720,852 /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/login_window.png)",
+      "Bash(screencapture -x -R920,263,720,852 /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/login_window2.png)",
+      "Bash(screencapture -x /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/full_screen.png)",
+      "Bash(kill 42331)",
+      "Bash(\"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Debug/Encore Karaoke.app/Contents/MacOS/Encore Karaoke\")",
+      "Bash(screencapture -x -R900,250,760,900 /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/login_final.png)",
+      "Bash(kill 50791)",
+      "Bash(node --check venueMembers.js)",
+      "Bash(firebase functions:list)"
     ]
   }
 }

@@ -130,13 +130,14 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
                                        const juce::String& body,
                                        int* httpStatus,
                                        juce::StringArray extraHeaders,
-                                       const juce::String& contentType)
+                                       const juce::String& contentType,
+                                       bool includeAuthHeader)
 {
     juce::URL u = url;
     if (body.isNotEmpty())
         u = u.withPOSTData(body);
 
-    const juce::String bearerToken = getIdToken();
+    const juce::String bearerToken = includeAuthHeader ? getIdToken() : juce::String();
 
     juce::StringArray headers;
     headers.add("Content-Type: " + contentType);
@@ -228,7 +229,14 @@ FirestoreClient::AuthResult FirestoreClient::signInWithEmailPassword(const juce:
     body->setProperty("returnSecureToken", true);
 
     int status = 0;
-    auto resp = httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    // includeAuthHeader=false: this is a public, credential-establishing
+    // endpoint keyed only by the API key -- it must never carry a
+    // *different*, still-valid session's leftover idToken_ (e.g. from
+    // LoginWindow's background "stay signed in" refresh), which Identity
+    // Toolkit rejects outright rather than ignoring. See httpJsonRaw()'s
+    // doc comment.
+    auto resp = httpJsonRaw(url, "POST", juce::JSON::toString(juce::var(body.get())), &status,
+                            {}, "application/json", false);
 
     if (status >= 200 && status < 300 && resp.isObject())
     {
@@ -257,7 +265,9 @@ FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce:
     body->setProperty("returnSecureToken", true);
 
     int status = 0;
-    auto resp = httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    // includeAuthHeader=false -- see signInWithEmailPassword()'s comment.
+    auto resp = httpJsonRaw(url, "POST", juce::JSON::toString(juce::var(body.get())), &status,
+                            {}, "application/json", false);
 
     if (status >= 200 && status < 300 && resp.isObject())
     {
@@ -274,6 +284,53 @@ FirestoreClient::AuthResult FirestoreClient::signUpWithEmailPassword(const juce:
     return parseAuthError(resp, status);
 }
 
+FirestoreClient::AuthResult FirestoreClient::signInWithRefreshToken(const juce::String& refreshToken)
+{
+    if (refreshToken.isEmpty())
+        return { false, false, {}, {} };
+
+    juce::URL url("https://securetoken.googleapis.com/v1/token?key=" + FirebaseConfig::apiKey);
+    const juce::String form = "grant_type=refresh_token&refresh_token="
+                             + juce::URL::addEscapeChars(refreshToken, true);
+
+    int status = 0;
+    // includeAuthHeader=false -- see httpJsonRaw()'s doc comment. Matters
+    // here in particular: this is called while a *different* session may
+    // already be signed in (see LoginContent::attemptSavedSignIn), and
+    // must bootstrap the new one purely from `refreshToken`, not whatever
+    // idToken_ currently happens to hold.
+    auto resp = httpJsonRaw(url, "POST", form, &status, {}, "application/x-www-form-urlencoded", false);
+
+    if (status < 200 || status >= 300 || ! resp.isObject())
+        return { false, false, "REFRESH_FAILED", {} };
+
+    juce::String newIdToken, newLocalId;
+    {
+        const juce::ScopedLock lock(stateLock_);
+        idToken_       = resp.getProperty("id_token", "").toString();
+        refreshToken_  = resp.getProperty("refresh_token", "").toString();
+        localId_       = resp.getProperty("user_id", "").toString();
+        tokenIssuedAt_ = juce::Time::getCurrentTime();
+        tokenLifetimeSeconds_ = resp.getProperty("expires_in", "3600").toString().getIntValue();
+        newIdToken = idToken_;
+        newLocalId = localId_;
+    }
+
+    // The refresh grant's response doesn't include email/displayName the
+    // way signInWithPassword's does -- pull email out of the fresh
+    // token's own claims instead of a second network round trip.
+    const auto claims = parseJwtPayload(newIdToken);
+    {
+        const juce::ScopedLock lock(stateLock_);
+        email_ = claims.getProperty("email", email_).toString();
+    }
+
+    if (newIdToken.isEmpty() || newLocalId.isEmpty())
+        return { false, false, "REFRESH_FAILED", {} };
+
+    return { true, false, {}, {} };
+}
+
 FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::String& email)
 {
     juce::URL url(FirebaseConfig::authBaseUrl
@@ -284,7 +341,13 @@ FirestoreClient::AuthResult FirestoreClient::sendPasswordResetEmail(const juce::
     body->setProperty("email", email);
 
     int status = 0;
-    auto resp = httpJson(url, "POST", juce::JSON::toString(juce::var(body.get())), &status);
+    // includeAuthHeader=false -- see signInWithEmailPassword()'s comment.
+    // Also used by the Customer Admin tool to reset OTHER accounts'
+    // passwords while signed in as the admin, so this matters even outside
+    // the "stay signed in" scenario -- must never carry the admin's own
+    // token to what's meant to be a public, target-email-only endpoint.
+    auto resp = httpJsonRaw(url, "POST", juce::JSON::toString(juce::var(body.get())), &status,
+                            {}, "application/json", false);
 
     if (status >= 200 && status < 300 && resp.isObject())
         return { true, false, {}, {} };
@@ -417,12 +480,20 @@ juce::Array<juce::var> FirestoreClient::runQuery(const juce::String& parentPath,
 }
 
 juce::Array<juce::var> FirestoreClient::listCollection(const juce::String& collectionPath,
-                                                       int pageSize)
+                                                       int pageSize, bool* ok)
 {
     juce::URL url(FirebaseConfig::firestoreBaseUrl() + "/" + collectionPath
                   + "?pageSize=" + juce::String(pageSize));
     int status = 0;
     auto resp = httpJson(url, "GET", {}, &status);
+
+    // A real "the collection is empty" response is a 2xx with no
+    // "documents" field. Anything else that also has no "documents" field
+    // -- a dropped connection (status stays 0), a timeout, an auth error,
+    // a transient 5xx -- is a failed request, not an empty collection, and
+    // must not be reported to the caller as the same thing.
+    if (ok != nullptr)
+        *ok = (status >= 200 && status < 300);
 
     juce::Array<juce::var> docs;
     if (auto* arr = resp.getProperty("documents", juce::var()).getArray())

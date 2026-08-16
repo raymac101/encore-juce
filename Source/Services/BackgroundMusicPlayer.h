@@ -115,6 +115,18 @@ public:
     void fadeIn  (float durationSeconds = 1.5f);
 
     //==========================================================================
+    // Master on/off (Ribbon's enable/disable button). When disabled, play()
+    // and fadeIn() both no-op -- nothing can start this player back up,
+    // regardless of which of the many call sites tries (song pause/stop,
+    // song finishing naturally, or the user's own Play button). Disabling
+    // while already audible fades it out immediately rather than cutting
+    // it off. Does not affect playSpecificTrack()/playOneShotIntro(),
+    // which are deliberate one-shot previews/announcements, not the
+    // "fill silence between singers" behaviour this gate is for.
+    void setEnabled (bool enabled);
+    bool isEnabled() const noexcept { return enabled_.load(); }
+
+    //==========================================================================
     // Phase B: this player's own VST3 plugin chain (the Mixer page's
     // "Background Music" strip). Message thread only for load/unload/editor
     // access; this class calls process() on it internally, from its own
@@ -145,6 +157,7 @@ private:
 
     std::atomic<bool> initialized_ { false };
     std::atomic<bool> playing_ { false };
+    std::atomic<bool> enabled_ { true };
     std::atomic<double> currentPosition_ { 0.0 };
     std::atomic<double> totalLength_ { 0.0 };
 
@@ -154,7 +167,6 @@ private:
     std::atomic<float> fadeRatePerSample_ { 0.0f };
     std::atomic<bool> fadingOut_ { false };
     std::atomic<bool> fadingIn_  { false };
-    std::atomic<bool> pauseAfterFadeFlag_ { false };  // set by audio thread, handled on msg thread
 
     std::atomic<int> currentIndex_ { 0 };
     std::atomic<bool> trackChangedFlag_ { false };
@@ -164,7 +176,7 @@ private:
     // checked/cleared on the audio thread (getNextAudioBlock) when the
     // one-shot file finishes, consumed on the message thread (timerCallback)
     // to resume the regular rotation and fire the completion callback.
-    // Mirrors the existing trackChangedFlag_/pauseAfterFadeFlag_ pattern.
+    // Mirrors the existing trackChangedFlag_ pattern.
     std::atomic<bool> oneShotIntroActive_ { false };
     std::atomic<bool> oneShotIntroFinishedFlag_ { false };
     std::function<void (bool)> oneShotIntroFinishedCallback_;  // message-thread only

@@ -124,6 +124,31 @@ private:
     void timerCallback() override;
     void pollWatcher();
 
+    // Message-thread-only in-flight write counter. A write's background
+    // thread can take several seconds (persistSingerOrder in particular
+    // PATCHes one singer doc at a time), and the watcher polls on a fixed
+    // 3s timer regardless -- without this, a poll can land mid-write and
+    // read a half-old/half-new queue, which momentarily undoes whatever
+    // optimistic local update the write was made to confirm (e.g. Rotate
+    // visibly reverting for a moment before "correcting" itself). Both
+    // beginWrite() (called synchronously from each public write method)
+    // and endWrite() (called via callAsync from the write's background
+    // thread once it finishes) only ever run on the message thread, same
+    // as pollWatcher() itself, so this needs no atomics/locking.
+    void beginWrite() noexcept { ++pendingWrites_; }
+    void endWrite();
+    int               pendingWrites_ = 0;
+
+    // RAII scope guard for the above: construct at the top of a write's
+    // background-thread lambda, and its destructor marks the write done
+    // regardless of which of the lambda's several return points is taken.
+    struct WriteGuard
+    {
+        explicit WriteGuard (QueueService* s) : svc (s) {}
+        ~WriteGuard() { juce::MessageManager::callAsync ([s = svc] { s->endWrite(); }); }
+        QueueService* svc;
+    };
+
     juce::String      watchVenueId_;
     bool              watching_ = false;
     bool              watchInFlight_ = false;

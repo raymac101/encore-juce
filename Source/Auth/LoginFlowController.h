@@ -35,7 +35,7 @@ public:
     {
         VenueLoaded,        // Single resolved venue. `venueId` is set.
         PickVenue,          // associations.size() > 1, ask the user to pick.
-        AwaitInvitation,    // No associations. Show invitations list / block.
+        AwaitInvitation,    // No associations (pending invitations, if any, were already auto-claimed above -- see runPostAuthFlow). Offers self-serve venue setup.
         RequestAccess,      // Stored venueId is not in user's associations.
         VenueLicenseInvalid // Resolved venue exists but its license is invalid/expired.
     };
@@ -48,9 +48,8 @@ public:
         juce::String                         licenseMessage; // For VenueLicenseInvalid
         juce::String                         configuredVenueId; // Stored on this PC (for "Configured on this PC" badge)
         std::vector<UserVenueAssociation>    associations;   // For PickVenue
-        std::vector<VenueInvitation>         invitations;    // For AwaitInvitation
         bool                                 canCreateVenue = false; // admin/enterprise (gates the legacy privileged-admin path)
-        bool                                 offerSelfServeSetup = false; // Zero associations AND zero invitations — offer the onboarding wizard regardless of role.
+        bool                                 offerSelfServeSetup = false; // Zero associations — offer the onboarding wizard regardless of role. Pending invitations (if any) are auto-claimed before this is even checked, see runPostAuthFlow.
         bool                                 hasCompanyContext = false;
         juce::String                         companyId;
         juce::String                         companyRole;

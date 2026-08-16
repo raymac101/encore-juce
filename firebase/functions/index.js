@@ -142,6 +142,12 @@ exports._normalizeKeyForTests = normalizeKey;
 Object.assign(exports, require("./adminUsers")(admin, db));
 
 // ============================================================
+// Venue membership: Settings > Invite + invitation auto-claim
+// (per-venue admin, not EnterpriseAdmin; see firebase/functions/venueMembers.js)
+// ============================================================
+Object.assign(exports, require("./venueMembers")(admin, db));
+
+// ============================================================
 // LEGACY FUNCTIONS (Migrated)
 // ============================================================
 

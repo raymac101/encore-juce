@@ -309,7 +309,7 @@ void BackgroundMusicPlayer::loadTrackFile (const juce::File& trackFile, int inde
 //==============================================================================
 void BackgroundMusicPlayer::play()
 {
-    if (! initialized_.load() || playlist_.empty())
+    if (! enabled_.load() || ! initialized_.load() || playlist_.empty())
         return;
 
     // If no track is loaded yet, load the first one.
@@ -422,7 +422,7 @@ void BackgroundMusicPlayer::fadeOut (float durationSeconds)
 
 void BackgroundMusicPlayer::fadeIn (float durationSeconds)
 {
-    if (! initialized_.load() || playlist_.empty())
+    if (! enabled_.load() || ! initialized_.load() || playlist_.empty())
         return;
 
     // Ensure playback is running before fading in.
@@ -445,6 +445,21 @@ void BackgroundMusicPlayer::fadeIn (float durationSeconds)
     fadeRatePerSample_ = (target - currentGain_.load()) / juce::jmax (1.0f, samplesForFade);
     fadingOut_ = false;
     fadingIn_  = true;
+}
+
+void BackgroundMusicPlayer::setEnabled (bool enabled)
+{
+    enabled_ = enabled;
+
+    // Silence it right away if it's currently audible (or fading toward
+    // being audible) -- "disabled" must mean off now, not "off starting
+    // from whenever the current fade would have finished." Harmless if
+    // it's already silent: fadeOut() from gain 0 just stays at 0, and the
+    // transport is deliberately left running either way (see fadeOut's
+    // gain-reaches-zero comment) rather than stopped, to avoid the
+    // cross-stream audio glitch that used to cause on this same hardware.
+    if (! enabled)
+        fadeOut (0.5f);
 }
 
 //==============================================================================
@@ -497,10 +512,17 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
             {
                 gain = 0.0f;
                 fadingOut_ = false;
-                // Request a pause from the message thread; don't touch
-                // the transport source from inside the audio callback.
-                playStateChangedFlag_ = true;
-                pauseAfterFadeFlag_   = true;
+
+                // Deliberately NOT stopping transportSource_ here. This
+                // player runs on its own secondary AudioDeviceManager, and
+                // on some interfaces (this project's target Thunderbolt
+                // audio hardware included) one client's stream changing
+                // state can glitch every other client sharing the same
+                // physical device -- observed as ~0.5s of dropout in the
+                // main karaoke audio at the exact moment a fade-out
+                // finished. Leaving the transport running at gain 0 keeps
+                // this stream's state constant across fades, so there's
+                // nothing left to trigger that cross-stream hiccup.
             }
         }
         else if (fadingIn_.load())
@@ -569,14 +591,6 @@ void BackgroundMusicPlayer::advanceToNext()
 
 void BackgroundMusicPlayer::timerCallback()
 {
-    // Handle deferred pause (set by fade-out completing on the audio thread).
-    if (pauseAfterFadeFlag_.exchange (false))
-    {
-        std::lock_guard<std::mutex> lock (chainMutex_);
-        if (transportSource_) transportSource_->stop();
-        playing_ = false;
-    }
-
     // A one-shot intro (playOneShotIntro) just finished on the audio thread
     // -- resume the regular rotation from wherever it was, then tell the
     // caller. Must happen before the trackChangedFlag_ handling below,

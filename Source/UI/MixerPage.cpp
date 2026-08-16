@@ -1014,14 +1014,20 @@ void MixerPage::restorePluginSlotsForChannel(int stripIndex)
         const int slotIndex = saved.slotIndex;
         juce::Component::SafePointer<MixerPage> safe(this);
         chain->loadPlugin(slotIndex, desc, PluginHostService::getInstance().getFormatManager(),
-            [safe, stripIndex, slotIndex](bool success, juce::String /*error*/)
+            [safe](bool success, juce::String /*error*/)
             {
                 if (safe == nullptr || ! success)
                     return;
 
-                auto& sw = safe->strips[(size_t) stripIndex];
-                auto& editButton = (slotIndex == 0 ? *sw.pluginSlotAEdit : *sw.pluginSlotBEdit);
-                editButton.setEnabled(true);
+                // Restore runs asynchronously and completes after the
+                // synchronous refreshPluginPickers() call that follows
+                // restorePluginSlotsForChannel() at startup, so that first
+                // pass always shows every restored slot as "None" (and its
+                // edit button disabled) even though a plugin is now loaded
+                // and actively processing audio. Re-running the picker
+                // refresh here is what makes the dropdown -- and therefore
+                // what the user can see and unload -- match reality.
+                safe->refreshPluginPickers();
             },
             &stateBlock);
     }

@@ -941,7 +941,16 @@ void LyricDisplayComponent::paintAdPanel (juce::Graphics& g, juce::Rectangle<int
         return;
 
     auto adArea = area.reduced (18);
-    g.setColour (juce::Colours::black.withAlpha (0.42f));
+
+    // Opaque, not translucent: an image ad is drawn into this same 2D
+    // canvas right after this fill (below), so any transparency in the ad
+    // artwork or letterboxing from an aspect-ratio mismatch lets this
+    // backdrop show/blend through, reading as "faded". A video ad never
+    // showed this because idleAdVideoComponent_ is a native VideoComponent
+    // layered fully opaque on top of this whole area regardless of what's
+    // painted underneath -- this fill was invisible for video the entire
+    // time, so making it opaque only changes the image case.
+    g.setColour (juce::Colours::black);
     g.fillRoundedRectangle (adArea.toFloat(), 12.0f);
 
     if (addFrame)

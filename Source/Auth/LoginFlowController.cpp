@@ -262,9 +262,17 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             // 2) Read stored venueId from prefs
             const auto storedVenueId = UserPreferences::getInstance().getVenueId();
 
-            // 3) Associations + pending invitations
+            // 3) Auto-claim any pending invitations for this email FIRST --
+            //    e.g. a venue admin added this user via Settings > Invite
+            //    while they were signed out. This is what makes that show
+            //    up in `associations` below with no separate "accept" step
+            //    ever surfacing; best-effort (see claimAllPendingSync's own
+            //    comment), so a transient failure here just means the next
+            //    login retries it.
+            InvitationService::claimAllPendingSync(email);
+
+            // 4) Associations
             auto associations = queryAssociations(uid);
-            auto invitations  = InvitationService::queryPendingInvitationsSync(email);
 
             const bool canCreate = (host.role == UserRole::Admin
                                   || host.role == UserRole::EnterpriseAdmin
@@ -276,7 +284,6 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             DBG("[LoginFlow] storedVenueId=" << storedVenueId
                 << " associations=" << (int) associations.size()
-                << " invitations="  << (int) invitations.size()
                 << " role=" << juce::String(AccessRightsUtil::userRoleToString(host.role))
                 << " companyId=" << companyId
                 << " companyRole=" << companyRole);
@@ -289,7 +296,7 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             result.companyId         = companyId;
             result.companyRole       = companyRole;
 
-            // 4) Apply the scenario tree (mirrors Angular start.component logic)
+            // 5) Apply the scenario tree (mirrors Angular start.component logic)
             //    - Multiple associations → ALWAYS show picker (the configured
             //      venue is just badged in the list).
             //    - Single association → auto-load it.
@@ -338,9 +345,13 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             }
             else
             {
+                // Pending invitations for this email were already claimed
+                // in step 3 above -- if any existed, associations wouldn't
+                // be empty here. Zero associations at this point genuinely
+                // means "nothing to join," so self-serve setup is always
+                // offered rather than blocking on an invitations list.
                 result.outcome             = Outcome::AwaitInvitation;
-                result.offerSelfServeSetup = invitations.empty();
-                result.invitations         = std::move(invitations);
+                result.offerSelfServeSetup = true;
             }
 
             postOnMessageThread([onResult, result = std::move(result)]() mutable

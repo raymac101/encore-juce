@@ -583,7 +583,7 @@ void CustomerAdminPage::loadProfile (const juce::String& uid)
 {
     setStatus ("Loading profile...");
     juce::Component::SafePointer<CustomerAdminPage> safe (this);
-    CustomerAdminService::getInstance().getUserProfile (uid, [safe] (CustomerAdminService::UserProfile profile)
+    CustomerAdminService::getInstance().getUserProfile (uid, [safe, uid] (CustomerAdminService::UserProfile profile)
     {
         if (safe == nullptr) return;
         if (! profile.ok)
@@ -592,6 +592,18 @@ void CustomerAdminPage::loadProfile (const juce::String& uid)
             return;
         }
         safe->currentProfile_ = profile;
+
+        // Auth-only accounts (no `hosts` doc) come back from the server
+        // with host.userId left empty -- there's no hosts doc to have
+        // populated it from -- which then made every write action below
+        // (setUserPassword/deactivate/reactivate/hardDelete, all keyed off
+        // currentProfile_.host.userId) silently send an empty uid and fail
+        // server-side validation. `uid` here is the real Firebase Auth uid
+        // this profile was fetched for either way, so it's always the
+        // right fallback.
+        if (safe->currentProfile_.host.userId.isEmpty())
+            safe->currentProfile_.host.userId = uid;
+
         safe->profileLoaded_ = true;
         safe->confirmEmailEditor_.setText ({}, false);
         safe->newPasswordEditor_.setText ({}, false);

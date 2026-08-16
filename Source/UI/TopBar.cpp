@@ -316,16 +316,37 @@ void TopBar::paint(juce::Graphics& g)
     
     // Draw user avatar
     auto userArea = getUserArea();
-    auto avatarBounds = userArea.removeFromLeft(AVATAR_SIZE).reduced(2);
+
+    // A true circle regardless of the bar's current (user-resizable)
+    // height -- getUserArea() spans the bar's full height, so reusing that
+    // as the avatar's height too (the old `.reduced(2)` on the full-height
+    // slice) stretched it into an oval whenever the bar was taller than
+    // AVATAR_SIZE. Diameter is 60% of the bar height instead of the bar
+    // height itself, width forced equal to height, centred in the reserved
+    // AVATAR_SIZE-wide column (resized() reserves the same width for
+    // userNameLabel's left margin, so that reservation itself is unchanged).
+    const int avatarDiameter = juce::roundToInt ((float) userArea.getHeight() * 0.6f);
+    auto avatarBounds = userArea.removeFromLeft(AVATAR_SIZE)
+                                 .withSizeKeepingCentre(avatarDiameter, avatarDiameter);
 
     if (userAvatarImage.isValid())
     {
+        // Opaque backing behind the image -- these small preset avatars
+        // often carry their own transparency, and drawn straight onto the
+        // bar's near-black background that blends toward black and reads
+        // as faded/washed out. QueueBar's singer rows already solve this
+        // (an opaque fill behind the avatar before the image); TopBar just
+        // never had it. Same accent used there.
+        g.setColour(ACCENT_COLOR);
+        g.fillEllipse(avatarBounds.toFloat());
         g.drawImage(userAvatarImage, avatarBounds.toFloat(),
                    juce::RectanglePlacement::centred);
     }
     else if (defaultAvatarImage.isValid())
     {
         // Use default avatar if user avatar didn't load
+        g.setColour(ACCENT_COLOR);
+        g.fillEllipse(avatarBounds.toFloat());
         g.drawImage(defaultAvatarImage, avatarBounds.toFloat(),
                    juce::RectanglePlacement::centred);
     }

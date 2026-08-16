@@ -1154,17 +1154,16 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
 
-    const int hostIndex = QueueRotation::findHostIndex(singers);
-
-    // Host cannot be moved. Non-host singers also cannot be dropped into the
-    // host slot or across the host boundary (keeps round anchor stable).
+    // Host cannot be moved at all. Position 1 (index 0 -- whoever's up
+    // next) can never be displaced by a drop, so a drag can't accidentally
+    // bump the singer about to perform. Everything else in the round,
+    // including crossing the host's own slot, is a valid target:
+    // remapFromDisplayDrag below re-derives the round-robin order from
+    // wherever the host ends up after the splice, so there's no ordering
+    // hazard in allowing a singer to move from one side of the host to
+    // the other.
     if (singers[(size_t)fromIndex].isHost) return;
-    if (hostIndex >= 0)
-    {
-        if (toIndex == hostIndex) return;
-        if (fromIndex < hostIndex && toIndex > hostIndex) return;
-        if (fromIndex > hostIndex && toIndex < hostIndex) return;
-    }
+    if (toIndex == 0) return;
 
     // `singers` here is the currently DISPLAYED (anchor-rotated) order, not
     // the stable RR -- remapFromDisplayDrag splices the drag within it and
@@ -1447,6 +1446,27 @@ void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
         return;
     }
 
+    // Auto-scroll the viewport when the drag nears its top/bottom edge.
+    // Rows already keep their real Y position in this content-space child
+    // regardless of scroll offset, so the toIndex/indicator math below
+    // works fine on off-screen rows -- the missing piece was ever bringing
+    // a far-away row (e.g. position 18 of a 20-singer round) into view so
+    // the cursor can actually reach it, which previously made anything
+    // below the currently-visible page effectively undraggable-to.
+    {
+        constexpr int autoScrollMargin = 32;
+        constexpr int autoScrollStep   = 16;
+
+        const int visibleY      = owner.listViewport.getViewPositionY();
+        const int visibleHeight = owner.listViewport.getHeight();
+        const int localY        = d.localPosition.y;
+
+        if (localY < visibleY + autoScrollMargin)
+            owner.listViewport.setViewPosition (0, juce::jmax (0, visibleY - autoScrollStep));
+        else if (localY > visibleY + visibleHeight - autoScrollMargin)
+            owner.listViewport.setViewPosition (0, visibleY + autoScrollStep);
+    }
+
     if (owner.expandedMode)
     {
         const int rowsPerColumn = juce::jmax(1, (getHeight() - QueueBar::expandedCardGap)
@@ -1497,14 +1517,13 @@ void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
             ++toIndex;
     }
 
-    const int hostIndex = QueueRotation::findHostIndex(owner.singers);
-    if (hostIndex >= 0)
-    {
-        if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
-        else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
-        if (toIndex == hostIndex) toIndex = fromIndex;
-    }
+    // Position 1 (index 0 -- whoever's up next) can never be displaced by a
+    // drop, so a drag can't accidentally bump the singer about to perform.
+    // Everything else, including crossing the host's own row, is a valid
+    // target -- moveSinger()'s remap re-derives the round-robin order from
+    // wherever the host ends up after the splice either way.
     toIndex = juce::jlimit (0, (int) owner.singers.size(), toIndex);
+    if (toIndex == 0) toIndex = 1;
 
     // Convert the slot index into a Y coordinate. Insertion line is drawn
     // at the top of the row currently at `toIndex` (or below the last row
@@ -1578,14 +1597,9 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 
         int toIndex = col * rowsPerColumn + row;
 
-        const int hostIndex = QueueRotation::findHostIndex(owner.singers);
-        if (hostIndex >= 0)
-        {
-            if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
-            else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
-            if (toIndex == hostIndex) toIndex = fromIndex;
-        }
+        // Position 1 (index 0) can never be a drop target -- see moveSinger().
         toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
+        if (toIndex == 0) toIndex = 1;
 
         dropIndicatorY = -1;
         dropIndicatorRect = {};
@@ -1611,14 +1625,9 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
             ++toIndex;
     }
 
-    const int hostIndex = QueueRotation::findHostIndex(owner.singers);
-    if (hostIndex >= 0)
-    {
-        if (fromIndex < hostIndex) toIndex = juce::jmin (toIndex, hostIndex - 1);
-        else if (fromIndex > hostIndex) toIndex = juce::jmax (toIndex, hostIndex + 1);
-        if (toIndex == hostIndex) toIndex = fromIndex;
-    }
+    // Position 1 (index 0) can never be a drop target -- see moveSinger().
     toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
+    if (toIndex == 0) toIndex = 1;
 
     dropIndicatorY = -1;
     dropIndicatorRect = {};

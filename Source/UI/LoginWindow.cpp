@@ -24,6 +24,7 @@
 #include "../Models/AccessRights.h"
 #include "BuildInfo.h"
 #include "Onboarding/OnboardingWizard.h"
+#include "SpriteIcon.h"
 
 namespace
 {
@@ -99,6 +100,39 @@ public:
         passwordEditor_.setPasswordCharacter((juce::juce_wchar) 0x2022); // bullet
         passwordEditor_.onReturnKey = [this] { handleEmailSubmit(); };
 
+        // Small circular clear ('x') buttons overlaid on the right edge of
+        // each field -- only shown while that field actually has text in
+        // it, so the empty/placeholder state stays clean.
+        addChildComponent(emailClearButton_);
+        addChildComponent(passwordClearButton_);
+        for (auto* clearBtn : { &emailClearButton_, &passwordClearButton_ })
+        {
+            auto icon = SpriteIcon::create ("icon-cancel-circle", juce::Colour(LoginTheme::kPlaceholder));
+            auto iconOver = SpriteIcon::create ("icon-cancel-circle", juce::Colours::white);
+            clearBtn->setImages (icon.get(), iconOver.get(), iconOver.get());
+            clearBtn->setTooltip (lm.getText("login.clear_field"));
+        }
+        emailClearButton_.onClick = [this]
+        {
+            emailEditor_.clear();
+            emailEditor_.grabKeyboardFocus();
+            updateClearButtonVisibility();
+        };
+        passwordClearButton_.onClick = [this]
+        {
+            passwordEditor_.clear();
+            passwordEditor_.grabKeyboardFocus();
+            updateClearButtonVisibility();
+        };
+        emailEditor_.onTextChange    = [this] { updateClearButtonVisibility(); };
+        passwordEditor_.onTextChange = [this] { updateClearButtonVisibility(); };
+
+        addChildComponent(rememberMeToggle_);
+        rememberMeToggle_.setButtonText(lm.getText("login.remember_me"));
+        rememberMeToggle_.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+        rememberMeToggle_.setColour(juce::ToggleButton::tickColourId, juce::Colour(LoginTheme::kAccentBlue));
+        rememberMeToggle_.setToggleState(true, juce::dontSendNotification);
+
         loginButton_.setButtonText(lm.getText("login.button_login"));
         switchModeButton_.setButtonText(lm.getText("login.button_switch_to_signup"));
         googleButton_.setButtonText(lm.getText("login.button_google"));
@@ -157,11 +191,6 @@ public:
         venuesViewport_.setColour(juce::ScrollBar::thumbColourId, juce::Colour(0x66000000));
 
         // AwaitingInvitation
-        addChildComponent(invitationsListBox_);
-        invitationsListBox_.setModel(&invitationsListModel_);
-        invitationsListBox_.setRowHeight(58);
-        invitationsListBox_.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
-
         addChildComponent(refreshButton_);
         addChildComponent(signOutButton_);
         addChildComponent(createVenueButton_);
@@ -181,13 +210,18 @@ public:
 
         refreshButton_.onClick = [this]
         {
+            // Re-runs the whole post-auth flow, which retries claiming any
+            // pending invitation for this email before re-checking venue
+            // associations -- lets "I was just added, let me check again"
+            // work without a full sign-out/sign-in.
             if (page_ == Page::AwaitingInvitation)
-                runFlow(); // re-fetch invitations
+                runFlow();
         };
 
         signOutButton_.onClick = [this]
         {
             FirestoreClient::getInstance().signOut();
+            UserPreferences::getInstance().clearSavedLogin();
             page_ = Page::Login;
             applyPage();
         };
@@ -263,16 +297,10 @@ public:
             proceed(false);
         };
 
-        invitationsListModel_.onAccept = [this](int row)
-        {
-            juce::ignoreUnused(row);
-            statusLabel_.setText(
-                LocalizationManager::getInstance().getText("login.awaiting.status_accept_not_implemented"),
-                juce::dontSendNotification);
-        };
-
         applyPage();
-        setSize(720, 820);
+        setSize(720, 860); // was 820 -- +40 for the new Remember-me row
+
+        attemptSavedSignIn();
     }
 
     ~LoginContent() override
@@ -435,6 +463,17 @@ private:
         te.setTextToShowWhenEmpty(placeholder, juce::Colour(LoginTheme::kPlaceholder));
     }
 
+    // Each clear button only shows while the Login page itself is showing
+    // AND its field actually has text -- called from applyPage() (so a
+    // pre-filled saved email shows its clear button immediately) and from
+    // both editors' onTextChange (so typing/clearing updates live).
+    void updateClearButtonVisibility()
+    {
+        const bool login = page_ == Page::Login;
+        emailClearButton_.setVisible(login && emailEditor_.getText().isNotEmpty());
+        passwordClearButton_.setVisible(login && passwordEditor_.getText().isNotEmpty());
+    }
+
     //==============================================================================
     // Layout helpers
     void layoutLoginPage(juce::Rectangle<int> area)
@@ -445,7 +484,21 @@ private:
         area.removeFromTop(16);
         passwordEditor_.setBounds(area.removeFromTop(54));
 
-        area.removeFromTop(22);
+        // Clear buttons sit inside their editor's own bounds, at the right
+        // edge -- derived from a copy so the editor's actual bounds above
+        // are untouched.
+        constexpr int clearBtnSize = 22;
+        auto emailClearArea = emailEditor_.getBounds();
+        emailClearButton_.setBounds(emailClearArea.removeFromRight(clearBtnSize + 12)
+                                         .withSizeKeepingCentre(clearBtnSize, clearBtnSize));
+        auto passwordClearArea = passwordEditor_.getBounds();
+        passwordClearButton_.setBounds(passwordClearArea.removeFromRight(clearBtnSize + 12)
+                                            .withSizeKeepingCentre(clearBtnSize, clearBtnSize));
+
+        area.removeFromTop(10);
+        rememberMeToggle_.setBounds(area.removeFromTop(24));
+
+        area.removeFromTop(12);
 
         // Centred Login button.
         loginButton_.setBounds(area.removeFromTop(48).withSizeKeepingCentre(180, 48));
@@ -503,8 +556,7 @@ private:
             createVenueButton_.setBounds(bottom.removeFromRight(190));
         bottom.removeFromRight(8);
         refreshButton_.setBounds(bottom.removeFromRight(120));
-
-        invitationsListBox_.setBounds(area.reduced(0, 8));
+        juce::ignoreUnused(area);
     }
 
     void layoutRequestAccessPage(juce::Rectangle<int> area)
@@ -531,6 +583,8 @@ private:
 
         emailEditor_.setVisible(login);
         passwordEditor_.setVisible(login);
+        rememberMeToggle_.setVisible(login);
+        updateClearButtonVisibility();
         loginButton_.setVisible(login);
         switchModeButton_.setVisible(login);
         googleButton_.setVisible(login);
@@ -542,7 +596,6 @@ private:
         venuesHeadingLabel_.setVisible(sel);
         rememberVenueToggle_.setVisible(sel);
         venuesViewport_.setVisible(sel);
-        invitationsListBox_.setVisible(await_);
         refreshButton_.setVisible(await_);
         createVenueButton_.setVisible(await_ && (flowResult_.canCreateVenue || flowResult_.offerSelfServeSetup));
         createVenueButton_.setButtonText(flowResult_.offerSelfServeSetup ? lm.getText("login.awaiting.button_get_started_alt")
@@ -585,11 +638,8 @@ private:
                 headingLabel_.setText(lm.getText("login.awaiting.heading"), juce::dontSendNotification);
                 headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
                 statusLabel_.setText(
-                    flowResult_.invitations.empty()
-                        ? lm.getText("login.awaiting.status_no_invitations")
-                        : lm.getText("login.awaiting.status_has_invitations"),
+                    lm.getText("login.awaiting.status_no_invitations"),
                     juce::dontSendNotification);
-                invitationsListBox_.updateContent();
                 break;
 
             case Page::RequestAccess:
@@ -600,8 +650,6 @@ private:
                     juce::dontSendNotification);
                 break;
         }
-
-        invitationsListModel_.invitations = &flowResult_.invitations;
 
         resized();
         repaint();
@@ -651,11 +699,76 @@ private:
     }
 
     //==============================================================================
+    // "Stay signed in" -- called once at construction, before the user has
+    // touched anything. Pre-fills the saved email either way. If a saved
+    // refresh token is also present, quietly exchanges it for a fresh
+    // session in the background so no password is needed later -- but
+    // deliberately does NOT navigate anywhere or act "logged in" on its
+    // own. Login always stays a manual, explicit click: this only means
+    // that when the host does click Log In without changing the pre-filled
+    // email or typing a password, handleEmailSubmit() can use the already-
+    // validated session instead of demanding a password that was never
+    // stored in the first place.
+    void attemptSavedSignIn()
+    {
+        auto& prefs = UserPreferences::getInstance();
+        const auto savedEmail = prefs.getSavedLoginEmail();
+        const auto savedRefreshToken = prefs.getSavedLoginRefreshToken();
+
+        if (savedEmail.isNotEmpty())
+            emailEditor_.setText(savedEmail, juce::dontSendNotification);
+
+        updateClearButtonVisibility();
+
+        if (savedRefreshToken.isEmpty())
+            return;
+
+        juce::Component::SafePointer<LoginContent> safe(this);
+        juce::Thread::launch([safe, savedRefreshToken]
+        {
+            auto result = FirestoreClient::getInstance().signInWithRefreshToken(savedRefreshToken);
+
+            juce::MessageManager::callAsync([safe, result]()
+            {
+                if (safe == nullptr)
+                    return;
+
+                if (! result.ok)
+                {
+                    // Expired/revoked -- nothing to show for it either way,
+                    // since this was never a visible action to begin with.
+                    UserPreferences::getInstance().setSavedLoginRefreshToken({});
+                    return;
+                }
+
+                safe->savedSessionReady_ = true;
+                safe->statusLabel_.setText(
+                    LocalizationManager::getInstance().getText("login.status_saved_session_ready"),
+                    juce::dontSendNotification);
+            });
+        });
+    }
+
+    //==============================================================================
     // Sign-in handlers (run on a background thread to avoid blocking the UI)
     void handleEmailSubmit()
     {
         const auto email    = emailEditor_.getText().trim();
         const auto password = passwordEditor_.getText();
+
+        // A saved session was silently refreshed in the background (see
+        // attemptSavedSignIn()) but held back from navigating anywhere on
+        // its own -- this is the manual confirmation of it. Only takes
+        // this path if nothing's been changed from what was pre-filled;
+        // if the host typed a different email or any password, that's
+        // them deliberately signing in as someone else, so fall through
+        // to the normal flow below instead.
+        if (savedSessionReady_ && isLoginMode_ && password.isEmpty()
+            && email.equalsIgnoreCase(FirestoreClient::getInstance().getEmail()))
+        {
+            runFlow();
+            return;
+        }
 
         auto& lm = LocalizationManager::getInstance();
         if (email.isEmpty() || password.length() < 6)
@@ -666,16 +779,17 @@ private:
         }
 
         const bool signUp = ! isLoginMode_;
+        const bool rememberMe = rememberMeToggle_.getToggleState();
         setBusy(true, signUp ? lm.getText("login.status_creating_account") : lm.getText("login.status_signing_in"));
 
         juce::Component::SafePointer<LoginContent> safe(this);
-        juce::Thread::launch([safe, email, password, signUp]
+        juce::Thread::launch([safe, email, password, signUp, rememberMe]
         {
             auto& fc = FirestoreClient::getInstance();
             auto result = signUp ? fc.signUpWithEmailPassword(email, password)
                                  : fc.signInWithEmailPassword(email, password);
 
-            juce::MessageManager::callAsync([safe, result]()
+            juce::MessageManager::callAsync([safe, result, email, rememberMe]()
             {
                 if (safe == nullptr)
                     return;
@@ -687,6 +801,18 @@ private:
                                          juce::dontSendNotification);
                     return;
                 }
+
+                auto& prefs = UserPreferences::getInstance();
+                if (rememberMe)
+                {
+                    prefs.setSavedLoginEmail(email);
+                    prefs.setSavedLoginRefreshToken(FirestoreClient::getInstance().getRefreshToken());
+                }
+                else
+                {
+                    prefs.clearSavedLogin();
+                }
+
                 safe->runFlow();
             });
         });
@@ -1128,49 +1254,16 @@ private:
     };
 
     //==============================================================================
-    // ListBox model for invitations (kept; AssociationListModel was removed).
-    struct InvitationsListModel : public juce::ListBoxModel
-    {
-        std::vector<VenueInvitation>* invitations = nullptr;
-        std::function<void(int)> onAccept;
-
-        int getNumRows() override { return invitations ? (int) invitations->size() : 0; }
-
-        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool isSelected) override
-        {
-            if (invitations == nullptr || row < 0 || row >= (int) invitations->size()) return;
-            const auto& i = (*invitations)[(size_t) row];
-            g.fillAll(isSelected ? juce::Colour(0x33ffffff) : juce::Colour(0x14ffffff));
-            g.setColour(juce::Colours::white);
-            g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-            g.drawText(i.venueName, 12, 6, w - 100, 22, juce::Justification::centredLeft);
-            g.setColour(juce::Colour(LoginTheme::kSubtleText));
-            g.setFont(juce::Font(juce::FontOptions(12.0f)));
-            g.drawText(LocalizationManager::getInstance().getTextWithParams("login.awaiting.invite_row_subtitle",
-                           { i.invitedByName, juce::String(AccessRightsUtil::userRoleToString(i.role)) }),
-                       12, 28, w - 100, 18, juce::Justification::centredLeft);
-
-            // "Accept" hint button
-            g.setColour(juce::Colour(0xffc69b3b));
-            g.fillRoundedRectangle((float)(w - 90), 14.0f, 78.0f, 28.0f, 4.0f);
-            g.setColour(juce::Colours::black);
-            g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
-            g.drawText(LocalizationManager::getInstance().getText("login.awaiting.invite_row_accept_button"),
-                       w - 90, 14, 78, 28, juce::Justification::centred);
-        }
-
-        void listBoxItemClicked(int row, const juce::MouseEvent& e) override
-        {
-            // Only fire onAccept when the click hits the right-side pill.
-            if (onAccept && e.x > 0)
-                onAccept(row);
-        }
-    };
-
-    //==============================================================================
     // State
     Page page_ = Page::Login;
     bool isLoginMode_ = true;
+
+    // Set once attemptSavedSignIn()'s background refresh-token exchange
+    // succeeds. Deliberately does NOT advance past the login page by
+    // itself -- see attemptSavedSignIn()'s comment -- it just lets
+    // handleEmailSubmit() skip re-asking for a password we never stored
+    // when the host clicks Log In themselves without changing anything.
+    bool savedSessionReady_ = false;
     LoginFlowController::Result flowResult_;
     LoginCompleteCallback onComplete_;
 
@@ -1188,6 +1281,9 @@ private:
     // Login page
     juce::TextEditor emailEditor_;
     juce::TextEditor passwordEditor_;
+    juce::DrawableButton emailClearButton_    { "emailClear", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton passwordClearButton_ { "passwordClear", juce::DrawableButton::ImageFitted };
+    juce::ToggleButton rememberMeToggle_;
     juce::TextButton loginButton_;
     juce::TextButton switchModeButton_;
     juce::TextButton getStartedButton_;
@@ -1213,9 +1309,6 @@ private:
     std::function<void(const juce::String&)> venueListModelOnSelected_;
 
     // AwaitingInvitation / RequestAccess
-    InvitationsListModel  invitationsListModel_;
-    juce::ListBox          invitationsListBox_;
-
     juce::TextButton refreshButton_;
     juce::TextButton signOutButton_;
     juce::TextButton createVenueButton_;

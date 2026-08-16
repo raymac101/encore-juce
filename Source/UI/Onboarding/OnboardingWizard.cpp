@@ -610,9 +610,9 @@ private:
     class JoinInvitedVenueStep : public juce::Component
     {
     public:
-        JoinInvitedVenueStep(VenueInvitation invitation, juce::String uid,
+        JoinInvitedVenueStep(VenueInvitation invitation,
                              std::function<void(bool joined)> onDone)
-            : invitation_(std::move(invitation)), uid_(std::move(uid)), onDone_(std::move(onDone))
+            : invitation_(std::move(invitation)), onDone_(std::move(onDone))
         {
             auto& lm = LocalizationManager::getInstance();
             styleHeading(heading_, lm.getText("onboarding.join_invited.heading"));
@@ -667,7 +667,7 @@ private:
             statusLabel_.setText(LocalizationManager::getInstance().getText("onboarding.join_invited.status_joining"), juce::dontSendNotification);
 
             juce::Component::SafePointer<JoinInvitedVenueStep> safe(this);
-            InvitationService::getInstance().acceptInvitation(invitation_, uid_,
+            InvitationService::getInstance().acceptInvitation(invitation_,
                 [safe](bool ok, juce::String error)
                 {
                     if (safe == nullptr) return;
@@ -687,7 +687,6 @@ private:
         }
 
         VenueInvitation invitation_;
-        juce::String uid_;
         std::function<void(bool)> onDone_;
         juce::Label heading_, sub_, detailLabel_, statusLabel_;
         juce::TextButton acceptButton_, declineButton_;
@@ -1387,7 +1386,7 @@ void OnboardingWizard::Content::showStep(Step step)
         }
         case Step::JoinInvitedVenue:
         {
-            auto s = std::make_unique<JoinInvitedVenueStep>(pendingInvitationForNextStep_, uid_,
+            auto s = std::make_unique<JoinInvitedVenueStep>(pendingInvitationForNextStep_,
                 [this](bool joined)
                 {
                     if (joined)

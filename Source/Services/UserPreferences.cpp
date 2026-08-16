@@ -272,6 +272,41 @@ void UserPreferences::setVenueId(const juce::String& id)
 }
 
 //==============================================================================
+juce::String UserPreferences::getSavedLoginEmail() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("savedLoginEmail", juce::var()).toString();
+}
+
+void UserPreferences::setSavedLoginEmail(const juce::String& email)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginEmail", email);
+    save();
+}
+
+juce::String UserPreferences::getSavedLoginRefreshToken() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("savedLoginRefreshToken", juce::var()).toString();
+}
+
+void UserPreferences::setSavedLoginRefreshToken(const juce::String& refreshToken)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginRefreshToken", refreshToken);
+    save();
+}
+
+void UserPreferences::clearSavedLogin()
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginEmail", juce::String());
+    asObj(root_)->setProperty("savedLoginRefreshToken", juce::String());
+    save();
+}
+
+//==============================================================================
 juce::String UserPreferences::getLibraryPath() const
 {
     const juce::ScopedLock sl(lock_);
@@ -688,6 +723,19 @@ void UserPreferences::setBackgroundMusicSource(const juce::String& source)
 {
     const juce::ScopedLock sl(lock_);
     asObj(root_)->setProperty("backgroundMusicSource", source);
+    save();
+}
+
+bool UserPreferences::getBackgroundMusicEnabled() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("backgroundMusicEnabled", true);
+}
+
+void UserPreferences::setBackgroundMusicEnabled(bool enabled)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("backgroundMusicEnabled", enabled);
     save();
 }
 
