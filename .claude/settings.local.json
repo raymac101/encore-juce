@@ -98,7 +98,11 @@
       "Bash(screencapture -x -R900,250,760,900 /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/login_final.png)",
       "Bash(kill 50791)",
       "Bash(node --check venueMembers.js)",
-      "Bash(firebase functions:list)"
+      "Bash(firebase functions:list)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('releases/releases.json'\\)\\); print\\(len\\(d\\)\\); [print\\(x['version']\\) for x in d[:6]]\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\('has tokens' , 'tokens' in d or 'user' in d\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([p['name'] for p in d.get\\('configurePresets',[]\\)]\\)\")",
+      "Bash(xattr -l \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Release/Encore Karaoke.app/Contents/Info.plist\")"
     ]
   }
 }
