@@ -102,7 +102,16 @@
       "Bash(python3 -c \"import json; d=json.load\\(open\\('releases/releases.json'\\)\\); print\\(len\\(d\\)\\); [print\\(x['version']\\) for x in d[:6]]\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\('has tokens' , 'tokens' in d or 'user' in d\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([p['name'] for p in d.get\\('configurePresets',[]\\)]\\)\")",
-      "Bash(xattr -l \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Release/Encore Karaoke.app/Contents/Info.plist\")"
+      "Bash(xattr -l \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/build/EncoreJUCE_artefacts/Release/Encore Karaoke.app/Contents/Info.plist\")",
+      "Bash(NOTARY_KEYCHAIN_PROFILE=AC_NOTARY packaging/macos/build_dmg.sh 'build/EncoreJUCE_artefacts/Release/Encore Karaoke.app' 3.1.255 'Developer ID Application: Viracicom Entertainment Group LTD \\(9A3YNFA752\\)')",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(shasum -a 256 \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/dist/EncoreKaraoke-3.1.255-mac.dmg\")",
+      "Bash(chmod +x \"/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh\")",
+      "Bash(/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/_write_test.txt Installers/_write_test.txt text/plain)",
+      "Bash(/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh '/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/dist/EncoreKaraoke-3.1.255-mac.dmg' Installers/EncoreKaraoke-3.1.255-mac.dmg application/x-apple-diskimage)",
+      "Bash(/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/manifest.json Installers/manifest.json application/json)",
+      "Bash(curl -s -D - \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2Fmanifest.json?alt=media\" -o /tmp/live_manifest_check.json)",
+      "Bash(curl -sI \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.255-mac.dmg?alt=media\")"
     ]
   }
 }
