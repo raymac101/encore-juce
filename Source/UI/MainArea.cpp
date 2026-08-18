@@ -165,7 +165,13 @@ MainArea::MainArea()
         addChildComponent(tp.get());
         pages[static_cast<int>(NavPage::Testing)] = std::move(tp);
     }
-    addPage(NavPage::Ads,             lm.getText("page.ads"));
+    // Create real Ads page
+    {
+        auto ap = std::make_unique<AdsPage>();
+        adsPage = ap.get();
+        addChildComponent(ap.get());
+        pages[static_cast<int>(NavPage::Ads)] = std::move(ap);
+    }
     addPage(NavPage::Playlist,        lm.getText("page.playlist"));
 
     // Show Home by default
@@ -232,7 +238,6 @@ void MainArea::updateAllText()
         { NavPage::Mixer,           "page.mixer" },
         { NavPage::Settings,        "page.setup" },
         { NavPage::Testing,         "page.testing" },
-        { NavPage::Ads,             "page.ads" },
         { NavPage::Playlist,        "page.playlist" },
         { NavPage::CompanyAdmin,    "page.company_admin" },
     };
@@ -258,6 +263,7 @@ void MainArea::updateAllText()
     if (customerAdminPage) customerAdminPage->updateAllText();
     if (profilePage) profilePage->updateAllText();
     if (testingPage)  testingPage->updateAllText();
+    if (adsPage)      adsPage->updateAllText();
 }
 
 void MainArea::setAudioEngine(AudioEngine* engine)
@@ -276,6 +282,8 @@ void MainArea::setVenueContext(const juce::String& venueId, const juce::String& 
 {
     if (mixerPage)
         mixerPage->setVenueContext(venueId, venueName);
+    if (adsPage)
+        adsPage->setVenueContext(venueId, venueName);
 }
 
 void MainArea::refreshRoomEqProfilePicker()

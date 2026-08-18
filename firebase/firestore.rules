@@ -135,6 +135,15 @@ service cloud.firestore {
       allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
       allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
 
+      // Ad scheduling/rotation metadata (AdsService / AdsPage). Narrower than
+      // the generic wildcard below -- writes are Admin/Tester/EnterpriseAdmin
+      // only, matching the client-side AccessRight::Ads gate (Host does NOT
+      // see the Ads nav item, so Host shouldn't be able to write here either).
+      match /Ads/{adId} {
+        allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
+        allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
+      }
+
       match /{document=**} {
         allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
         allow write: if isPlatformAdmin() || isLegacyVenueOperator(venueId);

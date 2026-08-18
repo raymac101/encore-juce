@@ -420,6 +420,45 @@ song_edit.delete_confirm_title=Delete Song
 song_edit.delete_confirm_body=Delete this song from the library?\n\nArtist: {artist}\nSong: {song}\n\nThis action cannot be undone.
 song_edit.delete_confirm_delete=Delete
 
+ads.no_venue=No active venue
+ads.empty_state=No ads yet. Drag a file above or click Browse to add one.
+ads.loading=Loading ads...
+ads.load_failed=Could not load ads.
+ads.saving=Saving ad...
+ads.save_failed=Could not save ad.
+ads.deleting=Deleting ad...
+ads.delete_failed=Could not delete ad.
+ads.count_prefix=Ads:
+ads.status_active=Active
+ads.status_scheduled=Scheduled
+ads.status_expired=Expired
+ads.tile.edit=Edit
+ads.upload.select_file=Select an ad file
+ads.upload.prompt=Drag an image or video here, or click Browse to add a new ad.
+ads.upload.browse=Browse...
+ads.upload.replace_title=Replace Existing Ad?
+ads.upload.replace_body=An ad named "{name}" already exists. Uploading will replace both the file and its schedule.
+ads.upload.replace_confirm=Replace
+ads.delete_confirm_title=Delete Ad
+ads.delete_confirm_body=Delete this ad?\n\n{name}\n\nThis removes it from the lyric screen rotation and cannot be undone.
+ads.delete_confirm_delete=Delete
+ads.edit.title=Edit Ad
+ads.edit.name=File Name
+ads.edit.media_type=Media Type
+ads.edit.type_image=Image
+ads.edit.type_video=Video
+ads.edit.duration=Duration (sec)
+ads.edit.duration_video_hint=Videos always play to their natural end.
+ads.edit.frequency=Frequency (rotation weight)
+ads.edit.start_date=Start Date
+ads.edit.end_date=End Date
+ads.edit.date_hint=YYYY-MM-DD (blank = no limit)
+ads.edit.duration_required=Enter a duration of at least 1 second.
+ads.edit.frequency_required=Enter a frequency of at least 1.
+ads.edit.invalid_date=Invalid date -- use YYYY-MM-DD.
+ads.edit.end_before_start=End date must be on or after the start date.
+ads.preview.title=Ad Preview
+
 # ── Settings extras ─────────────────────────────────────────────────────────
 settings.active=ACTIVE
 settings.inactive=INACTIVE

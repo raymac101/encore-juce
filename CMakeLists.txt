@@ -60,6 +60,15 @@ endif()
 
 add_subdirectory(${JUCE_SOURCE_DIR} JUCE)
 
+if(APPLE)
+    enable_language(OBJCXX)
+    set(ENCORE_AD_VIDEO_THUMBNAIL_SOURCE Source/Services/AdVideoThumbnail_mac.mm)
+    set(ENCORE_AD_VIDEO_PREVIEW_SOURCE Source/UI/AdVideoPreviewComponent_mac.mm)
+else()
+    set(ENCORE_AD_VIDEO_THUMBNAIL_SOURCE Source/Services/AdVideoThumbnail_fallback.cpp)
+    set(ENCORE_AD_VIDEO_PREVIEW_SOURCE Source/UI/AdVideoPreviewComponent_fallback.cpp)
+endif()
+
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
     PRODUCT_NAME "Encore Karaoke"
@@ -106,6 +115,10 @@ target_sources(EncoreJUCE
         Source/UI/ProfilePage.cpp
         Source/UI/SongSelectionDialog.cpp
         Source/UI/SongEditDialog.cpp
+        Source/UI/AdsPage.cpp
+        Source/UI/AdEditDialog.cpp
+        Source/UI/AdPreviewDialog.cpp
+        ${ENCORE_AD_VIDEO_PREVIEW_SOURCE}
         Source/UI/AddSongsDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
@@ -115,10 +128,13 @@ target_sources(EncoreJUCE
         Source/Services/LibraryScanner.cpp
         Source/Services/SongDatabase.cpp
         Source/Services/ImageCache.cpp
+        Source/Services/AdMediaCache.cpp
+        ${ENCORE_AD_VIDEO_THUMBNAIL_SOURCE}
         Source/Services/UserPreferences.cpp
         Source/Services/WaveformGenerator.cpp
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
+        Source/Services/AdsService.cpp
         Source/Services/SfxLibraryService.cpp
         Source/Services/IntroVoiceService.cpp
         Source/Services/SpotifyService.cpp
@@ -158,7 +174,7 @@ target_sources(EncoreJUCE
         Source/Models/Playlist.cpp
         Source/Models/Member.cpp
         Source/Models/Audit.cpp
-        Source/Models/Ad.cpp
+        Source/Models/AdMetadata.cpp
         Source/Models/Preset.cpp
         Source/Models/Location.cpp)
 

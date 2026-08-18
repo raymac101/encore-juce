@@ -26,6 +26,7 @@
 #include "ProfilePage.h"
 #include "MixerPage.h"
 #include "TestingPage.h"
+#include "AdsPage.h"
 #include "SongSelectionDialog.h"
 #include "SongEditDialog.h"
 #include "../Models/VenueItem.h"
@@ -121,6 +122,7 @@ private:
     CompanyAdminPage* companyAdminPage = nullptr;
     CustomerAdminPage* customerAdminPage = nullptr;
     ProfilePage* profilePage = nullptr;
+    AdsPage* adsPage = nullptr;
 
 public:
     /** Push a venue snapshot into the settings page (call from FirebaseManager callback). */
@@ -164,6 +166,9 @@ public:
     /** Direct access to the self-service "Edit Profile" page (reachable only
         via the TopBar user-menu dropdown, not the sidebar). */
     ProfilePage* getProfilePage() const noexcept { return profilePage; }
+
+    /** Direct access to the Ads management page. */
+    AdsPage* getAdsPage() const noexcept { return adsPage; }
 
     /** Update company-dashboard context for company-mode users. */
     void setCompanyContext (const juce::String& companyId, const juce::String& companyRole)

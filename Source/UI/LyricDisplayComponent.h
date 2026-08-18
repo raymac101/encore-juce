@@ -68,6 +68,7 @@ public:
         juce::String url;
         juce::String mimeType;
         int durationSec = 10;
+        int frequency = 1;
 
         bool isVideo() const noexcept
         {
@@ -207,6 +208,7 @@ private:
 
     void refreshAdsAsync (bool force = false);
     void applyAds (std::vector<AdEntry> ads);
+    void buildAdPlaybackOrder();
     void advanceIdleAd (bool force = false);
     void stopIdleAdVideo();
     void showIdleAdVideo (const AdEntry& ad);
@@ -239,6 +241,8 @@ private:
 
     std::vector<AdEntry> ads_;
     int currentAdIndex_ = -1;
+    std::vector<int> adPlaybackOrder_;
+    size_t adPlaybackPos_ = 0;
     int adRemainingMs_ = 0;
     int adRefreshCountdownFrames_ = 0;
     float adPanelVisibility_ = 1.0f;

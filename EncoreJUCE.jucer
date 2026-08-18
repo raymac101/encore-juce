@@ -44,8 +44,6 @@
       <!-- ================================================================== -->
       <GROUP id="GRP_Models" name="Models">
         <FILE id="F_AccessRights_h"          name="AccessRights.h"          compile="0" resource="0" file="Source/Models/AccessRights.h"/>
-        <FILE id="F_Ad_cpp"                  name="Ad.cpp"                  compile="1" resource="0" file="Source/Models/Ad.cpp"/>
-        <FILE id="F_Ad_h"                    name="Ad.h"                    compile="0" resource="0" file="Source/Models/Ad.h"/>
         <FILE id="F_Audit_cpp"               name="Audit.cpp"               compile="1" resource="0" file="Source/Models/Audit.cpp"/>
         <FILE id="F_Audit_h"                 name="Audit.h"                 compile="0" resource="0" file="Source/Models/Audit.h"/>
         <FILE id="F_CdgGroup_cpp"            name="CdgGroup.cpp"            compile="1" resource="0" file="Source/Models/CdgGroup.cpp"/>
