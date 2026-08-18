@@ -211,6 +211,204 @@ private:
     std::vector<double> values_;
 };
 
+class ChartsPage::SortableTable : public juce::Component,
+                                  private juce::ListBoxModel
+{
+public:
+    enum class Kind { Members, Songs };
+
+    SortableTable(Kind kind, juce::String title)
+        : kind_(kind), title_(std::move(title)), list_("charts-sortable-table", this)
+    {
+        setOpaque(true);
+        addAndMakeVisible(list_);
+        list_.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff1f3564));
+        list_.setColour(juce::ListBox::outlineColourId, kBorder);
+        list_.setRowHeight(22);
+
+        for (auto* button : { &firstHeader_, &secondHeader_, &thirdHeader_, &fourthHeader_ })
+        {
+            addAndMakeVisible(*button);
+            button->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1f376b));
+            button->setColour(juce::TextButton::textColourOffId, kText);
+            button->onClick = [this, button]()
+            {
+                const int column = button == &firstHeader_ ? 0
+                                 : button == &secondHeader_ ? 1
+                                 : button == &thirdHeader_ ? 2 : 3;
+                if (sortColumn_ == column)
+                    ascending_ = ! ascending_;
+                else
+                {
+                    sortColumn_ = column;
+                    ascending_ = true;
+                }
+                resort();
+            };
+        }
+
+        firstHeader_.setButtonText(kind_ == Kind::Members ? "Member" : "Song");
+        secondHeader_.setButtonText(kind_ == Kind::Members ? "Songs" : "Artist");
+        thirdHeader_.setButtonText(kind_ == Kind::Members ? "Last Sung" : "Plays");
+        fourthHeader_.setButtonText(kind_ == Kind::Members ? "" : "Last Played");
+        fourthHeader_.setEnabled(kind_ != Kind::Members);
+
+        addAndMakeVisible(limitBox_);
+        limitBox_.addItem("5", 1);
+        limitBox_.addItem("10", 2);
+        limitBox_.addItem("20", 3);
+        limitBox_.addItem("50", 4);
+        limitBox_.addItem("100", 5);
+        limitBox_.setSelectedId(2, juce::dontSendNotification);
+        limitBox_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1630));
+        limitBox_.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+        limitBox_.setColour(juce::ComboBox::outlineColourId, kBorder);
+        limitBox_.onChange = [this]()
+        {
+            const int selectedId = limitBox_.getSelectedId();
+            limit_ = selectedId == 1 ? 5
+                   : selectedId == 2 ? 10
+                   : selectedId == 3 ? 20
+                   : selectedId == 4 ? 50 : 100;
+            list_.updateContent();
+              list_.setVerticalPosition(0.0);
+            list_.repaint();
+        };
+    }
+
+    void setMembers(std::vector<AnalyticsService::TopMember> rows)
+    {
+        members_ = std::move(rows);
+        songs_.clear();
+        resetSort();
+    }
+
+    void setSongs(std::vector<AnalyticsService::TopSong> rows)
+    {
+        songs_ = std::move(rows);
+        members_.clear();
+        resetSort();
+    }
+
+    void setTitle(const juce::String& title)
+    {
+        title_ = title;
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(6);
+        area.removeFromTop(22);
+        auto top = area.removeFromTop(26);
+        limitBox_.setBounds(top.removeFromRight(64));
+        top.removeFromRight(6);
+        top.removeFromLeft(38);
+        firstHeader_.setBounds(top.removeFromLeft(kind_ == Kind::Members ? 170 : 210));
+        secondHeader_.setBounds(top.removeFromLeft(kind_ == Kind::Members ? 70 : 150));
+        thirdHeader_.setBounds(top.removeFromLeft(kind_ == Kind::Members ? 110 : 80));
+        fourthHeader_.setBounds(top);
+        area.removeFromTop(4);
+        list_.setBounds(area);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setColour(juce::Colour(0xff1f3564));
+        g.fillRoundedRectangle(r, 10.0f);
+        g.setColour(kCardBorder);
+        g.drawRoundedRectangle(r.reduced(0.5f), 10.0f, 1.0f);
+        g.setColour(kText);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(14.0f)).boldened());
+        g.drawFittedText(title_, getLocalBounds().removeFromTop(22), juce::Justification::centred, 1);
+    }
+
+private:
+    int getNumRows() override
+    {
+        return juce::jmin(limit_, kind_ == Kind::Members ? (int) members_.size() : (int) songs_.size());
+    }
+
+    void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        if (selected)
+            g.fillAll(juce::Colour(0xff254a83));
+        else if ((row & 1) != 0)
+            g.fillAll(juce::Colour(0xff19325f));
+
+        g.setColour(kText);
+        g.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
+        auto draw = [&g, height](const juce::String& text, int x, int w)
+        {
+            g.drawFittedText(text, juce::Rectangle<int>(x + 5, 0, w - 8, height),
+                             juce::Justification::centredLeft, 1);
+        };
+
+        draw(juce::String(row + 1), 0, 38);
+        if (kind_ == Kind::Members)
+        {
+            const auto& item = members_[(size_t) row];
+            draw(item.memberName, 38, 170);
+            draw(juce::String(item.totalSongs), 208, 70);
+            draw(item.lastSung.formatted("%Y-%m-%d %H:%M"), 278, width - 278);
+        }
+        else
+        {
+            const auto& item = songs_[(size_t) row];
+            draw(item.songName, 38, 210);
+            draw(item.artistName, 248, 150);
+            draw(juce::String(item.timesPlayed), 398, 80);
+            draw(item.lastPlayed.formatted("%Y-%m-%d %H:%M"), 478, width - 478);
+        }
+    }
+
+    void resetSort()
+    {
+        sortColumn_ = 2;
+        ascending_ = false;
+        resort();
+    }
+
+    void resort()
+    {
+        if (kind_ == Kind::Members)
+        {
+            std::sort(members_.begin(), members_.end(), [this](const auto& a, const auto& b)
+            {
+                int result = sortColumn_ == 0 ? a.memberName.compareIgnoreCase(b.memberName)
+                            : sortColumn_ == 1 ? a.totalSongs - b.totalSongs
+                            : a.lastSung < b.lastSung ? -1 : a.lastSung > b.lastSung ? 1 : 0;
+                return ascending_ ? result < 0 : result > 0;
+            });
+        }
+        else
+        {
+            std::sort(songs_.begin(), songs_.end(), [this](const auto& a, const auto& b)
+            {
+                int result = sortColumn_ == 0 ? a.songName.compareIgnoreCase(b.songName)
+                            : sortColumn_ == 1 ? a.artistName.compareIgnoreCase(b.artistName)
+                            : sortColumn_ == 2 ? a.timesPlayed - b.timesPlayed
+                            : a.lastPlayed < b.lastPlayed ? -1 : a.lastPlayed > b.lastPlayed ? 1 : 0;
+                return ascending_ ? result < 0 : result > 0;
+            });
+        }
+        list_.updateContent();
+        list_.repaint();
+    }
+
+    Kind kind_;
+    juce::String title_;
+    juce::ListBox list_;
+    juce::TextButton firstHeader_, secondHeader_, thirdHeader_, fourthHeader_;
+    juce::ComboBox limitBox_;
+    std::vector<AnalyticsService::TopMember> members_;
+    std::vector<AnalyticsService::TopSong> songs_;
+    int limit_ = 10;
+    int sortColumn_ = 2;
+    bool ascending_ = false;
+};
+
 ChartsPage::~ChartsPage() = default;
 
 juce::String ChartsPage::tr(const juce::String& key, const juce::String& fallback) const
@@ -233,6 +431,17 @@ ChartsPage::ChartsPage()
     titleLabel_.setText(tr("charts.title", "Analytics Dashboard"), juce::dontSendNotification);
     titleLabel_.setColour(juce::Label::textColourId, kText);
     titleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(24.0f)).boldened());
+
+    contentHolder_->addAndMakeVisible(venueBox_);
+    venueBox_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1630));
+    venueBox_.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+    venueBox_.setColour(juce::ComboBox::outlineColourId, kBorder);
+    venueBox_.onChange = [this]()
+    {
+        const int idx = venueBox_.getSelectedItemIndex();
+        if (idx >= 0 && idx < (int) venueIds_.size())
+            refreshAnalytics();
+    };
 
     contentHolder_->addAndMakeVisible(timeRangeBox_);
     rebuildTimeRangeOptions();
@@ -333,8 +542,6 @@ ChartsPage::ChartsPage()
         g.setColour(juce::GroupComponent::textColourId, kText);
         g.setColour(juce::GroupComponent::outlineColourId, kBorder);
     };
-    prepGroup(topMembersGroup_, tr("charts.top_members", "Top Members"));
-    prepGroup(topSongsGroup_, tr("charts.top_songs", "Top Songs"));
     prepGroup(dailyStatsGroup_, tr("charts.daily_stats", "Daily Statistics"));
     prepGroup(weeklyStatsGroup_, tr("charts.weekly_summary", "Weekly Summary"));
     prepGroup(insightsGroup_, tr("charts.insights", "Insights"));
@@ -350,8 +557,6 @@ ChartsPage::ChartsPage()
         t.setFont(juce::Font(juce::FontOptions().withHeight(12.0f)));
         t.setOpaque(true);
     };
-    prepText(topMembersText_);
-    prepText(topSongsText_);
     prepText(dailyStatsText_);
     prepText(weeklyStatsText_);
     prepText(insightsText_);
@@ -363,6 +568,13 @@ ChartsPage::ChartsPage()
     peakHoursChart_->setNoDataText(noData);
     sourceBreakdownChart_->setNoDataText(noData);
     deviceBreakdownChart_->setNoDataText(noData);
+
+    topMembersTable_ = std::make_unique<SortableTable>(SortableTable::Kind::Members,
+                                                        tr("charts.top_members", "Top Members"));
+    topSongsTable_ = std::make_unique<SortableTable>(SortableTable::Kind::Songs,
+                                                      tr("charts.top_songs", "Top Songs"));
+    contentHolder_->addAndMakeVisible(*topMembersTable_);
+    contentHolder_->addAndMakeVisible(*topSongsTable_);
 
     customStartLabel_.setVisible(false);
     customEndLabel_.setVisible(false);
@@ -376,7 +588,7 @@ ChartsPage::ChartsPage()
         MenuTheme::drawHeaderPanel(g, contentHolder_->getLocalBounds().reduced(8).removeFromTop(74));
     };
 
-    refreshAnalytics();
+    refreshVenueOptions();
 }
 
 void ChartsPage::paint(juce::Graphics& g)
@@ -410,7 +622,9 @@ void ChartsPage::layoutContent()
     auto area = contentHolder_->getLocalBounds().reduced(12);
 
     auto header = area.removeFromTop(70).reduced(12, 8);
-    titleLabel_.setBounds(header.removeFromLeft(320));
+    titleLabel_.setBounds(header.removeFromLeft(230));
+    header.removeFromLeft(8);
+    venueBox_.setBounds(header.removeFromLeft(180));
 
     auto controls = header;
     timeRangeBox_.setBounds(controls.removeFromLeft(170));
@@ -440,8 +654,16 @@ void ChartsPage::layoutContent()
 
     area.removeFromTop(6);
 
-    auto chartsGrid = area.removeFromTop(420);
+    auto topTables = area.removeFromTop(280);
     const int colGap = 10;
+    auto topMembersArea = topTables.removeFromLeft((topTables.getWidth() - colGap) / 2);
+    topTables.removeFromLeft(colGap);
+    topMembersTable_->setBounds(topMembersArea);
+    topSongsTable_->setBounds(topTables);
+
+    area.removeFromTop(8);
+
+    auto chartsGrid = area.removeFromTop(420);
     auto left = chartsGrid.removeFromLeft((chartsGrid.getWidth() - colGap) / 2);
     chartsGrid.removeFromLeft(colGap);
     auto right = chartsGrid;
@@ -457,19 +679,6 @@ void ChartsPage::layoutContent()
     sourceBreakdownChart_->setBounds(right.removeFromTop(136));
     right.removeFromTop(6);
     deviceBreakdownChart_->setBounds(right.removeFromTop(136));
-
-    area.removeFromTop(8);
-
-    auto tablesTop = area.removeFromTop(220);
-    auto tleft = tablesTop.removeFromLeft((tablesTop.getWidth() - colGap) / 2);
-    tablesTop.removeFromLeft(colGap);
-    auto tright = tablesTop;
-
-    topMembersGroup_.setBounds(tleft);
-    topMembersText_.setBounds(tleft.reduced(8, 22));
-
-    topSongsGroup_.setBounds(tright);
-    topSongsText_.setBounds(tright.reduced(8, 22));
 
     area.removeFromTop(8);
 
@@ -501,8 +710,8 @@ void ChartsPage::updateAllText()
     refreshButton_.setButtonText(tr("charts.refresh", "Refresh"));
     exportButton_.setButtonText(tr("charts.export", "Export JSON"));
 
-    topMembersGroup_.setText(tr("charts.top_members", "Top Members"));
-    topSongsGroup_.setText(tr("charts.top_songs", "Top Songs"));
+    topMembersTable_->setTitle(tr("charts.top_members", "Top Members"));
+    topSongsTable_->setTitle(tr("charts.top_songs", "Top Songs"));
     dailyStatsGroup_.setText(tr("charts.daily_stats", "Daily Statistics"));
     weeklyStatsGroup_.setText(tr("charts.weekly_summary", "Weekly Summary"));
     insightsGroup_.setText(tr("charts.insights", "Insights"));
@@ -542,6 +751,61 @@ void ChartsPage::rebuildTimeRangeOptions()
     timeRangeBox_.setSelectedId(defaultId, juce::dontSendNotification); // thisWeek
 }
 
+void ChartsPage::refreshVenueOptions()
+{
+    const auto currentId = VenueService::getInstance().getCurrentVenueId();
+    venueBox_.clear();
+    venueIds_.clear();
+
+    venueBox_.addItem(tr("charts.venue.loading", "Loading venues..."), 1);
+    venueBox_.setSelectedId(1, juce::dontSendNotification);
+    venueBox_.setEnabled(false);
+
+    juce::Component::SafePointer<ChartsPage> safe(this);
+    VenueService::getInstance().getVenues(
+        [safe, currentId](bool ok, std::vector<VenueItem> venues, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->venueBox_.clear();
+            safe->venueIds_.clear();
+
+            if (! ok || venues.empty())
+            {
+                safe->venueBox_.addItem(safe->tr("charts.no_venues", "No accessible venues"), 1);
+                safe->venueBox_.setSelectedId(1, juce::dontSendNotification);
+                safe->venueBox_.setEnabled(false);
+                safe->loadingLabel_.setText(error.isNotEmpty() ? error
+                                             : safe->tr("charts.no_active_venue", "No active venue"),
+                                             juce::dontSendNotification);
+                return;
+            }
+
+            int selectedId = 1;
+            int itemId = 1;
+            for (const auto& venue : venues)
+            {
+                const auto id = juce::String(venue.id);
+                if (id.isEmpty())
+                    continue;
+
+                safe->venueIds_.push_back(id);
+                const auto label = juce::String(venue.name).trim()
+                                 + (juce::String(venue.city).trim().isNotEmpty()
+                                    ? " - " + juce::String(venue.city).trim() : juce::String());
+                safe->venueBox_.addItem(label.isNotEmpty() ? label : id, itemId);
+                if (id == currentId)
+                    selectedId = itemId;
+                ++itemId;
+            }
+
+            safe->venueBox_.setSelectedId(selectedId, juce::dontSendNotification);
+            safe->venueBox_.setEnabled(! safe->venueIds_.empty());
+            safe->refreshAnalytics();
+        });
+}
+
 AnalyticsService::TimeRange ChartsPage::currentRange() const
 {
     const int idx = juce::jlimit(0, juce::jmax(0, (int) timeRangeKeys_.size() - 1), timeRangeBox_.getSelectedItemIndex());
@@ -578,7 +842,10 @@ void ChartsPage::refreshAnalytics()
         }
     }
 
-    const auto venueId = VenueService::getInstance().getCurrentVenueId();
+    const int venueIndex = venueBox_.getSelectedItemIndex();
+    const auto venueId = (venueIndex >= 0 && venueIndex < (int) venueIds_.size())
+                       ? venueIds_[(size_t) venueIndex]
+                       : VenueService::getInstance().getCurrentVenueId();
     if (venueId.isEmpty())
     {
         loadingLabel_.setText(tr("charts.no_active_venue", "No active venue"), juce::dontSendNotification);
@@ -616,6 +883,9 @@ void ChartsPage::refreshAnalytics()
 void ChartsPage::applySnapshot(AnalyticsService::Snapshot data)
 {
     snapshot_ = std::move(data);
+
+    topMembersTable_->setMembers(snapshot_.topMembers);
+    topSongsTable_->setSongs(snapshot_.topSongs);
 
     metricSongsPerMember_.setText(tr("charts.metric.avg_songs_member", "Avg Songs/Member") + "\n"
                                   + juce::String(snapshot_.performanceMetrics.averageSongsPerMember, 1), juce::dontSendNotification);
@@ -698,38 +968,6 @@ void ChartsPage::applySnapshot(AnalyticsService::Snapshot data)
 
 void ChartsPage::rebuildReportingText()
 {
-    juce::String topMembers;
-    topMembers << tr("charts.col.rank", "Rank") << "\t"
-               << tr("charts.col.member", "Member") << "\t"
-               << tr("charts.col.songs", "Songs") << "\t"
-               << tr("charts.col.last_sung", "Last Sung") << "\n";
-    for (size_t i = 0; i < snapshot_.topMembers.size(); ++i)
-    {
-        auto& m = snapshot_.topMembers[i];
-        topMembers << juce::String((int) i + 1) << "\t"
-                   << m.memberName << "\t"
-                   << juce::String(m.totalSongs) << "\t"
-                   << m.lastSung.formatted("%Y-%m-%d %H:%M") << "\n";
-    }
-    topMembersText_.setText(topMembers, juce::dontSendNotification);
-
-    juce::String topSongs;
-    topSongs << tr("charts.col.rank", "Rank") << "\t"
-             << tr("charts.col.song", "Song") << "\t"
-             << tr("charts.col.artist", "Artist") << "\t"
-             << tr("charts.col.plays", "Plays") << "\t"
-             << tr("charts.col.last_played", "Last Played") << "\n";
-    for (size_t i = 0; i < snapshot_.topSongs.size(); ++i)
-    {
-        auto& s = snapshot_.topSongs[i];
-        topSongs << juce::String((int) i + 1) << "\t"
-                 << s.songName << "\t"
-                 << s.artistName << "\t"
-                 << juce::String(s.timesPlayed) << "\t"
-                 << s.lastPlayed.formatted("%Y-%m-%d %H:%M") << "\n";
-    }
-    topSongsText_.setText(topSongs, juce::dontSendNotification);
-
     juce::String daily;
         daily << tr("charts.col.date", "Date") << "\t"
             << tr("charts.col.members", "Members") << "\t"

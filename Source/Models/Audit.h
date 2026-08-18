@@ -27,6 +27,7 @@ struct Audit
     int64_t date = 0;                       // Epoch ms
     std::string artist;
     std::string singerId;
+    std::string singerName;
     std::string source;                     // "phone", "host", "unknown"
     std::string deviceId;
 

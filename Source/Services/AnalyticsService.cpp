@@ -108,6 +108,7 @@ namespace
         juce::String songName;
         juce::String artist;
         juce::String singerId;
+        juce::String singerName;
         juce::String source;
         juce::String deviceId;
         juce::int64 date = 0;
@@ -187,6 +188,7 @@ namespace
             r.songName = fieldStr(f, "songName");
             r.artist = fieldStr(f, "artist");
             r.singerId = fieldStr(f, "singerId");
+            r.singerName = fieldStr(f, "singerName");
             r.source = fieldStr(f, "source");
             r.deviceId = fieldStr(f, "deviceId");
             r.date = fieldInt(f, "date");
@@ -373,14 +375,20 @@ void AnalyticsService::loadAnalytics(const juce::String& venueId,
             std::unordered_map<juce::String, MemberAgg> memberAgg;
             for (auto& a : audits)
             {
-                auto key = a.singerId.isNotEmpty() ? a.singerId : juce::String("Unknown");
+                const auto nameKey = a.singerName.trim().toLowerCase();
+                auto key = a.singerId.isNotEmpty() ? a.singerId
+                         : nameKey.isNotEmpty() ? "name:" + nameKey
+                                                : juce::String("Unknown");
                 auto& agg = memberAgg[key];
                 agg.songs += 1;
                 agg.last = juce::jmax(agg.last, a.date);
                 auto it = memberNamesByProfile.find(key);
-                agg.name = (it != memberNamesByProfile.end() && it->second.isNotEmpty())
-                    ? it->second
-                    : ("Unknown (" + key + ")");
+                if (a.singerName.isNotEmpty())
+                    agg.name = a.singerName;
+                else if (it != memberNamesByProfile.end() && it->second.isNotEmpty())
+                    agg.name = it->second;
+                else
+                    agg.name = "Unknown (" + key + ")";
             }
             for (auto& kv : memberAgg)
             {
@@ -391,8 +399,6 @@ void AnalyticsService::loadAnalytics(const juce::String& venueId,
                 snap.topMembers.push_back(std::move(tm));
             }
             std::sort(snap.topMembers.begin(), snap.topMembers.end(), [](const TopMember& a, const TopMember& b) { return a.totalSongs > b.totalSongs; });
-            if ((int) snap.topMembers.size() > 10)
-                snap.topMembers.resize(10);
 
             // Top songs
             struct SongAgg { int plays = 0; juce::int64 last = 0; std::set<juce::String> singers; juce::String song; juce::String artist; };
@@ -422,8 +428,6 @@ void AnalyticsService::loadAnalytics(const juce::String& venueId,
                 snap.topSongs.push_back(std::move(ts));
             }
             std::sort(snap.topSongs.begin(), snap.topSongs.end(), [](const TopSong& a, const TopSong& b) { return a.timesPlayed > b.timesPlayed; });
-            if ((int) snap.topSongs.size() > 10)
-                snap.topSongs.resize(10);
 
             // Daily stats
             for (auto& s : sessions)

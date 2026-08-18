@@ -118,6 +118,7 @@ juce::var AuditService::auditFields(const Audit& a)
         { "date",      FC::integerValue(a.date)                   },
         { "artist",    FC::stringValue(juce::String(a.artist))    },
         { "singerId",  FC::stringValue(juce::String(a.singerId))  },
+        { "singerName",FC::stringValue(juce::String(a.singerName))},
         { "source",    FC::stringValue(juce::String(a.source))    },
         { "deviceId",  FC::stringValue(juce::String(a.deviceId))  },
     });
@@ -240,6 +241,7 @@ void AuditService::addAudit(const CdgSong&     song,
         audit.date      = now;
         audit.artist    = song.artistName;
         audit.singerId  = item.profileId;
+        audit.singerName = singer.name;
         audit.source    = determineSource(juce::String(item.deviceId)).toStdString();
         audit.deviceId  = item.deviceId;
 
