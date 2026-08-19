@@ -30,6 +30,7 @@ struct Audit
     std::string singerName;
     std::string source;                     // "phone", "host", "unknown"
     std::string deviceId;
+    std::string devicePlatform;
 
     //==============================================================================
     juce::String toJson() const;
@@ -62,6 +63,7 @@ struct UserAudit
     std::string avatar;
     std::string profileId;
     std::string deviceId;
+    std::string devicePlatform;
     std::string foxId;
     std::string songVersion;
     float pitch = 0.0f;

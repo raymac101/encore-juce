@@ -48,12 +48,14 @@ public:
         repaint();
     }
 
-    void setData(const juce::String& title, std::vector<juce::String> labels, std::vector<double> values, bool horizontal = false)
+    void setData(const juce::String& title, std::vector<juce::String> labels,
+                 std::vector<double> values, bool horizontal = false, bool line = false)
     {
         title_ = title;
         labels_ = std::move(labels);
         values_ = std::move(values);
         horizontal_ = horizontal;
+        line_ = line;
         repaint();
     }
 
@@ -81,7 +83,62 @@ public:
         const double maxV = juce::jmax(1.0, *std::max_element(values_.begin(), values_.end()));
         const int n = juce::jmin((int) labels_.size(), (int) values_.size());
 
-        if (horizontal_)
+        if (line_)
+        {
+            auto plot = area.reduced(38, 8).toFloat();
+            plot.removeFromBottom(24.0f);
+
+            const int maxMembers = juce::jmax(1, (int) std::ceil(maxV));
+            const int tickStep = juce::jmax(1, (int) std::ceil((double) maxMembers / 4.0));
+            g.setFont(juce::Font(juce::FontOptions().withHeight(10.0f)));
+
+            for (int tick = 0; tick <= maxMembers; tick += tickStep)
+            {
+                const float y = plot.getBottom() - (float) tick / (float) maxMembers * plot.getHeight();
+                g.setColour(juce::Colour(0x1833456f));
+                g.drawHorizontalLine((int) std::round(y), plot.getX(), plot.getRight());
+                g.setColour(juce::Colour(0xff52658d));
+                g.drawText(juce::String(tick), (int) plot.getX() - 34, (int) y - 7, 28, 14,
+                           juce::Justification::centredRight);
+            }
+
+            g.setColour(juce::Colour(0xff52658d));
+            g.drawLine(plot.getX(), plot.getY(), plot.getX(), plot.getBottom(), 1.0f);
+            g.drawLine(plot.getX(), plot.getBottom(), plot.getRight(), plot.getBottom(), 1.0f);
+
+            juce::Path path;
+            std::vector<juce::Point<float>> points;
+            points.reserve((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                const float x = n == 1 ? plot.getCentreX()
+                                       : plot.getX() + (float) i / (float) (n - 1) * plot.getWidth();
+                const float y = plot.getBottom() - (float) (values_[(size_t) i] / maxV) * plot.getHeight();
+                points.emplace_back(x, y);
+                if (i == 0) path.startNewSubPath(x, y); else path.lineTo(x, y);
+            }
+
+            g.setColour(palette(0));
+            g.strokePath(path, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved,
+                                                     juce::PathStrokeType::rounded));
+            for (int i = 0; i < n; ++i)
+            {
+                const auto point = points[(size_t) i];
+                g.fillEllipse(point.x - 4.0f, point.y - 4.0f, 8.0f, 8.0f);
+
+                g.setColour(juce::Colour(0xff33456f));
+                g.drawText(juce::String((int) values_[(size_t) i]),
+                           (int) point.x - 16, (int) point.y - 20, 32, 14,
+                           juce::Justification::centred);
+
+                const int labelWidth = juce::jmax(54, (int) plot.getWidth() / juce::jmax(1, n));
+                g.drawFittedText(labels_[(size_t) i], (int) point.x - labelWidth / 2,
+                                 (int) plot.getBottom() + 5, labelWidth, 18,
+                                 juce::Justification::centred, 1);
+                g.setColour(palette(0));
+            }
+        }
+        else if (horizontal_)
         {
             const int rowH = juce::jmax(16, area.getHeight() / juce::jmax(1, n));
             for (int i = 0; i < n; ++i)
@@ -121,6 +178,7 @@ private:
     std::vector<juce::String> labels_;
     std::vector<double> values_;
     bool horizontal_ = false;
+    bool line_ = false;
 };
 
 class ChartsPage::PieChart : public juce::Component
@@ -905,7 +963,8 @@ void ChartsPage::applySnapshot(AnalyticsService::Snapshot data)
             labels.push_back(d.date);
             values.push_back((double) d.totalMembers);
         }
-        membersPerNightChart_->setData(tr("charts.chart.members_per_night", "Members per Night"), std::move(labels), std::move(values));
+        membersPerNightChart_->setData(tr("charts.chart.members_per_night", "Singers per Karaoke Night"),
+                           std::move(labels), std::move(values), false, true);
     }
 
     {

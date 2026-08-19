@@ -105,6 +105,7 @@ namespace
         QueueItem q;
         q.id           = valueAsString(fieldByName(fields, "id")).toStdString();
         q.deviceId     = valueAsString(fieldByName(fields, "deviceId")).toStdString();
+        q.devicePlatform = valueAsString(fieldByName(fields, "devicePlatform")).toStdString();
         q.singerName   = valueAsString(fieldByName(fields, "singerName")).toStdString();
         q.singerAvatar = valueAsString(fieldByName(fields, "avatar")).toStdString();
         q.songId       = valueAsString(fieldByName(fields, "songId")).toStdString();
@@ -286,6 +287,7 @@ namespace
 
         put("id",          FirestoreClient::stringValue(juce::String(q.id)));
         put("deviceId",    FirestoreClient::stringValue(juce::String(q.deviceId)));
+        put("devicePlatform", FirestoreClient::stringValue(juce::String(q.devicePlatform)));
         put("profileId",   FirestoreClient::stringValue(juce::String(q.profileId)));
         put("foxId",       FirestoreClient::stringValue(juce::String(q.foxId)));
         put("singerName",  FirestoreClient::stringValue(juce::String(q.singerName)));

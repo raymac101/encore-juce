@@ -24,6 +24,7 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/SongbookStorageService.h"
 #include "../Services/ArchiveService.h"
+#include "../Services/AuditService.h"
 #include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
@@ -6352,6 +6353,21 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
     entry.singerName = hasLocalNowPlaying_ ? localNowPlaying_.name : "Unknown";
 
     playStartTimeMs_ = 0; // Reset before the async write to prevent duplicate entries.
+
+    if (hasLocalNowPlaying_ && ! localNowPlaying_.songs.empty())
+    {
+        auto playedItem = localNowPlaying_.songs.front();
+        if (playedItem.singerName.empty())
+            playedItem.singerName = localNowPlaying_.name;
+
+        const auto kjId = FirestoreClient::getInstance().getUserId().trim();
+        AuditService::getInstance().addAudit(currentSong, localNowPlaying_, playedItem,
+                                             venueId, activeVenueName_, kjId);
+    }
+    else
+    {
+        DBG("[AuditService] playback qualified but singer/item state was unavailable");
+    }
 
     juce::Component::SafePointer<MainComponent> safe (this);
     VenueService::getInstance().addPlayHistory(entry,

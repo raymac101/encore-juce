@@ -45,6 +45,7 @@ juce::String Audit::toJson() const
     obj->setProperty("singerId", juce::String(singerId));
     obj->setProperty("source", juce::String(source));
     obj->setProperty("deviceId", juce::String(deviceId));
+    obj->setProperty("devicePlatform", juce::String(devicePlatform));
     return juce::JSON::toString(juce::var(obj.get()));
 }
 
@@ -69,6 +70,7 @@ Audit Audit::fromJsonObject(juce::DynamicObject* obj)
     a.singerId  = obj->getProperty("singerId").toString().toStdString();
     a.source    = obj->getProperty("source").toString().toStdString();
     a.deviceId  = obj->getProperty("deviceId").toString().toStdString();
+    a.devicePlatform = obj->getProperty("devicePlatform").toString().toStdString();
     return a;
 }
 
@@ -99,6 +101,7 @@ juce::String UserAudit::toJson() const
     obj->setProperty("avatar", juce::String(avatar));
     obj->setProperty("profileId", juce::String(profileId));
     obj->setProperty("deviceId", juce::String(deviceId));
+    obj->setProperty("devicePlatform", juce::String(devicePlatform));
     obj->setProperty("foxId", juce::String(foxId));
     obj->setProperty("songVersion", juce::String(songVersion));
     obj->setProperty("pitch", (double)pitch);
@@ -139,6 +142,7 @@ UserAudit UserAudit::fromJsonObject(juce::DynamicObject* obj)
     u.avatar       = obj->getProperty("avatar").toString().toStdString();
     u.profileId    = obj->getProperty("profileId").toString().toStdString();
     u.deviceId     = obj->getProperty("deviceId").toString().toStdString();
+    u.devicePlatform = obj->getProperty("devicePlatform").toString().toStdString();
     u.foxId        = obj->getProperty("foxId").toString().toStdString();
     u.songVersion  = obj->getProperty("songVersion").toString().toStdString();
     u.pitch        = (float)(double)obj->getProperty("pitch");

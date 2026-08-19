@@ -121,6 +121,7 @@ juce::var AuditService::auditFields(const Audit& a)
         { "singerName",FC::stringValue(juce::String(a.singerName))},
         { "source",    FC::stringValue(juce::String(a.source))    },
         { "deviceId",  FC::stringValue(juce::String(a.deviceId))  },
+        { "devicePlatform", FC::stringValue(juce::String(a.devicePlatform)) },
     });
 }
 
@@ -158,6 +159,7 @@ juce::var AuditService::userAuditFields(const UserAudit& u)
         { "avatar",       FC::stringValue(juce::String(u.avatar))     },
         { "profileId",    FC::stringValue(juce::String(u.profileId))  },
         { "deviceId",     FC::stringValue(juce::String(u.deviceId))   },
+        { "devicePlatform", FC::stringValue(juce::String(u.devicePlatform)) },
         { "foxId",        FC::stringValue(juce::String(u.foxId))      },
         { "songVersion",  FC::stringValue(juce::String(u.songVersion)) },
         { "pitch",        FC::doubleValue(u.pitch)                    },
@@ -240,10 +242,11 @@ void AuditService::addAudit(const CdgSong&     song,
         audit.songId    = song.id;
         audit.date      = now;
         audit.artist    = song.artistName;
-        audit.singerId  = item.profileId;
-        audit.singerName = singer.name;
+        audit.singerId  = ! item.profileId.empty() ? item.profileId : singer.id;
+        audit.singerName = ! singer.name.empty() ? singer.name : item.singerName;
         audit.source    = determineSource(juce::String(item.deviceId)).toStdString();
         audit.deviceId  = item.deviceId;
+        audit.devicePlatform = item.devicePlatform;
 
         auto aFields = auditFields(audit);
 
@@ -257,7 +260,8 @@ void AuditService::addAudit(const CdgSong&     song,
         // 2. Build UserAudit (detailed per-user record, same shape as userAudit.model.ts)
         //    Only written when the singer has a profileId.
         //----------------------------------------------------------------------
-        if (! juce::String(item.profileId).isEmpty())
+        const auto resolvedProfileId = juce::String(item.profileId).trim();
+        if (resolvedProfileId.isNotEmpty())
         {
             UserAudit ua;
             ua.venueId      = venueId.toStdString();
@@ -277,17 +281,18 @@ void AuditService::addAudit(const CdgSong&     song,
             ua.releaseDate  = song.releaseDate;
             ua.tempo        = song.tempo;
             ua.type         = "karaoke";
-            ua.singerName   = singer.name;
+            ua.singerName   = audit.singerName;
             ua.avatar       = singer.avatar;
-            ua.profileId    = item.profileId;
+            ua.profileId    = resolvedProfileId.toStdString();
             ua.deviceId     = item.deviceId;
+            ua.devicePlatform = item.devicePlatform;
             ua.foxId        = item.foxId;
             ua.songVersion  = item.songVersion;
             ua.pitch        = item.pitch;
             ua.kjId         = kjId.toStdString();
 
             auto uaDoc = FC::getInstance().createDocument(
-                "users/" + juce::String(item.profileId) + "/userAudit",
+                "users/" + resolvedProfileId + "/userAudit",
                 userAuditFields(ua));
 
             // Back-patch the `id` field with the Firestore-generated doc ID.
@@ -331,7 +336,7 @@ void AuditService::addAudit(const CdgSong&     song,
         const auto membersAuditPath = "venues/" + venueId + "/membersAudit";
 
         // Query by profileId (or singerName as fallback if no profileId).
-        const bool hasProfileId = juce::String(item.profileId).isNotEmpty();
+        const bool hasProfileId = resolvedProfileId.isNotEmpty();
         juce::Array<juce::var> matchingDocs;
 
         if (hasProfileId)
@@ -339,7 +344,7 @@ void AuditService::addAudit(const CdgSong&     song,
             auto query = buildSingleFieldQuery("membersAudit",
                                                "profileId",
                                                "EQUAL",
-                                               FC::stringValue(juce::String(item.profileId)));
+                                               FC::stringValue(resolvedProfileId));
             // runQuery on the venue's parent path.
             matchingDocs = FC::getInstance().runQuery("venues/" + venueId, query);
         }
@@ -349,7 +354,7 @@ void AuditService::addAudit(const CdgSong&     song,
             auto query = buildSingleFieldQuery("membersAudit",
                                                "singerName",
                                                "EQUAL",
-                                               FC::stringValue(juce::String(singer.name)));
+                                               FC::stringValue(juce::String(audit.singerName)));
             matchingDocs = FC::getInstance().runQuery("venues/" + venueId, query);
         }
 
@@ -409,8 +414,8 @@ void AuditService::addAudit(const CdgSong&     song,
             //------------------------------------------------------------------
             Member newMember;
             newMember.id          = "";
-            newMember.singerName  = singer.name;
-            newMember.profileId   = item.profileId;
+            newMember.singerName  = audit.singerName;
+            newMember.profileId   = resolvedProfileId.toStdString();
             newMember.firstDate   = now;
             newMember.lastDate    = now;
             newMember.memberHistory.push_back(history);

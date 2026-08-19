@@ -131,8 +131,34 @@ service cloud.firestore {
         || (isSignedIn() && isLegacyVenueAdmin(resource.data.venueId));
     }
 
+    // Append-only performance audit written by the active venue operator.
+    match /audit/{auditId} {
+      allow read: if isPlatformAdmin()
+        || isSignedIn();
+      allow create: if isPlatformAdmin()
+        || isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/userAudit/{auditId} {
+      allow read: if isPlatformAdmin()
+        || (isSignedIn() && authUid() == userId)
+        || (isSignedIn() && isLegacyVenueMember(resource.data.venueId));
+      allow create: if isPlatformAdmin()
+        || (isSignedIn() && authUid() == userId)
+        || (isSignedIn() && isLegacyVenueOperator(request.resource.data.venueId));
+      allow update: if isPlatformAdmin()
+        || (isSignedIn()
+          && isLegacyVenueOperator(resource.data.venueId)
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['id']));
+      allow delete: if false;
+    }
+
     match /venues/{venueId} {
-      allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
+      // TAGG mobile users authenticate with Firebase and address a venue by
+      // its known venueId. They need the venue document plus all operational
+      // subcollections (queue, requested, audit, emojis, membersAudit, etc.).
+      allow read: if isSignedIn();
       allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
 
       // Ad scheduling/rotation metadata (AdsService / AdsPage). Narrower than
@@ -145,8 +171,7 @@ service cloud.firestore {
       }
 
       match /{document=**} {
-        allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
-        allow write: if isPlatformAdmin() || isLegacyVenueOperator(venueId);
+        allow read, write: if isSignedIn();
       }
     }
 

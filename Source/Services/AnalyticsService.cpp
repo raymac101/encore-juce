@@ -54,6 +54,18 @@ namespace
         return valueAsString(fields.getProperty(name, juce::var()));
     }
 
+    juce::String firstFieldStr(const juce::var& fields,
+                               std::initializer_list<const char*> names)
+    {
+        for (auto* name : names)
+        {
+            auto value = fieldStr(fields, name).trim();
+            if (value.isNotEmpty())
+                return value;
+        }
+        return {};
+    }
+
     juce::int64 fieldInt(const juce::var& fields, const juce::String& name)
     {
         return valueAsInt64(fields.getProperty(name, juce::var()));
@@ -79,13 +91,20 @@ namespace
         return "phone";
     }
 
-    juce::String determineDeviceType(const juce::String& deviceId)
+    juce::String determineDeviceType(const juce::String& devicePlatform,
+                                     const juce::String& deviceId)
     {
+        const auto platform = devicePlatform.trim().toLowerCase();
+        if (platform.contains("ios") || platform.contains("iphone") || platform.contains("ipad")
+            || platform.contains("apple")) return "ios";
+        if (platform.contains("android")) return "android";
+        if (platform.contains("desktop") || platform.contains("mac") || platform.contains("windows")
+            || platform.contains("host")) return "host";
+
         const auto d = deviceId.trim().toLowerCase();
         if (d.isEmpty() || d == "unknown") return "unknown";
         if (d == "local" || d.contains("host") || d.contains("encore")) return "host";
-        if (d.contains("iphone") || d.contains("ios")) return "iphone";
-        if (d.contains("ipad")) return "ipad";
+        if (d.contains("iphone") || d.contains("ios") || d.contains("ipad")) return "ios";
         if (d.contains("android")) return "android";
         if (d.contains("tablet")) return "tablet";
         if (d.contains("mobile") || d.contains("phone")) return "mobile";
@@ -95,8 +114,7 @@ namespace
     juce::String formatDeviceTypeName(const juce::String& key)
     {
         if (key == "host") return "Host/Desktop";
-        if (key == "iphone") return "iPhone";
-        if (key == "ipad") return "iPad";
+        if (key == "ios") return "iOS";
         if (key == "android") return "Android";
         if (key == "mobile") return "Mobile Device";
         if (key == "tablet") return "Tablet";
@@ -111,6 +129,7 @@ namespace
         juce::String singerName;
         juce::String source;
         juce::String deviceId;
+        juce::String devicePlatform;
         juce::int64 date = 0;
     };
 
@@ -133,6 +152,23 @@ namespace
 
     juce::String dateKeyFromMs(juce::int64 ms);
 
+    juce::int64 reportingNightTimestamp(juce::int64 timestamp)
+    {
+        const auto localTime = juce::Time(timestamp);
+        return localTime.getHours() < 5
+                 ? timestamp - 24LL * 60LL * 60LL * 1000LL
+                 : timestamp;
+    }
+
+    juce::String singerKey(const AuditRow& audit)
+    {
+        if (audit.singerId.isNotEmpty())
+            return audit.singerId;
+
+        const auto name = audit.singerName.trim().toLowerCase();
+        return name.isNotEmpty() ? "name:" + name : juce::String();
+    }
+
     std::vector<SessionRow> buildSessionsFromAudits(const std::vector<AuditRow>& audits)
     {
         struct Agg
@@ -143,23 +179,28 @@ namespace
             int songs = 0;
         };
 
-        std::map<juce::String, Agg> byDate;
+        std::map<juce::String, Agg> byNight;
         for (auto& a : audits)
         {
             if (a.date <= 0)
                 continue;
 
-            auto key = dateKeyFromMs(a.date);
-            auto& agg = byDate[key];
+            // A reporting night runs until 5 AM, so activity after midnight
+            // remains attached to the previous evening (e.g. 8 PM-1 AM).
+            auto key = dateKeyFromMs(reportingNightTimestamp(a.date));
+
+            auto& agg = byNight[key];
             agg.first = juce::jmin(agg.first, a.date);
             agg.last = juce::jmax(agg.last, a.date);
-            agg.members.insert(a.singerId);
+            const auto memberKey = singerKey(a);
+            if (memberKey.isNotEmpty())
+                agg.members.insert(memberKey);
             agg.songs += 1;
         }
 
         std::vector<SessionRow> out;
-        out.reserve(byDate.size());
-        for (auto& kv : byDate)
+        out.reserve(byNight.size());
+        for (auto& kv : byNight)
         {
             SessionRow r;
             r.sessionDate = kv.first;
@@ -176,27 +217,39 @@ namespace
     std::vector<AuditRow> readAudits(const juce::String& venueId, const AS::TimeRange& range)
     {
         std::vector<AuditRow> out;
-        auto docs = FC::getInstance().listCollection("venues/" + venueId + "/audit", 5000);
-        if (docs.isEmpty())
-            docs = FC::getInstance().listCollection("archives/" + venueId + "/audit", 5000);
-        out.reserve((size_t) docs.size());
+        auto liveDocs = FC::getInstance().listCollection("venues/" + venueId + "/audit", 5000);
+        auto archivedDocs = FC::getInstance().listCollection("archives/" + venueId + "/audit", 5000);
+        out.reserve((size_t) liveDocs.size() + (size_t) archivedDocs.size());
+        std::set<juce::String> seenDocumentIds;
 
-        for (auto& d : docs)
+        auto appendDocuments = [&](const juce::Array<juce::var>& docs)
         {
-            auto f = d.getProperty("fields", juce::var());
-            AuditRow r;
-            r.songName = fieldStr(f, "songName");
-            r.artist = fieldStr(f, "artist");
-            r.singerId = fieldStr(f, "singerId");
-            r.singerName = fieldStr(f, "singerName");
-            r.source = fieldStr(f, "source");
-            r.deviceId = fieldStr(f, "deviceId");
-            r.date = fieldInt(f, "date");
-            if (r.date <= 0)
-                r.date = fieldInt(f, "dateTime");
-            if (inRange(r.date, range))
-                out.push_back(std::move(r));
-        }
+            for (auto& d : docs)
+            {
+                const auto documentId = d.getProperty("name", "").toString()
+                                           .fromLastOccurrenceOf("/", false, false);
+                if (documentId.isNotEmpty() && ! seenDocumentIds.insert(documentId).second)
+                    continue;
+
+                auto f = d.getProperty("fields", juce::var());
+                AuditRow r;
+                r.songName = fieldStr(f, "songName");
+                r.artist = fieldStr(f, "artist");
+                r.singerId = firstFieldStr(f, { "singerId", "profileId", "userId", "memberId" });
+                r.singerName = firstFieldStr(f, { "singerName", "memberName", "name" });
+                r.source = fieldStr(f, "source");
+                r.deviceId = fieldStr(f, "deviceId");
+                r.devicePlatform = fieldStr(f, "devicePlatform");
+                r.date = fieldInt(f, "date");
+                if (r.date <= 0)
+                    r.date = fieldInt(f, "dateTime");
+                if (inRange(reportingNightTimestamp(r.date), range))
+                    out.push_back(std::move(r));
+            }
+        };
+
+        appendDocuments(archivedDocs);
+        appendDocuments(liveDocs);
 
         std::sort(out.begin(), out.end(), [](const AuditRow& a, const AuditRow& b) { return a.date > b.date; });
         return out;
@@ -361,7 +414,9 @@ void AnalyticsService::loadAnalytics(const juce::String& venueId,
         {
             auto audits = readAudits(venueId, range);
             auto sessions = readSessions(venueId, range);
-            if (sessions.empty() && ! audits.empty())
+            // Audits retain each singer and timestamp, so they can correctly
+            // merge after-midnight activity into the preceding karaoke night.
+            if (! audits.empty())
                 sessions = buildSessionsFromAudits(audits);
             auto members = readMembers(venueId, range);
 
@@ -497,7 +552,7 @@ void AnalyticsService::loadAnalytics(const juce::String& venueId,
                 auto src = determineSource(a.source, a.deviceId);
                 sourceCounts[src] += 1;
 
-                auto dev = determineDeviceType(a.deviceId);
+                auto dev = determineDeviceType(a.devicePlatform, a.deviceId);
                 deviceCounts[dev] += 1;
             }
 

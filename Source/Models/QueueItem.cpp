@@ -19,6 +19,7 @@ juce::String QueueItem::toJson() const
     
     jsonObject->setProperty("id", juce::String(id));
     jsonObject->setProperty("deviceId", juce::String(deviceId));
+    jsonObject->setProperty("devicePlatform", juce::String(devicePlatform));
     jsonObject->setProperty("singerName", juce::String(singerName));
     jsonObject->setProperty("singerAvatar", juce::String(singerAvatar));
     jsonObject->setProperty("songId", juce::String(songId));
@@ -55,6 +56,7 @@ QueueItem QueueItem::fromJson(const juce::String& json)
         {
             item.id = obj->getProperty("id").toString().toStdString();
             item.deviceId = obj->getProperty("deviceId").toString().toStdString();
+            item.devicePlatform = obj->getProperty("devicePlatform").toString().toStdString();
             item.singerName = obj->getProperty("singerName").toString().toStdString();
             item.singerAvatar = obj->getProperty("singerAvatar").toString().toStdString();
             item.songId = obj->getProperty("songId").toString().toStdString();
