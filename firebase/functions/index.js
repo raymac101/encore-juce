@@ -148,6 +148,11 @@ Object.assign(exports, require("./adminUsers")(admin, db));
 Object.assign(exports, require("./venueMembers")(admin, db));
 
 // ============================================================
+// Audit System V2: canonical idempotent performance events
+// ============================================================
+Object.assign(exports, require("./performanceEvents")(admin, db));
+
+// ============================================================
 // LEGACY FUNCTIONS (Migrated)
 // ============================================================
 

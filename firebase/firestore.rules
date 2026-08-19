@@ -276,7 +276,10 @@ service cloud.firestore {
     }
 
     match /{document=**} {
-      allow read, write: if false;
+      // Encore and TAGG share this Firebase project across desktop and mobile.
+      // Any Firebase-authenticated user may use the application data model;
+      // unauthenticated access remains denied.
+      allow read, write: if isSignedIn();
     }
   }
 }
