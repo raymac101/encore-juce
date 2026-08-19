@@ -100,6 +100,15 @@ public:
         to the Library page and start the initial song-load flow. */
     void setVenueId (const juce::String& venueId, bool requestInitialScan = false);
 
+    /** Switches straight to the Company Admin page and pushes company
+        context into NavBar / MainArea's CompanyAdminPage. Called once from
+        Main.cpp right after setVenueId() when the user picked "Manage
+        Company" on the login window's venue-select screen rather than a
+        specific venue (a venue is still loaded underneath -- MainComponent
+        has no venue-less mode -- but the host lands on the company
+        dashboard instead of Home). */
+    void openCompanyDashboard (const juce::String& companyId, const juce::String& companyRole);
+
     /** Shows a small, persistent "Update" pill in TopBar, just left of the
         avatar (VS Code-style) -- stays until the host clicks it or the app
         restarts. Called either directly from UpdateService's

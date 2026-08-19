@@ -534,11 +534,17 @@ private:
 
         venuesViewport_.setBounds(area);
 
-        // Lay out the inner cards stacked vertically.
+        // Lay out the inner cards stacked vertically. The company card (if
+        // any) always leads the list.
         const int viewW = venuesViewport_.getMaximumVisibleWidth();
         const int cardH = 110;
         const int gap = 12;
         int y = 0;
+        if (companyCard_ != nullptr)
+        {
+            companyCard_->setBounds(0, y, viewW, cardH);
+            y += cardH + gap;
+        }
         for (auto& c : venueCards_)
         {
             c->setBounds(0, y, viewW, cardH);
@@ -667,6 +673,23 @@ private:
             card->onSelect = [this, venueId] { if (venueListModelOnSelected_) venueListModelOnSelected_(venueId); };
             venuesContainer_.addAndMakeVisible(card.get());
             venueCards_.push_back(std::move(card));
+        }
+
+        // Company card -- lets a company owner/admin jump into the
+        // company-wide dashboard instead of a single venue. Only offered
+        // when we actually have a venue to boot MainComponent with (it's
+        // venue-centric), since the dashboard itself is reached from inside
+        // that shell rather than being a standalone destination.
+        if (flowResult_.hasCompanyContext
+            && (flowResult_.configuredVenueId.isNotEmpty() || ! flowResult_.associations.empty()))
+        {
+            companyCard_ = std::make_unique<CompanyCardComponent>(flowResult_.companyName, flowResult_.companyRole);
+            companyCard_->onSelect = [this] { selectCompany(); };
+            venuesContainer_.addAndMakeVisible(companyCard_.get());
+        }
+        else
+        {
+            companyCard_ = nullptr;
         }
     }
 
@@ -907,7 +930,7 @@ private:
                             setBusy(false, {});
                             if (ok)
                             {
-                                if (onComplete_) onComplete_(pickId, false);
+                                if (onComplete_) onComplete_(pickId, false, false, {}, {});
                             }
                             else
                             {
@@ -965,6 +988,32 @@ private:
         applyPage();
     }
 
+    // Company card click on SelectVenue: there's no venue-less destination
+    // in this app (MainComponent always boots against a venue), so pick
+    // whichever venue would normally be used -- the configured one if it's
+    // still valid, else the first association -- and flag the hand-off so
+    // MainComponent opens straight into the Company Admin dashboard instead
+    // of Home once that venue finishes loading.
+    void selectCompany()
+    {
+        juce::String venueId = flowResult_.configuredVenueId;
+        bool stillAssociated = false;
+        for (auto& a : flowResult_.associations)
+            if (a.venueId == venueId) { stillAssociated = true; break; }
+
+        if (venueId.isEmpty() || ! stillAssociated)
+            venueId = flowResult_.associations.empty() ? juce::String() : flowResult_.associations.front().venueId;
+
+        if (venueId.isEmpty())
+            return;
+
+        pendingOpenCompanyDashboard_ = true;
+        pendingCompanyId_   = flowResult_.companyId;
+        pendingCompanyRole_ = flowResult_.companyRole;
+
+        proceedToVenueAfterChecks(venueId, {}, false);
+    }
+
     // Single hand-off point for BOTH places a venue can actually be opened
     // (the single-association auto-load in runFlow(), and the multi-venue
     // picker's venueListModelOnSelected_) -- runs the two collision-
@@ -1020,7 +1069,8 @@ private:
             {
                 if (! otherActive)
                 {
-                    if (onComplete_) onComplete_(venueId, initialScan);
+                    if (onComplete_) onComplete_(venueId, initialScan, pendingOpenCompanyDashboard_,
+                                                 pendingCompanyId_, pendingCompanyRole_);
                     return;
                 }
 
@@ -1039,7 +1089,8 @@ private:
                     juce::ModalCallbackFunction::create([this, venueId, initialScan](int result)
                     {
                         if (result == 1 && onComplete_)
-                            onComplete_(venueId, initialScan);
+                            onComplete_(venueId, initialScan, pendingOpenCompanyDashboard_,
+                                       pendingCompanyId_, pendingCompanyRole_);
                         // Cancel: stay on the current page, do nothing.
                     }));
             });
@@ -1254,6 +1305,81 @@ private:
     };
 
     //==============================================================================
+    // CompanyCardComponent — sits above the venue cards on the SelectVenue
+    // page for a company owner/admin. Styled in a distinct amber/gold tone
+    // (vs. the venues' blue/grey) so it reads as "a different kind of
+    // destination" rather than just another venue in the list.
+    class CompanyCardComponent : public juce::Component
+    {
+    public:
+        CompanyCardComponent(const juce::String& companyName, const juce::String& companyRole)
+            : companyName_(companyName), companyRole_(companyRole)
+        {
+            auto& lm = LocalizationManager::getInstance();
+            addAndMakeVisible(selectButton_);
+            selectButton_.setButtonText(lm.getText("login.select_venue.company_card_button"));
+            selectButton_.getProperties().set("greenSelect", true);
+            selectButton_.onClick = [this] { if (onSelect) onSelect(); };
+        }
+
+        std::function<void()> onSelect;
+
+        void paint(juce::Graphics& g) override
+        {
+            auto& lm = LocalizationManager::getInstance();
+            const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+            const float r = 12.0f;
+
+            g.setColour(juce::Colour(0xfffdf0da));
+            g.fillRoundedRectangle(bounds, r);
+            g.setColour(juce::Colour(0xffe8b84b));
+            g.drawRoundedRectangle(bounds, r, 1.5f);
+
+            const int pad = 16;
+            const int logoSize = 56;
+            const juce::Rectangle<int> logoArea(pad, pad, logoSize, logoSize);
+            g.setColour(juce::Colour(0xfff3d488));
+            g.fillRoundedRectangle(logoArea.toFloat(), 6.0f);
+            g.setColour(juce::Colour(0xff92660f));
+            g.setFont(juce::Font(juce::FontOptions(20.0f, juce::Font::bold)));
+            g.drawText(juce::String(juce::CharPointer_UTF8("\xf0\x9f\x8f\xa2")), logoArea, juce::Justification::centred);
+
+            const int textX = pad + logoSize + 16;
+            const int textW = getWidth() - textX - 140;
+            int y = pad - 2;
+
+            const auto displayName = companyName_.isNotEmpty() ? companyName_
+                                                               : lm.getText("login.select_venue.company_card_fallback_name");
+            g.setColour(juce::Colour(0xff5c4108));
+            g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
+            g.drawText(displayName, textX, y, textW, 22, juce::Justification::centredLeft, true);
+            y += 22;
+
+            g.setColour(juce::Colour(0xff7a5a12));
+            g.setFont(juce::Font(juce::FontOptions(12.0f)));
+            g.drawText(lm.getText("login.select_venue.company_card_subtitle"), textX, y, textW, 16,
+                       juce::Justification::centredLeft, true);
+            y += 16;
+
+            if (companyRole_.isNotEmpty())
+            {
+                g.drawText(lm.getTextWithParams("login.select_venue.card_role_label", { companyRole_ }),
+                           textX, y, textW, 16, juce::Justification::centredLeft);
+            }
+        }
+
+        void resized() override
+        {
+            const int w = 150, h = 36;
+            selectButton_.setBounds(getWidth() - w - 16, (getHeight() - h) / 2, w, h);
+        }
+
+    private:
+        juce::String companyName_, companyRole_;
+        juce::TextButton selectButton_;
+    };
+
+    //==============================================================================
     // State
     Page page_ = Page::Login;
     bool isLoginMode_ = true;
@@ -1301,12 +1427,22 @@ private:
 
     // SelectVenue page (custom cards instead of ListBox)
     class VenueCardComponent;
+    class CompanyCardComponent;
     juce::Label             venuesHeadingLabel_;
     juce::ToggleButton      rememberVenueToggle_;
     juce::Viewport          venuesViewport_;
     juce::Component         venuesContainer_;
     std::vector<std::unique_ptr<VenueCardComponent>> venueCards_;
+    std::unique_ptr<CompanyCardComponent> companyCard_;
     std::function<void(const juce::String&)> venueListModelOnSelected_;
+
+    // Set by selectCompany() just before the shared venue-completion hand-
+    // off, so checkLiveElsewhereThenComplete() can tell MainComponent to
+    // open the Company Admin dashboard instead of Home once the (arbitrary,
+    // just-needed-to-boot) venue finishes loading.
+    bool          pendingOpenCompanyDashboard_ = false;
+    juce::String  pendingCompanyId_;
+    juce::String  pendingCompanyRole_;
 
     // AwaitingInvitation / RequestAccess
     juce::TextButton refreshButton_;
@@ -1330,11 +1466,12 @@ LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
     setUsingNativeTitleBar(true);
     setResizable(false, false);
 
-    auto* c = new LoginContent([this](juce::String venueId, bool requestInitialScan)
+    auto* c = new LoginContent([this](juce::String venueId, bool requestInitialScan,
+                                      bool openCompanyDashboard, juce::String companyId, juce::String companyRole)
     {
         auto cb = std::move(onComplete_);
         onComplete_ = nullptr;
-        if (cb) cb(venueId, requestInitialScan);
+        if (cb) cb(venueId, requestInitialScan, openCompanyDashboard, companyId, companyRole);
     });
     setContentOwned(c, true);
     centreWithSize(720, 820);

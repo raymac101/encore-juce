@@ -282,6 +282,13 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
                                        || companyRole.equalsIgnoreCase("enterprise_admin")
                                        || companyRole.equalsIgnoreCase("platform_admin");
 
+            juce::String companyName;
+            if (hasCompanyContext)
+            {
+                auto companyDoc = fc.getDocument("companies/" + companyId);
+                companyName = FirestoreClient::readString(companyDoc, "name");
+            }
+
             DBG("[LoginFlow] storedVenueId=" << storedVenueId
                 << " associations=" << (int) associations.size()
                 << " role=" << juce::String(AccessRightsUtil::userRoleToString(host.role))
@@ -295,14 +302,18 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             result.hasCompanyContext  = hasCompanyContext;
             result.companyId         = companyId;
             result.companyRole       = companyRole;
+            result.companyName       = companyName;
 
             // 5) Apply the scenario tree (mirrors Angular start.component logic)
             //    - Multiple associations → ALWAYS show picker (the configured
             //      venue is just badged in the list).
-            //    - Single association → auto-load it.
+            //    - Single association → auto-load it, UNLESS the user also
+            //      has company context: they need the picker so the
+            //      "manage company" card is reachable instead of being
+            //      dropped straight into their one venue.
             //    - Zero associations → request access (if stored venueId set
             //      and user isn't an admin) / await invitation otherwise.
-            if (associations.size() > 1)
+            if (associations.size() > 1 || (hasCompanyContext && ! associations.empty()))
             {
                 result.outcome      = Outcome::PickVenue;
                 result.associations = std::move(associations);

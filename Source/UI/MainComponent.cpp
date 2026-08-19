@@ -4059,6 +4059,23 @@ void MainComponent::setLargeTextMode(bool enabled)
     resized(); // Relayout with new font sizes
 }
 */
+
+//==============================================================================
+void MainComponent::openCompanyDashboard(const juce::String& companyId, const juce::String& companyRole)
+{
+    companyContextEnabled_ = true;
+    companyId_ = companyId;
+    companyRole_ = companyRole;
+
+    if (mainArea) mainArea->setCompanyContext(companyId, companyRole);
+    if (navBar)
+    {
+        navBar->setCompanyContext(true, companyRole);
+        navBar->setActivePage(NavPage::CompanyAdmin);
+    }
+    if (mainArea) mainArea->setCurrentPage(NavPage::CompanyAdmin);
+}
+
 //==============================================================================
 // Song playback
 //==============================================================================

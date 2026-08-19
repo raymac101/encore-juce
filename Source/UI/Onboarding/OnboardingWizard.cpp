@@ -36,7 +36,7 @@ namespace
     constexpr int kCardCornerRadius = 16;
 
     constexpr int kWindowW = 760 + 2 * kShadowMargin;
-    constexpr int kWindowH = 620 + 2 * kShadowMargin;
+    constexpr int kWindowH = 664 + 2 * kShadowMargin;
 
     void styleEditor(juce::TextEditor& te, const juce::String& placeholder)
     {
@@ -188,7 +188,7 @@ class OnboardingWizard::Content : public juce::Component
 public:
     enum class Step
     {
-        CreateAccount, JoinInvitedVenue, AccountType,
+        CreateAccount, LoginStep, JoinInvitedVenue, AccountType,
         CompanyInfo, VenueInfo, HostInvite, LibraryScan
     };
 
@@ -347,6 +347,15 @@ private:
             addAndMakeVisible(submitButton_);
             submitButton_.setButtonText(lm.getText("onboarding.create_account.submit_button"));
             submitButton_.onClick = [this] { submit(); };
+
+            addAndMakeVisible(switchToLoginButton_);
+            switchToLoginButton_.setButtonText(lm.getText("onboarding.create_account.switch_to_login"));
+            switchToLoginButton_.getProperties().set("ghost", true);
+            switchToLoginButton_.onClick = [this]
+            {
+                if (onSwitchToLogin)
+                    onSwitchToLogin();
+            };
         }
 
         void resized() override
@@ -397,7 +406,10 @@ private:
 
             area.removeFromTop(10);
             statusLabel_.setBounds(area.removeFromTop(20));
-            submitButton_.setBounds(area.removeFromTop(44).withSizeKeepingCentre(220, 44));
+            auto buttonArea = area.removeFromTop(44);
+            submitButton_.setBounds(buttonArea.removeFromTop(22).withSizeKeepingCentre(220, 22));
+            area.removeFromTop(4);
+            switchToLoginButton_.setBounds(area.removeFromTop(22).withSizeKeepingCentre(220, 22));
         }
 
     private:
@@ -590,6 +602,7 @@ private:
     public:
         std::function<void(juce::String uid, juce::String email, Host host,
                            std::vector<VenueInvitation> invitations)> onAccountCreated;
+        std::function<void()> onSwitchToLogin;
 
     private:
         static constexpr int kAvatarCols = 9;
@@ -600,9 +613,175 @@ private:
         juce::TextEditor firstNameEd_, lastNameEd_, stageNameEd_, emailEd_, passEd_, confirmEd_;
         juce::Label avatarLabel_, statusLabel_;
         juce::TextButton submitButton_;
+        juce::TextButton switchToLoginButton_;
         juce::Viewport avatarViewport_;
         juce::Component avatarGridContainer_;
         std::vector<std::unique_ptr<juce::ImageButton>> avatarButtons_;
+    };
+
+    //==============================================================================
+    // Step: User already has an account and wants to log in instead of signing up.
+    class LoginStep : public juce::Component
+    {
+    public:
+        LoginStep(std::function<void(juce::String uid, juce::String email, Host host,
+                                    std::vector<VenueInvitation> invitations)> onLoggedIn)
+            : onLoggedIn_(std::move(onLoggedIn))
+        {
+            auto& lm = LocalizationManager::getInstance();
+            styleHeading(heading_, lm.getText("onboarding.login.heading"));
+            styleSubheading(sub_, lm.getText("onboarding.login.subtitle"));
+            addAndMakeVisible(heading_); addAndMakeVisible(sub_);
+
+            setupField(emailLabel_, emailEd_, lm.getText("onboarding.login.email_label"), lm.getText("onboarding.login.email_placeholder"));
+            setupField(passLabel_, passEd_, lm.getText("onboarding.login.password_label"), lm.getText("onboarding.login.password_placeholder"));
+            passEd_.setPasswordCharacter((juce::juce_wchar) 0x2022);
+
+            addAndMakeVisible(statusLabel_);
+            styleStatus(statusLabel_);
+
+            addAndMakeVisible(submitButton_);
+            submitButton_.setButtonText(lm.getText("onboarding.login.submit_button"));
+            submitButton_.onClick = [this] { submit(); };
+
+            addAndMakeVisible(switchToSignupButton_);
+            switchToSignupButton_.setButtonText(lm.getText("onboarding.login.switch_to_signup"));
+            switchToSignupButton_.getProperties().set("ghost", true);
+            switchToSignupButton_.onClick = [this]
+            {
+                if (onSwitchToSignup)
+                    onSwitchToSignup();
+            };
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            heading_.setBounds(area.removeFromTop(30));
+            sub_.setBounds(area.removeFromTop(22));
+            area.removeFromTop(12);
+
+            auto emailArea = area.removeFromTop(58);
+            layoutField(emailLabel_, emailEd_, emailArea);
+            area.removeFromTop(10);
+
+            auto r2 = area.removeFromTop(58);
+            layoutField(passLabel_, passEd_, r2);
+            area.removeFromTop(14);
+
+            // Add spacing for alignment with create account step
+            area.removeFromTop(60);
+
+            statusLabel_.setBounds(area.removeFromTop(20));
+            auto buttonArea = area.removeFromTop(44);
+            submitButton_.setBounds(buttonArea.removeFromTop(22).withSizeKeepingCentre(220, 22));
+            area.removeFromTop(4);
+            switchToSignupButton_.setBounds(area.removeFromTop(22).withSizeKeepingCentre(220, 22));
+        }
+
+    private:
+        void setupField(juce::Label& label, juce::TextEditor& editor,
+                        const juce::String& labelText, const juce::String& placeholder)
+        {
+            styleFieldLabel(label, labelText);
+            styleEditor(editor, placeholder);
+            addAndMakeVisible(label);
+            addAndMakeVisible(editor);
+        }
+
+        void layoutField(juce::Label& label, juce::TextEditor& editor, juce::Rectangle<int> area)
+        {
+            label.setBounds(area.removeFromTop(16));
+            editor.setBounds(area);
+        }
+
+        void submit()
+        {
+            const auto email    = emailEd_.getText().trim();
+            const auto password = passEd_.getText();
+
+            auto& lm = LocalizationManager::getInstance();
+            if (email.isEmpty() || password.isEmpty())
+            {
+                statusLabel_.setText(lm.getText("onboarding.login.error_required_fields"), juce::dontSendNotification);
+                return;
+            }
+            if (! looksLikeEmail(email))
+            {
+                statusLabel_.setText(lm.getText("onboarding.login.error_invalid_email"), juce::dontSendNotification);
+                return;
+            }
+
+            submitButton_.setEnabled(false);
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kSubtleText));
+            statusLabel_.setText(lm.getText("onboarding.login.status_signing_in"), juce::dontSendNotification);
+
+            juce::Component::SafePointer<LoginStep> safe(this);
+            juce::Thread::launch([safe, email, password]()
+            {
+                auto& fc = FC::getInstance();
+                auto authResult = fc.signInWithEmailPassword(email, password);
+
+                if (! authResult.ok)
+                {
+                    const auto msg = authResult.errorMessage.isNotEmpty() ? authResult.errorMessage
+                                                                          : authResult.errorCode;
+                    juce::MessageManager::callAsync([safe, msg]()
+                    {
+                        if (safe == nullptr) return;
+                        safe->submitButton_.setEnabled(true);
+                        safe->statusLabel_.setColour(juce::Label::textColourId, juce::Colour(LoginTheme::kErrorText));
+                        safe->statusLabel_.setText(msg.isNotEmpty() ? msg : LocalizationManager::getInstance().getText("onboarding.login.error_generic"),
+                                                   juce::dontSendNotification);
+                    });
+                    return;
+                }
+
+                const auto uid = fc.getUserId();
+                auto hostDocs = fc.listCollection("hosts", 1);
+                Host h;
+
+                for (const auto& doc : hostDocs)
+                {
+                    if (FC::readString(doc, "userId") == uid)
+                    {
+                        h.userId = uid.toStdString();
+                        h.email = FC::readString(doc, "email").toStdString();
+                        h.firstName = FC::readString(doc, "firstName").toStdString();
+                        h.lastName = FC::readString(doc, "lastName").toStdString();
+                        h.stageName = FC::readString(doc, "stageName").toStdString();
+                        h.fullName = FC::readString(doc, "fullName").toStdString();
+                        h.avatarUrl = FC::readString(doc, "avatarUrl").toStdString();
+                        h.role = AccessRightsUtil::stringToUserRole(FC::readString(doc, "role").toStdString());
+                        break;
+                    }
+                }
+
+                auto invitations = InvitationService::queryPendingInvitationsSync(email);
+
+                juce::MessageManager::callAsync([safe, uid, email, h, invitations]() mutable
+                {
+                    if (safe == nullptr) return;
+                    HostService::getInstance().setCurrent(h);
+                    if (safe->onLoggedIn_)
+                        safe->onLoggedIn_(uid, email, h, invitations);
+                });
+            });
+        }
+
+    public:
+        std::function<void()> onSwitchToSignup;
+
+    private:
+        juce::Label heading_, sub_;
+        juce::Label emailLabel_, passLabel_;
+        juce::TextEditor emailEd_, passEd_;
+        juce::Label statusLabel_;
+        juce::TextButton submitButton_;
+        juce::TextButton switchToSignupButton_;
+        
+        std::function<void(juce::String uid, juce::String email, Host host,
+                           std::vector<VenueInvitation> invitations)> onLoggedIn_;
     };
 
     //==============================================================================
@@ -1380,6 +1559,33 @@ void OnboardingWizard::Content::showStep(Step step)
                 {
                     showStep(Step::AccountType);
                 }
+            };
+            s->onSwitchToLogin = [this]()
+            {
+                showStep(Step::LoginStep);
+            };
+            stepComponent_ = std::move(s);
+            break;
+        }
+        case Step::LoginStep:
+        {
+            auto s = std::make_unique<LoginStep>([this](juce::String uid, juce::String email, Host host,
+                                                        std::vector<VenueInvitation> invitations)
+            {
+                uid_ = uid; email_ = email; host_ = host;
+                if (! invitations.empty())
+                {
+                    pendingInvitationForNextStep_ = invitations.front();
+                    showStep(Step::JoinInvitedVenue);
+                }
+                else
+                {
+                    showStep(Step::AccountType);
+                }
+            });
+            s->onSwitchToSignup = [this]()
+            {
+                showStep(Step::CreateAccount);
             };
             stepComponent_ = std::move(s);
             break;

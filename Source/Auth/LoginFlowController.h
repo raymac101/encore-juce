@@ -53,6 +53,7 @@ public:
         bool                                 hasCompanyContext = false;
         juce::String                         companyId;
         juce::String                         companyRole;
+        juce::String                         companyName;    // Resolved from companies/{companyId} when hasCompanyContext.
         Host                                 host;
     };
 

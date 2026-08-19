@@ -582,14 +582,14 @@ ChartsPage::ChartsPage()
     membersPerNightChart_ = std::make_unique<BarChart>();
     topMembersChart_ = std::make_unique<BarChart>();
     topSongsChart_ = std::make_unique<PieChart>();
-    peakHoursChart_ = std::make_unique<BarChart>();
+    peakHoursLineChart_ = std::make_unique<BarChart>();
     sourceBreakdownChart_ = std::make_unique<PieChart>();
     deviceBreakdownChart_ = std::make_unique<PieChart>();
 
     contentHolder_->addAndMakeVisible(*membersPerNightChart_);
     contentHolder_->addAndMakeVisible(*topMembersChart_);
     contentHolder_->addAndMakeVisible(*topSongsChart_);
-    contentHolder_->addAndMakeVisible(*peakHoursChart_);
+    contentHolder_->addAndMakeVisible(*peakHoursLineChart_);
     contentHolder_->addAndMakeVisible(*sourceBreakdownChart_);
     contentHolder_->addAndMakeVisible(*deviceBreakdownChart_);
 
@@ -623,7 +623,7 @@ ChartsPage::ChartsPage()
     membersPerNightChart_->setNoDataText(noData);
     topMembersChart_->setNoDataText(noData);
     topSongsChart_->setNoDataText(noData);
-    peakHoursChart_->setNoDataText(noData);
+    peakHoursLineChart_->setNoDataText(noData);
     sourceBreakdownChart_->setNoDataText(noData);
     deviceBreakdownChart_->setNoDataText(noData);
 
@@ -732,7 +732,7 @@ void ChartsPage::layoutContent()
     left.removeFromTop(6);
     topSongsChart_->setBounds(left.removeFromTop(136));
 
-    peakHoursChart_->setBounds(right.removeFromTop(136));
+    peakHoursLineChart_->setBounds(right.removeFromTop(136));
     right.removeFromTop(6);
     sourceBreakdownChart_->setBounds(right.removeFromTop(136));
     right.removeFromTop(6);
@@ -990,14 +990,36 @@ void ChartsPage::applySnapshot(AnalyticsService::Snapshot data)
     }
 
     {
+        // Peak hours line chart for 8pm-2am (hours 20-23, 0-2)
         std::vector<juce::String> labels;
         std::vector<double> values;
-        for (auto& p : snapshot_.performanceMetrics.peakHours)
+        std::vector<int> peakHourRange = { 20, 21, 22, 23, 0, 1, 2 };
+        
+        for (int hour : peakHourRange)
         {
-            labels.push_back(juce::String(p.hour) + ":00");
-            values.push_back((double) p.count);
+            // Find matching hour in peakHours data
+            double count = 0.0;
+            for (auto& p : snapshot_.performanceMetrics.peakHours)
+            {
+                if (p.hour == hour)
+                {
+                    count = (double) p.count;
+                    break;
+                }
+            }
+            
+            // Format hour display
+            juce::String hourLabel;
+            if (hour < 12)
+                hourLabel = hour == 0 ? "12 AM" : juce::String(hour) + " AM";
+            else
+                hourLabel = hour == 12 ? "12 PM" : juce::String(hour - 12) + " PM";
+            
+            labels.push_back(hourLabel);
+            values.push_back(count);
         }
-        peakHoursChart_->setData(tr("charts.chart.peak_hours", "Peak Hours Activity"), std::move(labels), std::move(values));
+        peakHoursLineChart_->setData(tr("charts.chart.peak_hours_line", "Peak Hours (8PM-2AM)"), 
+                                     std::move(labels), std::move(values), false, true);
     }
 
     {

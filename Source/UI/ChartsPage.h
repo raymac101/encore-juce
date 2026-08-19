@@ -71,7 +71,7 @@ private:
     std::unique_ptr<BarChart> membersPerNightChart_;
     std::unique_ptr<BarChart> topMembersChart_;
     std::unique_ptr<PieChart> topSongsChart_;
-    std::unique_ptr<BarChart> peakHoursChart_;
+    std::unique_ptr<BarChart> peakHoursLineChart_;
     std::unique_ptr<PieChart> sourceBreakdownChart_;
     std::unique_ptr<PieChart> deviceBreakdownChart_;
 
