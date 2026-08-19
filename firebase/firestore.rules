@@ -154,6 +154,26 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // TAGG mobile profiles and their nested collections. TAGG users are
+    // Firebase-authenticated; access is intentionally broad within /users
+    // to preserve the mobile app's existing profile and history workflows.
+    match /users/{userId} {
+      allow read, write: if isSignedIn();
+
+      match /{document=**} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // TAGG social posts, including comments/reactions stored below a post.
+    match /posts/{postId} {
+      allow read, write: if isSignedIn();
+
+      match /{document=**} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
     match /venues/{venueId} {
       // TAGG mobile users authenticate with Firebase and address a venue by
       // its known venueId. They need the venue document plus all operational
