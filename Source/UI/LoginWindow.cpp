@@ -676,12 +676,11 @@ private:
         }
 
         // Company card -- lets a company owner/admin jump into the
-        // company-wide dashboard instead of a single venue. Only offered
-        // when we actually have a venue to boot MainComponent with (it's
-        // venue-centric), since the dashboard itself is reached from inside
-        // that shell rather than being a standalone destination.
-        if (flowResult_.hasCompanyContext
-            && (flowResult_.configuredVenueId.isNotEmpty() || ! flowResult_.associations.empty()))
+        // company-wide dashboard instead of a single venue. Shown whenever
+        // the user has company context at all; selectCompany() itself
+        // handles the (rare) case where there's truly no venue anywhere to
+        // boot MainComponent with yet.
+        if (flowResult_.hasCompanyContext)
         {
             companyCard_ = std::make_unique<CompanyCardComponent>(flowResult_.companyName, flowResult_.companyRole);
             companyCard_->onSelect = [this] { selectCompany(); };
@@ -991,9 +990,10 @@ private:
     // Company card click on SelectVenue: there's no venue-less destination
     // in this app (MainComponent always boots against a venue), so pick
     // whichever venue would normally be used -- the configured one if it's
-    // still valid, else the first association -- and flag the hand-off so
-    // MainComponent opens straight into the Company Admin dashboard instead
-    // of Home once that venue finishes loading.
+    // still valid, else the first association, else (a company-only user
+    // with no personal venue association) the company's own first venue --
+    // and flag the hand-off so MainComponent opens straight into the
+    // Company Admin dashboard instead of Home once that venue loads.
     void selectCompany()
     {
         juce::String venueId = flowResult_.configuredVenueId;
@@ -1005,7 +1005,14 @@ private:
             venueId = flowResult_.associations.empty() ? juce::String() : flowResult_.associations.front().venueId;
 
         if (venueId.isEmpty())
+            venueId = flowResult_.companyFallbackVenueId;
+
+        if (venueId.isEmpty())
+        {
+            auto& lm = LocalizationManager::getInstance();
+            statusLabel_.setText(lm.getText("login.select_venue.company_card_no_venues"), juce::dontSendNotification);
             return;
+        }
 
         pendingOpenCompanyDashboard_ = true;
         pendingCompanyId_   = flowResult_.companyId;

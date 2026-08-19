@@ -54,6 +54,8 @@ public:
         juce::String                         companyId;
         juce::String                         companyRole;
         juce::String                         companyName;    // Resolved from companies/{companyId} when hasCompanyContext.
+        juce::String                         companyFallbackVenueId;   // First venue found under the company, for a
+        juce::String                         companyFallbackVenueName; // company-only user (no personal venue association) to boot into.
         Host                                 host;
     };
 

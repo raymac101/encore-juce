@@ -823,6 +823,7 @@ login.select_venue.card_select_button=SELECT
 login.select_venue.company_card_button=MANAGE COMPANY
 login.select_venue.company_card_subtitle=Manage venues, hosts, and shared songs company-wide.
 login.select_venue.company_card_fallback_name=Your Company
+login.select_venue.company_card_no_venues=This company has no venues yet. Add one from the Company Admin page first.
 login.select_venue.switch_dialog_title=Switch Venue?
 login.select_venue.switch_dialog_body=This PC is currently configured for a different venue. Switching will re-scan your song library for the new venue. Continue?
 login.select_venue.switch_dialog_confirm=Switch Venue
