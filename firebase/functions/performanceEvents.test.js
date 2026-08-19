@@ -76,6 +76,17 @@ test("registered or venue-scoped guest identity is required", () => {
   assert.equal(guest.guestSingerId, "venue-guest-12");
 });
 
+test("Firestore path identifiers reject slash injection", () => {
+  assert.throws(
+    () => _test.validatePayload(validPayload({ venueId: "venue/other" })),
+    /valid document ID/
+  );
+  assert.throws(
+    () => _test.validatePayload(validPayload({ userId: "users/other" })),
+    /valid document ID/
+  );
+});
+
 test("event UUID and timestamps are validated", () => {
   assert.throws(
     () => _test.validatePayload(validPayload({ eventId: "not-a-uuid" })),

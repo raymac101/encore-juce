@@ -12,12 +12,15 @@
 - Added transactional writes for the canonical event, venue recent feed, user history, and venue member summary.
 - Added `bigQueryStatus=pending`; `expireAt` remains null until confirmed delivery so Firestore TTL cannot remove an unexported event.
 - Added focused Node tests for validation, qualification, identity, retry hashing, timezone boundaries, and venue snapshots.
+- Added Encore's SQLite `audit-v2-outbox.db` with WAL and full synchronous durability.
+- Added restart recovery, authenticated callable delivery, one-at-a-time draining, and capped exponential retry with jitter.
+- Added V2 event mapping for qualified playback while retaining the legacy audit path during reconciliation.
+- Added registered-user versus venue-scoped guest identity mapping and deterministic metadata fallbacks.
 
 ### Next Implementation Slice
 
-- Add the Encore SQLite outbox and callable client.
-- Send V2 events in parallel with the legacy audit path during reconciliation.
 - Provision BigQuery delivery and set `bigQueryDeliveredAt`/`expireAt` only after successful export.
+- Add operational visibility for pending/outbox failures in Encore.
 
 ## Goals
 

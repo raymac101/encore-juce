@@ -148,6 +148,7 @@ target_sources(EncoreJUCE
         Source/Services/ArchiveService.cpp
         Source/Services/AnalyticsService.cpp
         Source/Services/AuditService.cpp
+        Source/Services/PerformanceEventOutbox.cpp
         Source/Services/BackgroundMusicPlayer.cpp
         Source/Services/PluginHostService.cpp
         Source/Services/UpdateService.cpp

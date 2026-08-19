@@ -25,6 +25,7 @@
 #include "../Services/SongbookStorageService.h"
 #include "../Services/ArchiveService.h"
 #include "../Services/AuditService.h"
+#include "../Services/PerformanceEventOutbox.h"
 #include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
@@ -441,6 +442,10 @@ MainComponent::MainComponent()
         
         // Ensure components are visible and painted
         repaint();
+
+        // Retry any V2 audit events left pending by a previous shutdown or
+        // network outage. The worker waits for an authenticated token.
+        PerformanceEventOutbox::getInstance().start();
         
         // Start timer for periodic updates - disabled until safer implementation
         // startTimer(2000);
@@ -466,6 +471,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    PerformanceEventOutbox::getInstance().stop();
     // Close the secondary display before the audio engine goes away — its
     // timer may be trying to poll the engine's position.
     lyricWindow_.reset();
@@ -6345,6 +6351,9 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
     const auto venueId = activeVenueId_;
     if (venueId.isEmpty()) return;
 
+    const auto startedAtMs = playStartTimeMs_;
+    const auto endedAtMs = juce::Time::currentTimeMillis();
+
     VenueService::PlayHistoryEntry entry;
     entry.songId     = currentSong.id;
     entry.songName   = currentSong.songName;
@@ -6361,6 +6370,11 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
             playedItem.singerName = localNowPlaying_.name;
 
         const auto kjId = FirestoreClient::getInstance().getUserId().trim();
+        if (!PerformanceEventOutbox::getInstance().enqueuePerformance(
+                currentSong, localNowPlaying_, playedItem, venueId,
+                startedAtMs, endedAtMs, naturalEnd))
+            DBG("[AuditV2] failed to enqueue qualified performance");
+
         AuditService::getInstance().addAudit(currentSong, localNowPlaying_, playedItem,
                                              venueId, activeVenueName_, kjId);
     }

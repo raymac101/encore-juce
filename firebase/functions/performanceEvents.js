@@ -31,6 +31,13 @@ function optionalString(data, field, maxLength = 500) {
   return value;
 }
 
+function firestoreDocumentId(value, field) {
+  if (!value || value === "." || value === ".." || value.includes("/")) {
+    throw new HttpsError("invalid-argument", `${field} is not a valid document ID.`);
+  }
+  return value;
+}
+
 function nonNegativeInteger(data, field) {
   const value = Number(data[field]);
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -105,6 +112,8 @@ function validatePayload(rawData) {
   if (!userId && !guestSingerId) {
     throw new HttpsError("invalid-argument", "userId or guestSingerId is required.");
   }
+  if (userId) firestoreDocumentId(userId, "userId");
+  if (guestSingerId) firestoreDocumentId(guestSingerId, "guestSingerId");
 
   const actualPlayedDurationMs = nonNegativeInteger(data, "actualPlayedDurationMs");
   const completionReason = enumValue(data, "completionReason", COMPLETION_REASONS, "stopped");
@@ -120,7 +129,7 @@ function validatePayload(rawData) {
 
   return {
     eventId,
-    venueId: requiredString(data, "venueId", 128),
+    venueId: firestoreDocumentId(requiredString(data, "venueId", 128), "venueId"),
     songId: requiredString(data, "songId", 256),
     songName: requiredString(data, "songName", 500),
     artist: requiredString(data, "artist", 500),
@@ -271,18 +280,27 @@ module.exports = function performanceEventsModule(admin, db) {
         });
       }
 
+      const existingMember = memberSnap.exists ? memberSnap.data() || {} : {};
+      const eventTimeMs = payload.clientEndedAtMs;
+      const existingFirstMs = existingMember.firstPerformedAt?.toMillis?.();
+      const existingLastMs = existingMember.lastPerformedAt?.toMillis?.();
+      const firstPerformedAt = Number.isFinite(existingFirstMs)
+        ? admin.firestore.Timestamp.fromMillis(Math.min(existingFirstMs, eventTimeMs))
+        : canonical.clientEndedAt;
+      const lastPerformedAt = Number.isFinite(existingLastMs)
+        ? admin.firestore.Timestamp.fromMillis(Math.max(existingLastMs, eventTimeMs))
+        : canonical.clientEndedAt;
+
       const memberUpdate = {
         singerId,
         userId: canonical.userId,
         guestSingerId: canonical.guestSingerId,
         singerStageName: canonical.singerStageName,
-        lastPerformedAt: canonical.clientEndedAt,
+        firstPerformedAt,
+        lastPerformedAt,
         performanceCount: admin.firestore.FieldValue.increment(1),
         updatedAt: canonical.serverRecordedAt
       };
-      if (!memberSnap.exists) {
-        memberUpdate.firstPerformedAt = canonical.clientEndedAt;
-      }
       tx.set(memberRef, memberUpdate, { merge: true });
 
       return { duplicate: false };
