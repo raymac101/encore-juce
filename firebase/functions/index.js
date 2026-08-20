@@ -46,6 +46,69 @@ function nowMinusDays(days) {
   return d;
 }
 
+// Mirrors ApiService::getKeySignature (Source/Services/ApiService.cpp) --
+// Spotify's integer pitch class (0-11) + mode (1=major, 0=minor).
+function keySignatureFromSpotify(key, mode) {
+  const letters = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  const k = Number(key);
+  if (!Number.isFinite(k) || k < 0 || k > 11) return "";
+  let label = letters[k];
+  if (String(mode) === "0") label += " minor";
+  return label;
+}
+
+// Reduces the raw Spotify search/artist/track/audioFeatures payloads down to
+// the canonical metadataSongs field set (METADATA_MIGRATION_DESIGN.md).
+// Mirrors the same fallback order ApiService::doSpotifyApiCall uses client-
+// side (search-result track first, then the directly-fetched track/artist).
+function buildCanonicalMetadata(artistName, songName, searchResult, artistData, trackData, featuresData) {
+  const items = (searchResult && searchResult.tracks && searchResult.tracks.items) || [];
+  const firstTrack = items.length > 0 ? items[0] : null;
+
+  let imageUrl = "";
+  const trackImages = (firstTrack && firstTrack.album && firstTrack.album.images) || [];
+  if (trackImages.length > 0) imageUrl = trackImages[0].url || "";
+  if (!imageUrl) {
+    const artistImages = (artistData && artistData.images) || [];
+    if (artistImages.length > 0) imageUrl = artistImages[0].url || "";
+  }
+
+  const durationMS = (trackData && trackData.duration_ms) || (firstTrack && firstTrack.duration_ms) || 0;
+
+  const resolvedSongName = (trackData && trackData.name) || (firstTrack && firstTrack.name) || songName;
+
+  const trackArtists = (trackData && trackData.artists) || [];
+  const resolvedArtistName =
+    (trackArtists.length > 0 && trackArtists[0].name) || (artistData && artistData.name) || artistName;
+
+  const releaseDate =
+    (trackData && trackData.album && trackData.album.release_date) ||
+    (firstTrack && firstTrack.album && firstTrack.album.release_date) ||
+    "";
+
+  const genres = (artistData && artistData.genres) || [];
+
+  let tempo = 0;
+  let keySignature = "";
+  if (featuresData) {
+    if (featuresData.tempo) tempo = Math.round(featuresData.tempo);
+    if (featuresData.key !== undefined && featuresData.key !== null) {
+      keySignature = keySignatureFromSpotify(featuresData.key, featuresData.mode);
+    }
+  }
+
+  return {
+    artistName: resolvedArtistName,
+    songName: resolvedSongName,
+    imageUrl,
+    durationMS,
+    tempo,
+    keySignature,
+    releaseDate,
+    genres
+  };
+}
+
 exports.enqueueMetadataFetch = onCall(
   {
     region: "us-central1",
@@ -369,6 +432,13 @@ app.get('/getTrack/:id', isAuthorized, (req, res) => {
 });
 
 // Search both artist and song
+//
+// Response shape is { data: { searchResult, artist, track, audioFeatures } } --
+// this MUST stay in sync with ApiService::doSpotifyApiCall (Source/Services/
+// ApiService.cpp), which parses exactly these four named keys out of `data`.
+// A successful lookup is also upserted into metadataSongs so every venue
+// benefits from one client's Spotify hit instead of re-querying Spotify for
+// the same song (see METADATA_MIGRATION_DESIGN.md).
 app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, (req, res) => {
   checkForTokenRefresh().then(() => {
     const { artistName, songName } = req.params;
@@ -384,8 +454,34 @@ app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, (req, res) =
             spotifyApi.getArtist(artistId),
             spotifyApi.getTrack(trackId),
             spotifyApi.getAudioFeaturesForTrack(trackId)
-          ]).then(([artistData, trackData, featuresData]) => {
-            res.json([data.body, artistData.body, trackData.body, featuresData.body]);
+          ]).then(async ([artistData, trackData, featuresData]) => {
+            const responsePayload = {
+              data: {
+                searchResult: data.body,
+                artist: artistData.body,
+                track: trackData.body,
+                audioFeatures: featuresData.body
+              }
+            };
+
+            const normalizedKey = normalizeKey(artistName, songName);
+            const canonical = buildCanonicalMetadata(
+              artistName, songName, data.body, artistData.body, trackData.body, featuresData.body);
+
+            try {
+              await db.collection(COLLECTION_METADATA).doc(normalizedKey).set({
+                ...canonical,
+                normalizedKey,
+                source: "legacyApi",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                fetchedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            } catch (err) {
+              // Never fail the client's request over a caching side-effect.
+              logger.error("metadataSongs upsert failed", { normalizedKey, error: err.message });
+            }
+
+            res.json(responsePayload);
           }).catch(err => res.json(err));
         } else {
           res.status(404).json('No results found');

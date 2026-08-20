@@ -111,7 +111,9 @@
       "Bash(/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh '/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/dist/EncoreKaraoke-3.1.255-mac.dmg' Installers/EncoreKaraoke-3.1.255-mac.dmg application/x-apple-diskimage)",
       "Bash(/private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/gcs_upload.sh /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/97dc324f-0430-469f-a979-f57d5d36d16d/scratchpad/manifest.json Installers/manifest.json application/json)",
       "Bash(curl -s -D - \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2Fmanifest.json?alt=media\" -o /tmp/live_manifest_check.json)",
-      "Bash(curl -sI \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.255-mac.dmg?alt=media\")"
+      "Bash(curl -sI \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.255-mac.dmg?alt=media\")",
+      "Bash(node -c index.js)",
+      "Bash(awk -F: '$1 > 950 && $1 < 1050')"
     ]
   }
 }

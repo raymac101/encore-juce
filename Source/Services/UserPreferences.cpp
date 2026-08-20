@@ -322,6 +322,20 @@ void UserPreferences::setLibraryPath(const juce::String& path)
 }
 
 //==============================================================================
+juce::int64 UserPreferences::getLastMetadataSyncAtMs() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (juce::int64) root_.getProperty("lastMetadataSyncAtMs", 0);
+}
+
+void UserPreferences::setLastMetadataSyncAtMs(juce::int64 epochMs)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lastMetadataSyncAtMs", epochMs);
+    save();
+}
+
+//==============================================================================
 juce::String UserPreferences::getPreferredAudioOutputDevice() const
 {
     const juce::ScopedLock sl(lock_);

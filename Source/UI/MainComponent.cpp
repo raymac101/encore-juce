@@ -6041,6 +6041,64 @@ void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
         });
 }
 
+void MainComponent::enrichSongMetadataIfMissing (const juce::String& songId,
+                                                  const juce::String& artistHint,
+                                                  const juce::String& songHint)
+{
+    if (mainArea == nullptr)
+        return;
+
+    const auto& songs = mainArea->getLibrarySongs();
+    const CdgSong* match = nullptr;
+
+    if (songId.isNotEmpty())
+    {
+        for (auto& s : songs)
+        {
+            if (juce::String (s.id) == songId)
+            {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    if (match == nullptr && artistHint.isNotEmpty() && songHint.isNotEmpty())
+    {
+        for (auto& s : songs)
+        {
+            if (juce::String (s.artistName).equalsIgnoreCase (artistHint)
+             && juce::String (s.songName).equalsIgnoreCase (songHint))
+            {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    // No local match (shouldn't normally happen -- TAGG requests are chosen
+    // from this venue's own songbook) or metadata already present.
+    if (match == nullptr || match->hasMetadata())
+        return;
+
+    const CdgSong current = *match;
+    DBG ("[Metadata] auto-enriching '" << juce::String (current.artistName)
+         << " - " << juce::String (current.songName) << "' (triggered by TAGG request)");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    ApiService::getInstance().searchArtistAndSong (current,
+        juce::String (current.artistName), juce::String (current.songName),
+        [safe] (ApiService::Result result)
+        {
+            if (safe == nullptr || ! result.ok || ! result.song.hasMetadata())
+                return;
+
+            auto* lib = safe->mainArea != nullptr ? safe->mainArea->getLibraryPage() : nullptr;
+            if (lib != nullptr)
+                lib->upsertSong (result.song);
+        });
+}
+
 void MainComponent::onIncomingNewRequest (const QueueItem& item)
 {
     // Mirrors autoApproveSong() in queue-bar.component.ts.
@@ -6048,6 +6106,13 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
     const juce::String venueId = activeVenueId_;
     if (venueId.isEmpty())
         return;
+
+    // Independent of the auto-approve outcome below -- even a request that
+    // gets rejected (queue closed, too many songs, duplicate) still tells us
+    // someone wants this song, so it's worth having metadata for it.
+    enrichSongMetadataIfMissing (juce::String (item.songId),
+                                 juce::String (item.songArtist),
+                                 juce::String (item.songName));
 
     // Local desktop request — bypass checks and add straight to queue.
     if (juce::String(item.deviceId).equalsIgnoreCase("local"))

@@ -80,6 +80,14 @@ public:
     juce::String getLibraryPath() const;
     void setLibraryPath(const juce::String& path);
 
+    //--- Shared metadata startup sync -------------------------------------------
+    // Epoch ms of the last time LibraryPage checked its still-missing-metadata
+    // songs against the shared Firestore metadataSongs cache (see
+    // LibraryPage::maybeSyncSharedMetadata()). 0 means never run. This is a
+    // per-machine cooldown timestamp, not tied to any one venue.
+    juce::int64 getLastMetadataSyncAtMs() const;
+    void setLastMetadataSyncAtMs(juce::int64 epochMs);
+
     //--- Audio -----------------------------------------------------------------
     juce::String getPreferredAudioOutputDevice() const;
     void setPreferredAudioOutputDevice(const juce::String& deviceName);

@@ -1078,6 +1078,103 @@ void LibraryPage::onAddSongs()
     scheduleNext(0);
 }
 
+//==============================================================================
+namespace
+{
+    constexpr juce::int64 kMetadataSyncCooldownMs = (juce::int64) 6 * 60 * 60 * 1000; // 6 hours
+
+    // Local state for maybeSyncSharedMetadata()'s sequential shared-cache
+    // sweep -- deliberately separate from fetchMetadataForImportedSongs'
+    // State struct above, since this pass never touches Spotify/the queue
+    // and never shows scan-progress UI.
+    struct SharedSyncState
+    {
+        juce::Component::SafePointer<LibraryPage> owner;
+        std::vector<size_t> targets;
+        size_t position = 0;
+        int updatedCount = 0;
+    };
+}
+
+void LibraryPage::maybeSyncSharedMetadata()
+{
+    auto& prefs = UserPreferences::getInstance();
+    const auto now = juce::Time::currentTimeMillis();
+    const auto last = prefs.getLastMetadataSyncAtMs();
+    if (last > 0 && (now - last) < kMetadataSyncCooldownMs)
+        return;
+
+    std::vector<size_t> targets;
+    targets.reserve(songs_.size());
+    for (size_t i = 0; i < songs_.size(); ++i)
+        if (needsRemoteMetadata(songs_[i]))
+            targets.push_back(i);
+
+    // Record the attempt regardless of outcome, so a library with nothing
+    // left to fix doesn't get rechecked on every relaunch/venue-switch.
+    prefs.setLastMetadataSyncAtMs(now);
+
+    if (targets.empty())
+        return;
+
+    DBG ("[Metadata] startup sync: checking " << (int) targets.size()
+         << " song(s) missing metadata against the shared cache");
+
+    auto state = std::make_shared<SharedSyncState>();
+    state->owner = juce::Component::SafePointer<LibraryPage>(this);
+    state->targets = std::move(targets);
+
+    auto checkNext = std::make_shared<std::function<void()>>();
+    *checkNext = [state, checkNext]()
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        if (state->position >= state->targets.size())
+        {
+            if (state->updatedCount > 0)
+            {
+                owner->persistSongbook();
+                owner->stats_ = LibraryScanner::computeStats(owner->songs_);
+                owner->refreshStats();
+                if (owner->onSongbookChanged)
+                    owner->onSongbookChanged(owner->songs_);
+                owner->showMessage("Synced " + juce::String(state->updatedCount)
+                                   + " song(s) with shared metadata.", false);
+            }
+            return;
+        }
+
+        const size_t songIndex = state->targets[state->position++];
+        if (songIndex >= owner->songs_.size())
+        {
+            (*checkNext)();
+            return;
+        }
+
+        const auto current = owner->songs_[songIndex];
+        ApiService::getInstance().lookupSharedMetadataOnly(current,
+            juce::String(current.artistName), juce::String(current.songName),
+            [state, checkNext, songIndex](ApiService::Result result)
+            {
+                auto* ownerInner = state->owner.getComponent();
+                if (ownerInner == nullptr)
+                    return;
+
+                if (result.ok && songIndex < ownerInner->songs_.size())
+                {
+                    ownerInner->songs_[songIndex] = result.song;
+                    ++state->updatedCount;
+                }
+
+                (*checkNext)();
+            });
+    };
+
+    (*checkNext)();
+}
+
 void LibraryPage::startFolderChooser(bool appendMode)
 {
     if (scanner_.isScanning.load()) return;
