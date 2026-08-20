@@ -322,6 +322,20 @@ void UserPreferences::setLibraryPath(const juce::String& path)
 }
 
 //==============================================================================
+juce::String UserPreferences::getAnthropicApiKey() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("anthropicApiKey", juce::var()).toString();
+}
+
+void UserPreferences::setAnthropicApiKey(const juce::String& key)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("anthropicApiKey", key);
+    save();
+}
+
+//==============================================================================
 juce::int64 UserPreferences::getLastMetadataSyncAtMs() const
 {
     const juce::ScopedLock sl(lock_);

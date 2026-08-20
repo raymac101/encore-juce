@@ -662,11 +662,15 @@ void SongEditDialog::launch(juce::Component* parent,
                             const CdgSong& song,
                             InitialPlaylists pls,
                             MetadataFetcher fetcher,
-                            std::function<void(const SongEditResult&)> onResult)
+                            std::function<void(const SongEditResult&)> onResult,
+                            const juce::String& initialErrorMessage)
 {
     auto* content = new SongEditDialog(song, pls);
     content->onResult        = std::move(onResult);
     content->onFetchMetadata = std::move(fetcher);
+
+    if (initialErrorMessage.isNotEmpty())
+        content->setStatus(initialErrorMessage, juce::Colour(kStatusErrBg));
 
     auto* w = new BorderlessModalWindow(content, juce::Colour(kBgColour));
     if (parent != nullptr)

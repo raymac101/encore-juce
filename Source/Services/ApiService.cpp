@@ -302,7 +302,13 @@ ApiService::Result ApiService::tryFirestoreLookup(const CdgSong& currentSong,
     if (out.tempo > 0.0)
         out.tempo = std::round(out.tempo);
 
-    r.ok = true;
+    // Same rationale as tryCachedLookup: a Firestore metadataSongs doc that
+    // exists but is missing fields (this codebase's own May bootstrap-import
+    // left every doc's "genres" empty) must NOT short-circuit as a hit, or
+    // it permanently blocks the song from ever reaching a real Spotify call.
+    r.ok = out.hasMetadata();
+    if (! r.ok)
+        r.errorMessage = "Firestore metadataSongs entry is missing required fields.";
     r.fromCache = true;
     r.source = Result::Source::firestore;
     r.song = std::move(out);
@@ -453,7 +459,14 @@ ApiService::Result ApiService::tryCachedLookup(const CdgSong& currentSong,
     auto vs = arrayToStrings(getProp(entry, "version"));
     if (! vs.empty())     out.version = vs;
 
-    r.ok = true;
+    // A cached entry that's missing fields (e.g. genres never got backfilled
+    // by an older import) must NOT be reported as a hit -- otherwise callers
+    // (SongEditDialog, LibraryPage's batch fetcher, the bulk metadata tool)
+    // treat it as "done" forever and never fall through to Firestore/Spotify
+    // to actually complete it.
+    r.ok = out.hasMetadata();
+    if (! r.ok)
+        r.errorMessage = "Local cache entry is missing required fields.";
     r.fromCache = true;
     r.source = Result::Source::localCache;
     r.song = std::move(out);
@@ -526,8 +539,20 @@ ApiService::Result ApiService::doSpotifyApiCall(const CdgSong& currentSong,
 
     if (statusCode < 200 || statusCode >= 300)
     {
-        r.errorMessage = "API HTTP " + juce::String(statusCode)
-                       + (body.isNotEmpty() ? (" — " + body.substring(0, 200)) : juce::String());
+        // The Cloud Function responds with {"error": "<real Spotify/HTTP
+        // message>"} on failure (quota exceeded, no results, Spotify API
+        // error, etc.) -- surface that directly when present, since it's far
+        // more useful than the raw HTTP status/body dump.
+        juce::String detail;
+        if (body.isNotEmpty())
+        {
+            auto parsedError = juce::JSON::parse(body);
+            if (parsedError.isObject())
+                detail = parsedError.getProperty("error", juce::var()).toString();
+        }
+        r.errorMessage = detail.isNotEmpty()
+            ? detail
+            : ("API HTTP " + juce::String(statusCode) + (body.isNotEmpty() ? (" — " + body.substring(0, 200)) : juce::String()));
         return r;
     }
 
@@ -665,7 +690,9 @@ ApiService::Result ApiService::doSpotifyApiCall(const CdgSong& currentSong,
     if (out.tempo > 0.0)
         out.tempo = std::round(out.tempo);
 
-    r.ok = true;
+    r.ok = out.hasMetadata();
+    if (! r.ok)
+        r.errorMessage = "Spotify response was missing required fields (image/duration/key/tempo/release date/genres).";
     r.source = Result::Source::legacyApi;
     r.song = std::move(out);
     return r;

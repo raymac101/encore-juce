@@ -121,8 +121,6 @@ bool CdgSong::hasMetadata() const
 {
     return !imageUrl.empty()
         && durationMS > 0
-        && !keySignature.empty()
-        && tempo > 0.0
         && !releaseDate.empty()
         && !genres.empty();
 }

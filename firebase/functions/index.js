@@ -40,6 +40,23 @@ function normalizeKey(artistName, songName) {
   return `${normalizeText(artistName)}|${normalizeText(songName)}`;
 }
 
+// Extracts a clean {status, message} out of a spotify-web-api-node error
+// object so callers can res.status(...).json(...) a real error instead of
+// silently res.json(err)'ing it with an implicit 200 -- which is what made
+// every Spotify-side failure look like a successful (but empty) response to
+// the JUCE client.
+function spotifyErrorDetails(err) {
+  const status =
+    (err && err.statusCode) ||
+    (err && err.body && err.body.error && err.body.error.status) ||
+    502;
+  const message =
+    (err && err.body && err.body.error && err.body.error.message) ||
+    (err && err.message) ||
+    'Unknown Spotify API error';
+  return { status: (status >= 400 && status < 600) ? status : 502, message };
+}
+
 function nowMinusDays(days) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
@@ -199,6 +216,96 @@ exports.enqueueMetadataFetch = onCall(
 exports._normalizeKeyForTests = normalizeKey;
 
 // ============================================================
+// Shared daily Spotify-call quota. Every caller that can trigger a real
+// Spotify lookup through /searchArtistAndSong shares ONE quota, since they
+// all ride on the same Spotify app credentials: the TAGG-request auto-fetch
+// (MainComponent::enrichSongMetadataIfMissing), the manual "Get Metadata"
+// button, and the Viracicom Admin bulk metadata tool. A per-machine counter
+// wouldn't protect the real shared limit against any of the others.
+// ============================================================
+const COLLECTION_QUOTA = "metadataQuota";
+const QUOTA_DOC_ID = "daily";
+const DAILY_QUOTA_CAP = 1000;
+
+function nextMidnightUtc(from) {
+  return new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + 1, 0, 0, 0, 0));
+}
+
+// Read-only view of the current quota window, resetting the reported values
+// (but NOT writing them) if the window has rolled over. Safe to call as
+// often as needed -- e.g. from getMetadataQuotaStatus.
+async function getQuotaStatus() {
+  const snap = await db.collection(COLLECTION_QUOTA).doc(QUOTA_DOC_ID).get();
+  const now = new Date();
+
+  if (snap.exists) {
+    const data = snap.data() || {};
+    const resetAt = data.resetAt && data.resetAt.toDate ? data.resetAt.toDate() : null;
+    if (resetAt && now < resetAt) {
+      return {
+        usedCalls: Number.isFinite(data.usedCalls) ? data.usedCalls : 0,
+        cap: Number.isFinite(data.cap) ? data.cap : DAILY_QUOTA_CAP,
+        resetAt
+      };
+    }
+  }
+
+  return { usedCalls: 0, cap: DAILY_QUOTA_CAP, resetAt: nextMidnightUtc(now) };
+}
+
+// Atomically checks + increments the shared daily quota. Must be called
+// (and must return allowed=true) BEFORE issuing any real Spotify API call.
+async function tryConsumeQuota() {
+  const ref = db.collection(COLLECTION_QUOTA).doc(QUOTA_DOC_ID);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const now = new Date();
+    const data = snap.exists ? snap.data() || {} : {};
+    const resetAt = data.resetAt && data.resetAt.toDate ? data.resetAt.toDate() : null;
+
+    let usedCalls = Number.isFinite(data.usedCalls) ? data.usedCalls : 0;
+    let cap = Number.isFinite(data.cap) ? data.cap : DAILY_QUOTA_CAP;
+    let effectiveResetAt = resetAt;
+
+    if (!effectiveResetAt || now >= effectiveResetAt) {
+      usedCalls = 0;
+      cap = DAILY_QUOTA_CAP;
+      effectiveResetAt = nextMidnightUtc(now);
+    }
+
+    const allowed = usedCalls < cap;
+    if (allowed) {
+      usedCalls += 1;
+      tx.set(ref, {
+        usedCalls,
+        cap,
+        resetAt: admin.firestore.Timestamp.fromDate(effectiveResetAt),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
+    return { allowed, usedCalls, cap, remaining: Math.max(0, cap - usedCalls), resetAt: effectiveResetAt };
+  });
+}
+
+exports.getMetadataQuotaStatus = onCall(
+  { region: "us-central1", enforceAppCheck: false, cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign-in required.");
+    }
+    const status = await getQuotaStatus();
+    return {
+      usedCalls: status.usedCalls,
+      cap: status.cap,
+      remaining: Math.max(0, status.cap - status.usedCalls),
+      resetAt: status.resetAt.toISOString()
+    };
+  }
+);
+
+// ============================================================
 // Customer Admin: legacy-user venue assignment + support tool
 // (EnterpriseAdmin-only; see firebase/functions/adminUsers.js)
 // ============================================================
@@ -219,10 +326,19 @@ Object.assign(exports, require("./performanceEvents")(admin, db));
 // LEGACY FUNCTIONS (Migrated)
 // ============================================================
 
-// Middleware for authorization
+// Middleware for authorization. Every real caller (ApiService.h/.cpp's
+// bearerToken_, "KaraokeWorld") sends "Authorization: Bearer KaraokeWorld" --
+// this previously checked for the literal string 'secretvalue', which no
+// client has ever actually sent, so every route below 401'd for everyone.
+// It went unnoticed because ApiService::searchArtistAndSong tries the local
+// cache and Firestore metadataSongs FIRST and only falls through to these
+// legacy routes on a genuine miss; see ApiService.cpp's tryCachedLookup/
+// tryFirestoreLookup for the matching fix (they no longer report a false
+// "ok" on an incomplete cached/Firestore entry, which is what was masking
+// this for so long).
 const isAuthorized = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (authHeader === 'secretvalue') {
+  if (authHeader === 'Bearer KaraokeWorld') {
     next();
   } else {
     res.status(401).json({ msg: 'No Access' });
@@ -439,7 +555,20 @@ app.get('/getTrack/:id', isAuthorized, (req, res) => {
 // A successful lookup is also upserted into metadataSongs so every venue
 // benefits from one client's Spotify hit instead of re-querying Spotify for
 // the same song (see METADATA_MIGRATION_DESIGN.md).
-app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, (req, res) => {
+app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, async (req, res) => {
+  // Gate BEFORE spending a real Spotify call -- shared across every caller
+  // (see the quota section above for why this can't be a per-machine count).
+  const quota = await tryConsumeQuota();
+  if (!quota.allowed) {
+    res.status(429).json({
+      error: 'Daily Spotify metadata quota exceeded',
+      usedCalls: quota.usedCalls,
+      cap: quota.cap,
+      resetAt: quota.resetAt.toISOString()
+    });
+    return;
+  }
+
   checkForTokenRefresh().then(() => {
     const { artistName, songName } = req.params;
     const search = `track:${songName} artist:${artistName}`;
@@ -450,23 +579,36 @@ app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, (req, res) =
         if (items.length > 0) {
           const artistId = items[0].artists[0].id;
           const trackId = items[0].id;
+          // getArtist/getTrack are required -- if either fails, the whole
+          // request should fail. getAudioFeaturesForTrack is best-effort
+          // only: Spotify deprecated Audio Features for apps without
+          // Extended Quota Mode (Nov 2024), so it 403s here permanently.
+          // Falling back to null instead of rejecting the whole Promise.all
+          // means artist/track/image/duration/release-date/genres still
+          // come through even though tempo/key can no longer be sourced.
           Promise.all([
             spotifyApi.getArtist(artistId),
             spotifyApi.getTrack(trackId),
-            spotifyApi.getAudioFeaturesForTrack(trackId)
-          ]).then(async ([artistData, trackData, featuresData]) => {
+            spotifyApi.getAudioFeaturesForTrack(trackId).catch(featErr => {
+              logger.warn('searchArtistAndSong: audio-features unavailable', {
+                artistName, songName, status: spotifyErrorDetails(featErr).status
+              });
+              return null;
+            })
+          ]).then(async ([artistData, trackData, featuresResult]) => {
+            const audioFeaturesBody = featuresResult ? featuresResult.body : null;
             const responsePayload = {
               data: {
                 searchResult: data.body,
                 artist: artistData.body,
                 track: trackData.body,
-                audioFeatures: featuresData.body
+                audioFeatures: audioFeaturesBody
               }
             };
 
             const normalizedKey = normalizeKey(artistName, songName);
             const canonical = buildCanonicalMetadata(
-              artistName, songName, data.body, artistData.body, trackData.body, featuresData.body);
+              artistName, songName, data.body, artistData.body, trackData.body, audioFeaturesBody);
 
             try {
               await db.collection(COLLECTION_METADATA).doc(normalizedKey).set({
@@ -482,10 +624,20 @@ app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, (req, res) =
             }
 
             res.json(responsePayload);
-          }).catch(err => res.json(err));
+          }).catch(err => {
+            const { status, message } = spotifyErrorDetails(err);
+            logger.error('searchArtistAndSong: artist/track/audioFeatures lookup failed', {
+              artistName, songName, status, message
+            });
+            res.status(status).json({ error: message });
+          });
         } else {
-          res.status(404).json('No results found');
+          res.status(404).json({ error: 'No results found' });
         }
-      }).catch(err => res.json(err));
+      }).catch(err => {
+        const { status, message } = spotifyErrorDetails(err);
+        logger.error('searchArtistAndSong: track search failed', { artistName, songName, status, message });
+        res.status(status).json({ error: message });
+      });
   });
 });

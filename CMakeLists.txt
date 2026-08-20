@@ -85,6 +85,7 @@ target_sources(EncoreJUCE
         Source/Main.cpp
         Source/Audio/AudioEngine.cpp
         Source/Audio/PitchShifter.cpp
+        Source/Audio/KeyBpmAnalyzer.cpp
         Source/Audio/ChannelPluginChain.cpp
         Source/Audio/RoomCorrectionEq.cpp
         Source/Audio/SpectrumAnalyzer.cpp
@@ -112,6 +113,7 @@ target_sources(EncoreJUCE
         Source/UI/SettingsPage.cpp
         Source/UI/CompanyAdminPage.cpp
         Source/UI/CustomerAdminPage.cpp
+        Source/UI/BulkMetadataTool.cpp
         Source/UI/ProfilePage.cpp
         Source/UI/SongSelectionDialog.cpp
         Source/UI/SongEditDialog.cpp
@@ -135,6 +137,8 @@ target_sources(EncoreJUCE
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
         Source/Services/AdsService.cpp
+        Source/Services/AiSongNameCleanupService.cpp
+        Source/Services/MetadataQuotaService.cpp
         Source/Services/SfxLibraryService.cpp
         Source/Services/IntroVoiceService.cpp
         Source/Services/SpotifyService.cpp

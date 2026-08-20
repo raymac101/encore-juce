@@ -113,6 +113,7 @@ private:
     juce::Label title_, subtitle_, statusLabel_;
     juce::TextButton tabUnassignedButton_ { "Unassigned Users" };
     juce::TextButton tabSearchButton_ { "Customer Search" };
+    juce::TextButton bulkMetadataButton_ { "Bulk Metadata" };
     bool showingSearchTab_ = false;
 
     //--- Unassigned Users tab -------------------------------------------------

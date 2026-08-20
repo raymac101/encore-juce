@@ -80,6 +80,14 @@ public:
     juce::String getLibraryPath() const;
     void setLibraryPath(const juce::String& path);
 
+    //--- AI song-name cleanup (Viracicom Admin > Bulk Metadata Tool) -----------
+    // Anthropic API key, per-machine -- same security posture as the
+    // ElevenLabs/Spotify keys above (this file, not additionally encrypted).
+    // Used by AiSongNameCleanupService to pre-clean artist/song text (fix
+    // spelling, swapped fields, stray symbols) before a Spotify lookup.
+    juce::String getAnthropicApiKey() const;
+    void setAnthropicApiKey(const juce::String& key);
+
     //--- Shared metadata startup sync -------------------------------------------
     // Epoch ms of the last time LibraryPage checked its still-missing-metadata
     // songs against the shared Firestore metadataSongs cache (see

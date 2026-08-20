@@ -13,6 +13,7 @@
 #include "MenuTheme.h"
 #include "../Services/ApiService.h"
 #include "../Services/UserPreferences.h"
+#include "../Audio/KeyBpmAnalyzer.h"
 #include "../Services/GlobalProgressService.h"
 #include "../Services/SongbookStorageService.h"
 #include "../Localization/LocalizationManager.h"
@@ -34,6 +35,25 @@ static void styleStatLabel(juce::Label* lbl, uint32_t textColour)
 static bool needsRemoteMetadata(const CdgSong& song)
 {
     return ! song.hasMetadata();
+}
+
+// tempo/keySignature are intentionally NOT part of CdgSong::hasMetadata()
+// (Spotify can no longer supply them -- see KeyBpmAnalyzer.h), so they need
+// their own separate "still missing" check to drive the local analysis pass.
+static bool needsAudioAnalysis(const CdgSong& song)
+{
+    return song.tempo <= 0.0 || song.keySignature.empty();
+}
+
+namespace
+{
+    struct AudioAnalysisState
+    {
+        juce::Component::SafePointer<LibraryPage> owner;
+        std::vector<size_t> targets;
+        size_t position = 0;
+        int updatedCount = 0;
+    };
 }
 
 //==============================================================================
@@ -199,6 +219,15 @@ LibraryPage::LibraryPage()
 
         if (! needsMetadata.empty())
             fetchMetadataForImportedSongs(std::move(needsMetadata), lastScanWasAppend_);
+
+        std::vector<size_t> needsAudio;
+        needsAudio.reserve(songs_.size());
+        for (size_t i = 0; i < songs_.size(); ++i)
+            if (needsAudioAnalysis(songs_[i]))
+                needsAudio.push_back(i);
+
+        if (! needsAudio.empty())
+            runLocalAudioAnalysis(std::move(needsAudio));
     };
 
     scanner_.onError = [this](juce::String err) {
@@ -662,7 +691,9 @@ void LibraryPage::onAddSongs()
                     onSongsAddedViaAddSongs(added);
                 }
 
+                auto newlyImportedForAudio = newlyImported;
                 fetchMetadataForImportedSongs(std::move(newlyImported), true);
+                runLocalAudioAnalysis(std::move(newlyImportedForAudio));
             }
         });
 }
@@ -1076,6 +1107,87 @@ void LibraryPage::onAddSongs()
     };
 
     scheduleNext(0);
+}
+
+//==============================================================================
+void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
+{
+    std::vector<size_t> targets;
+    targets.reserve(songIndices.size());
+    for (auto index : songIndices)
+        if (index < songs_.size() && needsAudioAnalysis(songs_[index]))
+            targets.push_back(index);
+
+    if (targets.empty())
+        return;
+
+    reportStatus("Analyzing tempo/key for " + juce::String((int) targets.size()) + " song(s)...");
+
+    auto state = std::make_shared<AudioAnalysisState>();
+    state->owner = juce::Component::SafePointer<LibraryPage>(this);
+    state->targets = std::move(targets);
+
+    auto processNext = std::make_shared<std::function<void()>>();
+    *processNext = [state, processNext]()
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        if (state->position >= state->targets.size())
+        {
+            if (state->updatedCount > 0)
+            {
+                owner->persistSongbook();
+                owner->stats_ = LibraryScanner::computeStats(owner->songs_);
+                owner->refreshStats();
+                if (owner->onSongbookChanged)
+                    owner->onSongbookChanged(owner->songs_);
+            }
+            owner->showMessage("Analyzed tempo/key for " + juce::String(state->updatedCount) + " song(s).", false);
+            return;
+        }
+
+        const size_t songIndex = state->targets[state->position++];
+        if (songIndex >= owner->songs_.size())
+        {
+            (*processNext)();
+            return;
+        }
+
+        // Copy off the message thread before handing to the background
+        // thread -- songs_ itself is only ever read/written here, never
+        // from the analysis thread, so there's no data race to reason about.
+        const CdgSong current = owner->songs_[songIndex];
+
+        juce::Thread::launch([state, processNext, songIndex, current]()
+        {
+            juce::File tempFile;
+            auto audioFile = KeyBpmAnalyzer::resolvePlayableAudioFile(current, 0, tempFile);
+
+            KeyBpmAnalyzer::Result analysis;
+            if (audioFile.existsAsFile())
+                analysis = KeyBpmAnalyzer::analyze(audioFile);
+
+            if (tempFile.existsAsFile())
+                tempFile.deleteFile();
+
+            juce::MessageManager::callAsync([state, processNext, songIndex, analysis]()
+            {
+                auto* ownerInner = state->owner.getComponent();
+                if (ownerInner != nullptr && analysis.ok && songIndex < ownerInner->songs_.size())
+                {
+                    ownerInner->songs_[songIndex].tempo = (double) analysis.bpm;
+                    ownerInner->songs_[songIndex].keySignature = analysis.keySignature.toStdString();
+                    ++state->updatedCount;
+                }
+
+                (*processNext)();
+            });
+        });
+    };
+
+    (*processNext)();
 }
 
 //==============================================================================

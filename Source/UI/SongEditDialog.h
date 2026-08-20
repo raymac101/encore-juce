@@ -92,7 +92,8 @@ public:
                        const CdgSong& song,
                        InitialPlaylists pls,
                        MetadataFetcher fetcher,
-                       std::function<void(const SongEditResult&)> onResult);
+                       std::function<void(const SongEditResult&)> onResult,
+                       const juce::String& initialErrorMessage = {});
 
 private:
     void closeWith(SongEditResult::Action action);

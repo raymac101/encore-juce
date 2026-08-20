@@ -8,6 +8,7 @@
 
 #include "CustomerAdminPage.h"
 #include "MenuTheme.h"
+#include "BulkMetadataTool.h"
 #include "../Localization/LocalizationManager.h"
 #include "../Models/AccessRights.h"
 #include <algorithm>
@@ -126,6 +127,10 @@ CustomerAdminPage::CustomerAdminPage()
     styleButton (tabSearchButton_, kPanel);
     tabSearchButton_.onClick = [this] { showSearchTab(); };
     contentHolder_->addAndMakeVisible (tabSearchButton_);
+
+    styleButton (bulkMetadataButton_, kPanel);
+    bulkMetadataButton_.onClick = [this] { BulkMetadataTool::launch (this); };
+    contentHolder_->addAndMakeVisible (bulkMetadataButton_);
 
     //--- Unassigned Users tab ------------------------------------------------
     styleLabel (unassignedTitle_, 15.0f, true, kText);
@@ -991,6 +996,8 @@ void CustomerAdminPage::layoutContent()
     tabUnassignedButton_.setBounds (tabsRow.removeFromLeft (160));
     tabsRow.removeFromLeft (8);
     tabSearchButton_.setBounds (tabsRow.removeFromLeft (160));
+    tabsRow.removeFromLeft (8);
+    bulkMetadataButton_.setBounds (tabsRow.removeFromLeft (160));
     tabsRow.removeFromLeft (12);
     statusLabel_.setBounds (tabsRow);
 

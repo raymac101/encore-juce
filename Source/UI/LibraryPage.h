@@ -139,6 +139,13 @@ private:
     void fetchMetadataForImportedSongs(std::vector<size_t> songIndices,
                        bool allowOnlineLookup = true);
 
+    // Local, offline BPM/key detection (KeyBpmAnalyzer) for songs still
+    // missing tempo/keySignature -- run automatically after every scan/import
+    // since Spotify can no longer supply these two fields (Audio Features
+    // deprecated Nov 2024). One song at a time, off the message thread;
+    // songs_ itself is only ever touched from the message thread.
+    void runLocalAudioAnalysis(std::vector<size_t> songIndices);
+
     // Silent, low-cost catch-up pass: checks this PC's still-missing-metadata
     // songs against the shared local cache + Firestore metadataSongs only
     // (ApiService::lookupSharedMetadataOnly -- never calls Spotify or enqueues

@@ -113,7 +113,18 @@
       "Bash(curl -s -D - \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2Fmanifest.json?alt=media\" -o /tmp/live_manifest_check.json)",
       "Bash(curl -sI \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.255-mac.dmg?alt=media\")",
       "Bash(node -c index.js)",
-      "Bash(awk -F: '$1 > 950 && $1 < 1050')"
+      "Bash(awk -F: '$1 > 950 && $1 < 1050')",
+      "Bash(xargs cat)",
+      "Bash(curl -s -o /dev/null -w \"app ping: HTTP %{http_code}\\\\n\" \"https://us-central1-tagg-9ee2b.cloudfunctions.net/app/ping\")",
+      "Bash(curl -s -o /dev/null -w \"getMetadataQuotaStatus \\(unauth, expect 401/403\\): HTTP %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"data\":{}}' \"https://us-central1-tagg-9ee2b.cloudfunctions.net/getMetadataQuotaStatus\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -H \"Authorization: Bearer KaraokeWorld\" \"https://us-central1-tagg-9ee2b.cloudfunctions.net/app/searchArtistAndSong/Brandon%20Garth/Shameless\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -H \"Authorization: secretvalue\" \"https://us-central1-tagg-9ee2b.cloudfunctions.net/app/searchArtistAndSong/Brandon%20Garth/Shameless\")",
+      "Bash(cp /tmp/check_metadata.js \"/Volumes/MediaDrive/CodeProjects/Encore/Encore Juce/encore-juce/firebase/functions/check_metadata_tmp.js\")",
+      "Bash(node check_metadata_tmp.js)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -H \"Authorization: Bearer KaraokeWorld\" \"https://us-central1-tagg-9ee2b.cloudfunctions.net/app/searchArtistName/Brandon%20Garth\")",
+      "WebFetch(domain:rapidapi.com)",
+      "Bash(awk '/void MainComponent::loadAndPlaySong/,0' Source/UI/MainComponent.cpp)",
+      "Bash(grep -n \"^.\\\\{0,4\\\\}juce::File audioFile\\\\|audioFile =\")"
     ]
   }
 }
