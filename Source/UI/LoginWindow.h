@@ -26,7 +26,8 @@ class LoginWindow : public juce::DocumentWindow
 {
 public:
     using LoginCompleteCallback =
-        std::function<void(juce::String selectedVenueId, bool requestInitialScan)>;
+        std::function<void(juce::String selectedVenueId, bool requestInitialScan,
+                           bool openCompanyDashboard, juce::String companyId, juce::String companyRole)>;
 
     LoginWindow(LoginCompleteCallback onComplete);
     ~LoginWindow() override;

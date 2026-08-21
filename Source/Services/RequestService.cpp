@@ -69,6 +69,18 @@ namespace
         return docName.fromLastOccurrenceOf("/", false, false);
     }
 
+    juce::String firstStringField(const juce::var& fields,
+                                  std::initializer_list<const char*> names)
+    {
+        for (auto* name : names)
+        {
+            auto value = valueAsString(fieldByName(fields, name)).trim();
+            if (value.isNotEmpty())
+                return value;
+        }
+        return {};
+    }
+
     QueueItem itemFromDoc(const juce::var& doc)
     {
         auto fields = doc.getProperty("fields", juce::var());
@@ -78,6 +90,8 @@ namespace
         if (q.id.empty())
             q.id       = valueAsString(fieldByName(fields, "id")).toStdString();
         q.deviceId     = valueAsString(fieldByName(fields, "deviceId")).toStdString();
+        q.devicePlatform = firstStringField(fields, { "devicePlatform", "platform",
+                                 "operatingSystem", "os", "deviceType" }).toStdString();
         q.profileId    = valueAsString(fieldByName(fields, "profileId")).toStdString();
         q.foxId        = valueAsString(fieldByName(fields, "foxId")).toStdString();
         q.singerName   = valueAsString(fieldByName(fields, "singerName")).toStdString();

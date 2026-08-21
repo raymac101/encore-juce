@@ -525,6 +525,7 @@ std::vector<Singers> FirebaseManager::parseSingers(const void* ptr)
                 qi.status     = mGet("status");
                 qi.profileId  = mGet("profileId");
                 qi.deviceId   = mGet("deviceId");
+                qi.devicePlatform = mGet("devicePlatform");
                 qi.duration   = mGetInt("duration");
                 qi.order      = mGetInt("order");
                 qi.songOrder  = mGetInt("songOrder");

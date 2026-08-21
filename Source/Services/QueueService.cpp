@@ -105,6 +105,7 @@ namespace
         QueueItem q;
         q.id           = valueAsString(fieldByName(fields, "id")).toStdString();
         q.deviceId     = valueAsString(fieldByName(fields, "deviceId")).toStdString();
+        q.devicePlatform = valueAsString(fieldByName(fields, "devicePlatform")).toStdString();
         q.singerName   = valueAsString(fieldByName(fields, "singerName")).toStdString();
         q.singerAvatar = valueAsString(fieldByName(fields, "avatar")).toStdString();
         q.songId       = valueAsString(fieldByName(fields, "songId")).toStdString();
@@ -286,6 +287,7 @@ namespace
 
         put("id",          FirestoreClient::stringValue(juce::String(q.id)));
         put("deviceId",    FirestoreClient::stringValue(juce::String(q.deviceId)));
+        put("devicePlatform", FirestoreClient::stringValue(juce::String(q.devicePlatform)));
         put("profileId",   FirestoreClient::stringValue(juce::String(q.profileId)));
         put("foxId",       FirestoreClient::stringValue(juce::String(q.foxId)));
         put("singerName",  FirestoreClient::stringValue(juce::String(q.singerName)));
@@ -424,8 +426,10 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, authUid, stageName, avatarUrl, onDone = std::move(onDone)]()
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -509,8 +513,10 @@ void QueueService::appendSong(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -626,8 +632,10 @@ void QueueService::removeSong(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -700,8 +708,10 @@ void QueueService::deleteSinger(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, singerNameOrDocId, onDone = std::move(onDone)]()
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -746,8 +756,10 @@ void QueueService::patchSingerSongs(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, singerName, newSongs, onDone = std::move(onDone)]() mutable
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -797,8 +809,10 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
         return;
     }
 
+    beginWrite();
     juce::Thread::launch([this, venueId, orderedSingers, onDone = std::move(onDone)]()
     {
+        const WriteGuard writeGuard (this);
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
@@ -972,9 +986,32 @@ void QueueService::timerCallback()
     pollWatcher();
 }
 
+void QueueService::endWrite()
+{
+    jassert (pendingWrites_ > 0);
+    if (pendingWrites_ > 0)
+        --pendingWrites_;
+
+    // That was the last in-flight write -- poll right away so the confirmed
+    // Firestore state shows up immediately instead of waiting for the next
+    // timer tick (up to watchIntervalMs_ later).
+    if (pendingWrites_ == 0)
+        pollWatcher();
+}
+
 void QueueService::pollWatcher()
 {
     if (! watching_ || watchInFlight_ || watchVenueId_.isEmpty())
+        return;
+
+    // Don't read while a local write hasn't landed yet: persistSingerOrder
+    // in particular PATCHes one singer doc at a time, so a poll issued
+    // mid-write can read a queue that's half the old order and half the
+    // new one, which would momentarily stomp the optimistic local update
+    // the write is trying to confirm. endWrite() polls again the instant
+    // the last in-flight write finishes, so this just defers rather than
+    // skips.
+    if (pendingWrites_ > 0)
         return;
 
     watchInFlight_ = true;
@@ -983,14 +1020,35 @@ void QueueService::pollWatcher()
     juce::Thread::launch([this, venueId]
     {
         const auto path = "venues/" + venueId + "/queue";
-        auto docs = FirestoreClient::getInstance().listCollection(path, 200);
+        bool ok = false;
+        auto docs = FirestoreClient::getInstance().listCollection(path, 200, &ok);
         auto snap = buildSnapshot(docs);
 
-        juce::MessageManager::callAsync([this, venueId, snap = std::move(snap)]() mutable
+        juce::MessageManager::callAsync([this, venueId, ok, snap = std::move(snap)]() mutable
         {
             watchInFlight_ = false;
 
             if (! watching_ || venueId != watchVenueId_)
+                return;
+
+            // A failed poll (dropped connection, timeout, auth hiccup,
+            // transient Firestore error) comes back from listCollection as
+            // an empty doc list indistinguishable from a genuinely empty
+            // queue. Acting on it would wipe the on-screen queue even
+            // though nothing changed in Firestore -- just skip this tick
+            // and let the next poll retry rather than publishing a
+            // snapshot we don't actually trust.
+            if (! ok)
+            {
+                DBG ("[Queue] watcher poll failed -- keeping last known queue");
+                return;
+            }
+
+            // A write started after this particular poll was issued but
+            // before its response came back -- the response may already
+            // reflect a stale pre-write state. Drop it; endWrite() will
+            // trigger a fresh poll once that write completes.
+            if (pendingWrites_ > 0)
                 return;
 
             const auto fp = fingerprintFromSnapshot(snap);

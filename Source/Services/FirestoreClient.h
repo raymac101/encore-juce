@@ -31,6 +31,13 @@ public:
     juce::String getDisplayName() const     { const juce::ScopedLock l(stateLock_); return displayName_; }
     juce::String getIdToken() const         { const juce::ScopedLock l(stateLock_); return idToken_; }
 
+    /** The long-lived Firebase refresh token from the current session, if
+        any. Safe to persist locally (unlike the password) for a "stay
+        signed in" feature -- see signInWithRefreshToken(), the login-time
+        counterpart that bootstraps a whole new session from one of these
+        without ever touching the password. */
+    juce::String getRefreshToken() const    { const juce::ScopedLock l(stateLock_); return refreshToken_; }
+
     /** Like getIdToken(), but refreshes first if the current token is close
         to expiry (see ensureFreshToken()). Use this instead of getIdToken()
         whenever the token is about to be sent somewhere else that verifies
@@ -57,6 +64,17 @@ public:
                                        const juce::String& password);
     AuthResult signUpWithEmailPassword(const juce::String& email,
                                        const juce::String& password);
+
+    /** Bootstraps a brand-new session purely from a previously-saved
+        refresh token (securetoken.googleapis.com's refresh grant) -- the
+        "stay signed in" counterpart to signInWithEmailPassword(), used at
+        app launch instead of asking for the password again. Unlike
+        ensureFreshToken() (which only refreshes a session that's already
+        signed in), this works from a completely empty auth state.
+        errorMessage is empty on failure (an expired/revoked token is an
+        expected, silent case here, not something to surface to the user --
+        callers should just fall back to the normal login form). */
+    AuthResult signInWithRefreshToken(const juce::String& refreshToken);
 
     /** Open the system browser to start an OAuth sign-in for the given
         provider ("google.com" or "apple.com"). Real desktop OAuth requires a
@@ -110,9 +128,18 @@ public:
     juce::Array<juce::var> runQuery(const juce::String& parentPath,
                                     const juce::var& structuredQuery);
 
-    /** Quick helper: GET a collection (no filtering). */
+    /** Quick helper: GET a collection (no filtering). An empty array is
+        returned both when the collection genuinely has no documents and
+        when the request itself failed (dropped connection, timeout, auth
+        error, transient server error) -- those two cases are otherwise
+        indistinguishable to the caller. Pass `ok` to tell them apart: it's
+        set true only on a real 2xx response, false on any request failure,
+        so a caller that polls on a timer (e.g. QueueService's watcher) can
+        skip acting on a failed fetch instead of treating it as "now
+        empty". */
     juce::Array<juce::var> listCollection(const juce::String& collectionPath,
-                                          int pageSize = 100);
+                                          int pageSize = 100,
+                                          bool* ok = nullptr);
 
     //==============================================================================
     // Firestore value helpers — convert between native juce/std types and the
@@ -155,13 +182,25 @@ private:
                        juce::StringArray extraHeaders = {});
 
     /** Low-level request with no auto-refresh — used by httpJson and by
-        ensureFreshToken itself (which must not trigger another refresh). */
+        ensureFreshToken itself (which must not trigger another refresh).
+        `includeAuthHeader` (default true) controls whether a current
+        idToken_ gets attached as "Authorization: Bearer ...". Identity
+        Toolkit's own credential-establishing endpoints (signIn/signUp/
+        password reset/refresh) are public, keyed only by the API key in
+        the URL, and must be called with this false: they can run while a
+        *different*, still-valid session's idToken_ is sitting around
+        (e.g. LoginWindow's "stay signed in" background refresh, held back
+        from navigating anywhere -- see LoginContent::attemptSavedSignIn),
+        and attaching that unrelated token turned out to make Identity
+        Toolkit reject the request outright ("Request had invalid
+        authentication credentials") rather than just ignore it. */
     juce::var httpJsonRaw(const juce::URL& url,
                           const juce::String& httpMethod,
                           const juce::String& body,
                           int* httpStatus,
                           juce::StringArray extraHeaders,
-                          const juce::String& contentType);
+                          const juce::String& contentType,
+                          bool includeAuthHeader = true);
 
     // Guards all auth-state fields below: they're written by sign-in/sign-up/
     // refresh/sign-out and read by every background thread that issues a

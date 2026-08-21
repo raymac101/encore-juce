@@ -9,6 +9,7 @@
 #include "LyricDisplayComponent.h"
 #include "../Audio/AudioEngine.h"
 #include "../Firebase/FirebaseConfig.h"
+#include "../Services/AdsService.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/ImageCache.h"
 #include "../Services/UserPreferences.h"
@@ -20,154 +21,15 @@
 
 namespace
 {
-    juce::String trimTrailingSlash (juce::String s)
+    LyricDisplayComponent::AdEntry toAdEntry (const AdMetadata& ad)
     {
-        while (s.endsWithChar ('/'))
-            s = s.dropLastCharacters (1);
-        return s;
-    }
-
-    juce::var httpGetJson (const juce::URL& url,
-                           const juce::StringArray& headers,
-                           int* httpStatus)
-    {
-        juce::StringPairArray responseHeaders;
-        auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                           .withConnectionTimeoutMs (10000)
-                           .withNumRedirectsToFollow (5)
-                           .withExtraHeaders (headers.joinIntoString ("\r\n"))
-                           .withResponseHeaders (&responseHeaders)
-                           .withStatusCode (httpStatus);
-
-        if (auto stream = url.createInputStream (options))
-            return juce::JSON::parse (stream->readEntireStreamAsString());
-
-        return {};
-    }
-
-    void addDurationHint (std::map<juce::String, int>& hints,
-                          const juce::String& key,
-                          int durationSec)
-    {
-        auto k = key.trim().toLowerCase();
-        if (k.isNotEmpty() && durationSec > 0)
-            hints[k] = durationSec;
-    }
-
-    std::vector<LyricDisplayComponent::AdEntry> fetchVenueAds (const juce::String& venueId)
-    {
-        std::vector<LyricDisplayComponent::AdEntry> out;
-        if (venueId.isEmpty())
-            return out;
-
-        std::map<juce::String, int> durationHints;
-
-        // Optional metadata: venues/<venueId>/Ads (duration overrides, direct URLs).
-        {
-            const auto docs = FirestoreClient::getInstance().listCollection ("venues/" + venueId + "/Ads", 200);
-            for (const auto& doc : docs)
-            {
-                const int duration = (int) FirestoreClient::readInt (doc, "duration", 0);
-                addDurationHint (durationHints, FirestoreClient::readString (doc, "name"), duration);
-                addDurationHint (durationHints, FirestoreClient::readString (doc, "fileName"), duration);
-                addDurationHint (durationHints, FirestoreClient::readString (doc, "path"), duration);
-                addDurationHint (durationHints, FirestoreClient::readString (doc, "mediaUrl"), duration);
-                addDurationHint (durationHints, FirestoreClient::readString (doc, "url"), duration);
-
-                const auto mediaUrl = FirestoreClient::readString (doc, "mediaUrl");
-                if (mediaUrl.isEmpty())
-                    continue;
-
-                LyricDisplayComponent::AdEntry ad;
-                ad.name = FirestoreClient::readString (doc, "name");
-                ad.url = mediaUrl;
-                ad.mimeType = FirestoreClient::readString (doc, "mediaType");
-                if (ad.mimeType.isEmpty())
-                    ad.mimeType = FirestoreClient::readString (doc, "type");
-                ad.durationSec = juce::jmax (1, duration > 0 ? duration : 10);
-                out.push_back (ad);
-            }
-        }
-
-        juce::StringArray headers;
-        const auto token = FirestoreClient::getInstance().getFreshIdToken();
-        if (token.isNotEmpty())
-            headers.add ("Authorization: Bearer " + token);
-
-        auto appendFromPrefix = [&] (const juce::String& prefix)
-        {
-            const juce::String listUrl = "https://firebasestorage.googleapis.com/v0/b/"
-                                       + FirebaseConfig::storageBucket
-                                       + "/o?prefix="
-                                       + juce::URL::addEscapeChars (prefix, true);
-
-            int status = 0;
-            const auto listJson = httpGetJson (juce::URL (listUrl), headers, &status);
-            if (! (status >= 200 && status < 300) || ! listJson.isObject())
-            {
-                DBG ("LyricDisplay: ad list failed for prefix " + prefix + " (HTTP " + juce::String (status) + ")");
-                return;
-            }
-
-            const auto items = listJson.getProperty ("items", juce::var());
-            if (auto* arr = items.getArray())
-            {
-                for (const auto& item : *arr)
-                {
-                    const auto objectPath = item.getProperty ("name", juce::String()).toString();
-                    if (objectPath.isEmpty() || objectPath.endsWithChar ('/'))
-                        continue;
-
-                    LyricDisplayComponent::AdEntry ad;
-                    ad.name = juce::File (objectPath).getFileName();
-                    ad.mimeType = item.getProperty ("contentType", juce::String()).toString();
-
-                    juce::String tokenValue;
-                    auto tokenList = item.getProperty ("downloadTokens", juce::String()).toString();
-                    if (tokenList.isNotEmpty())
-                        tokenValue = tokenList.upToFirstOccurrenceOf (",", false, false);
-
-                    ad.url = "https://firebasestorage.googleapis.com/v0/b/"
-                           + FirebaseConfig::storageBucket
-                           + "/o/"
-                           + juce::URL::addEscapeChars (objectPath, true)
-                           + "?alt=media";
-                    if (tokenValue.isNotEmpty())
-                        ad.url << "&token=" << juce::URL::addEscapeChars (tokenValue, true);
-
-                    const auto hintByName = durationHints.find (ad.name.toLowerCase());
-                    const auto hintByPath = durationHints.find (objectPath.toLowerCase());
-                    const auto hintByUrl  = durationHints.find (ad.url.toLowerCase());
-                    int duration = 0;
-                    if (hintByName != durationHints.end()) duration = hintByName->second;
-                    if (hintByPath != durationHints.end()) duration = hintByPath->second;
-                    if (hintByUrl  != durationHints.end()) duration = hintByUrl->second;
-
-                    ad.durationSec = juce::jmax (1, duration > 0 ? duration : (ad.isVideo() ? 8 : 10));
-
-                    const bool already = std::any_of (out.begin(), out.end(),
-                                                      [&] (const LyricDisplayComponent::AdEntry& existing)
-                                                      {
-                                                          return trimTrailingSlash (existing.url) == trimTrailingSlash (ad.url);
-                                                      });
-                    if (! already)
-                        out.push_back (ad);
-                }
-            }
-        };
-
-        // Canonical source: Firebase Storage folder Venues/<venueId>/Ads/.
-        // Also scan lowercase "ads" for venues created with legacy casing.
-        appendFromPrefix ("Venues/" + venueId + "/Ads/");
-        appendFromPrefix ("Venues/" + venueId + "/ads/");
-
-        std::sort (out.begin(), out.end(), [] (const LyricDisplayComponent::AdEntry& a,
-                                               const LyricDisplayComponent::AdEntry& b)
-        {
-            return a.name.compareIgnoreCase (b.name) < 0;
-        });
-
-        return out;
+        LyricDisplayComponent::AdEntry entry;
+        entry.name = ad.name;
+        entry.url = ad.url;
+        entry.mimeType = ad.mimeType;
+        entry.durationSec = juce::jmax (1, ad.durationSec);
+        entry.frequency = juce::jmax (1, ad.frequency);
+        return entry;
     }
 
     // Avatar string -> image resolution (preset:<id>, legacy relative path,
@@ -948,7 +810,16 @@ void LyricDisplayComponent::paintAdPanel (juce::Graphics& g, juce::Rectangle<int
         return;
 
     auto adArea = area.reduced (18);
-    g.setColour (juce::Colours::black.withAlpha (0.42f));
+
+    // Opaque, not translucent: an image ad is drawn into this same 2D
+    // canvas right after this fill (below), so any transparency in the ad
+    // artwork or letterboxing from an aspect-ratio mismatch lets this
+    // backdrop show/blend through, reading as "faded". A video ad never
+    // showed this because idleAdVideoComponent_ is a native VideoComponent
+    // layered fully opaque on top of this whole area regardless of what's
+    // painted underneath -- this fill was invisible for video the entire
+    // time, so making it opaque only changes the image case.
+    g.setColour (juce::Colours::black);
     g.fillRoundedRectangle (adArea.toFloat(), 12.0f);
 
     if (addFrame)
@@ -1590,7 +1461,13 @@ void LyricDisplayComponent::refreshAdsAsync (bool force)
 
     juce::Thread::launch ([safe, venueId]()
     {
-        auto ads = fetchVenueAds (venueId);
+        auto metaAds = AdsService::fetchActiveAdsSync (venueId);
+
+        std::vector<AdEntry> ads;
+        ads.reserve (metaAds.size());
+        for (const auto& m : metaAds)
+            ads.push_back (toAdEntry (m));
+
         juce::MessageManager::callAsync ([safe, ads = std::move (ads)]() mutable
         {
             if (safe != nullptr)
@@ -1603,21 +1480,49 @@ void LyricDisplayComponent::applyAds (std::vector<AdEntry> ads)
 {
     ads_ = std::move (ads);
     currentAdIndex_ = -1;
+    adPlaybackOrder_.clear();
+    adPlaybackPos_ = 0;
     adRemainingMs_ = 0;
     currentAdImage_ = {};
     stopIdleAdVideo();
 
     if (! ads_.empty())
+    {
+        buildAdPlaybackOrder();
         advanceIdleAd (true);
+    }
 
     repaint();
 }
 
+void LyricDisplayComponent::buildAdPlaybackOrder()
+{
+    adPlaybackOrder_.clear();
+    for (int i = 0; i < (int) ads_.size(); ++i)
+    {
+        const int weight = juce::jmax (1, ads_[(size_t) i].frequency);
+        for (int n = 0; n < weight; ++n)
+            adPlaybackOrder_.push_back (i);
+    }
+
+    // Fisher-Yates shuffle so repeats from a high-frequency ad aren't
+    // necessarily consecutive.
+    auto& rng = juce::Random::getSystemRandom();
+    for (int i = (int) adPlaybackOrder_.size() - 1; i > 0; --i)
+    {
+        const int j = rng.nextInt (i + 1);
+        std::swap (adPlaybackOrder_[(size_t) i], adPlaybackOrder_[(size_t) j]);
+    }
+
+    adPlaybackPos_ = 0;
+}
+
 void LyricDisplayComponent::advanceIdleAd (bool force)
 {
-    if (ads_.empty())
+    if (ads_.empty() || adPlaybackOrder_.empty())
     {
         currentAdIndex_ = -1;
+        adPlaybackPos_ = 0;
         adRemainingMs_ = 0;
         currentAdImage_ = {};
         stopIdleAdVideo();
@@ -1625,9 +1530,8 @@ void LyricDisplayComponent::advanceIdleAd (bool force)
         return;
     }
 
-    currentAdIndex_ = force
-        ? juce::jlimit (0, (int) ads_.size() - 1, currentAdIndex_ < 0 ? 0 : currentAdIndex_)
-        : (currentAdIndex_ + 1) % (int) ads_.size();
+    adPlaybackPos_ = force ? 0 : (adPlaybackPos_ + 1) % adPlaybackOrder_.size();
+    currentAdIndex_ = juce::jlimit (0, (int) ads_.size() - 1, adPlaybackOrder_[adPlaybackPos_]);
 
     auto& ad = ads_[(size_t) currentAdIndex_];
     adRemainingMs_ = juce::jmax (1000, ad.durationSec * 1000);

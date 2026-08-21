@@ -8,10 +8,76 @@
 
 #include "InvitationService.h"
 #include "FirestoreClient.h"
+#include "../Firebase/FirebaseConfig.h"
 
 namespace
 {
     using FC = FirestoreClient;
+
+    //--- Cloud Function calling -- small local copy of the same pattern
+    //    CustomerAdminService uses (its own version is private to that
+    //    class); not worth a shared header for ~40 lines. ---------------
+    struct CallResult
+    {
+        bool         ok = false;
+        juce::var    result;
+        juce::String errorMessage;
+    };
+
+    juce::String functionUrl(const juce::String& name)
+    {
+        return "https://us-central1-" + FirebaseConfig::projectId + ".cloudfunctions.net/" + name;
+    }
+
+    CallResult callCloudFunction(const juce::String& functionName, const juce::var& dataObj)
+    {
+        CallResult out;
+
+        juce::DynamicObject::Ptr bodyObj = new juce::DynamicObject();
+        bodyObj->setProperty("data", dataObj);
+        const auto body = juce::JSON::toString(juce::var(bodyObj.get()), false);
+
+        // getFreshIdToken() (not getIdToken()) -- refreshes first if the
+        // cached token is close to expiry.
+        const auto idToken = FC::getInstance().getFreshIdToken();
+
+        juce::URL url(functionUrl(functionName));
+        int statusCode = 0;
+        auto stream = url.withPOSTData(body).createInputStream(
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
+                .withConnectionTimeoutMs(15000)
+                .withHttpRequestCmd("POST")
+                .withExtraHeaders("Content-Type: application/json\r\n"
+                                  "Accept: application/json\r\n"
+                                  "Authorization: Bearer " + idToken)
+                .withStatusCode(&statusCode));
+
+        if (stream == nullptr)
+        {
+            out.errorMessage = "Network error contacting " + functionName;
+            return out;
+        }
+
+        const auto responseText = stream->readEntireStreamAsString();
+        const auto parsed = juce::JSON::parse(responseText);
+
+        if (parsed.isObject() && parsed.hasProperty("error"))
+        {
+            auto err = parsed.getProperty("error", {});
+            out.errorMessage = err.getProperty("message", "Request failed").toString();
+            return out;
+        }
+
+        if (statusCode >= 200 && statusCode < 300 && parsed.isObject())
+        {
+            out.ok = true;
+            out.result = parsed.getProperty("result", {});
+            return out;
+        }
+
+        out.errorMessage = "Unexpected response (HTTP " + juce::String(statusCode) + ") from " + functionName;
+        return out;
+    }
 
     //--- Firestore structured-query builders (small local copies — mirrors
     //    the equivalent private helpers in LoginFlowController.cpp; not
@@ -84,6 +150,30 @@ InvitationService& InvitationService::getInstance()
     return instance;
 }
 
+void InvitationService::addVenueMember(const juce::String& venueId, const juce::String& email,
+                                       const juce::String& role, AddMemberCallback onDone)
+{
+    if (venueId.isEmpty() || email.isEmpty() || role.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, false, "venueId, email, and role are required"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, email, role, onDone = std::move(onDone)]()
+    {
+        juce::DynamicObject::Ptr data = new juce::DynamicObject();
+        data->setProperty("venueId", venueId);
+        data->setProperty("email", email);
+        data->setProperty("role", role);
+        const auto res = callCloudFunction("addVenueMember", juce::var(data.get()));
+
+        const bool activated = res.ok && (bool) res.result.getProperty("activated", false);
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok = res.ok, activated, error = res.errorMessage]
+                { onDone(ok, activated, error); });
+    });
+}
+
 std::vector<VenueInvitation> InvitationService::queryPendingInvitationsSync(const juce::String& email)
 {
     if (email.isEmpty())
@@ -112,55 +202,37 @@ void InvitationService::findPendingInvitations(const juce::String& email, FindCa
     });
 }
 
-void InvitationService::acceptInvitation(const VenueInvitation& invitation,
-                                         const juce::String& uid,
-                                         WriteCallback onDone)
+bool InvitationService::acceptInvitationSync(const juce::String& invitationId, juce::String* outError)
 {
-    if (invitation.venueId.isEmpty() || uid.isEmpty())
+    if (invitationId.isEmpty())
     {
-        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "Missing venueId/uid"); });
-        return;
+        if (outError) *outError = "Missing invitationId";
+        return false;
     }
 
-    const VenueInvitation inv = invitation;
-    juce::Thread::launch([inv, uid, onDone = std::move(onDone)]()
+    juce::DynamicObject::Ptr data = new juce::DynamicObject();
+    data->setProperty("invitationId", invitationId);
+    const auto res = callCloudFunction("acceptVenueInvitation", juce::var(data.get()));
+
+    if (! res.ok && outError)
+        *outError = res.errorMessage;
+    return res.ok;
+}
+
+void InvitationService::acceptInvitation(const VenueInvitation& invitation, WriteCallback onDone)
+{
+    const auto invitationId = invitation.id;
+    juce::Thread::launch([invitationId, onDone = std::move(onDone)]()
     {
-        // 1) Grant the association — doc id `{uid}_{venueId}` matches the
-        //    convention LoginFlowController::queryAssociations() reads.
-        const auto now = juce::Time::getCurrentTime();
-        auto assocFields = FC::makeFields({
-            { "userId",    FC::stringValue(uid) },
-            { "venueId",   FC::stringValue(inv.venueId) },
-            { "venueName", FC::stringValue(inv.venueName) },
-            { "role",      FC::stringValue(juce::String(AccessRightsUtil::userRoleToString(inv.role))) },
-            { "status",    FC::stringValue("active") },
-            { "joinedDate",FC::timestampValue(now) },
-            { "lastActive",FC::timestampValue(now) }
-        });
-        const auto assocDocId = uid + "_" + inv.venueId;
-        bool assocOk = false;
-        FC::getInstance().createDocument("user-venue-lookup", assocFields, assocDocId, &assocOk);
-
-        if (! assocOk)
-        {
-            if (onDone) juce::MessageManager::callAsync([onDone]
-                { onDone(false, "Could not create venue association"); });
-            return;
-        }
-
-        // 2) Patch the invitation doc — isAccepted / acceptedDate.
-        if (inv.id.isNotEmpty())
-        {
-            auto patchFields = FC::makeFields({
-                { "isAccepted",   FC::booleanValue(true) },
-                { "acceptedDate", FC::timestampValue(now) }
-            });
-            const auto path = "venueInvitations/" + inv.id
-                             + "?updateMask.fieldPaths=isAccepted&updateMask.fieldPaths=acceptedDate";
-            FC::getInstance().patchDocument(path, patchFields);
-        }
-
+        juce::String error;
+        const bool ok = acceptInvitationSync(invitationId, &error);
         if (onDone)
-            juce::MessageManager::callAsync([onDone] { onDone(true, {}); });
+            juce::MessageManager::callAsync([onDone, ok, error] { onDone(ok, error); });
     });
+}
+
+void InvitationService::claimAllPendingSync(const juce::String& email)
+{
+    for (auto& inv : queryPendingInvitationsSync(email))
+        acceptInvitationSync(inv.id);
 }

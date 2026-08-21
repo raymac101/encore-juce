@@ -97,8 +97,10 @@ public:
     //==========================================================================
     // Sets the venue whose Firebase Storage copy of songbook.json should be
     // refreshed after each completed scan. Set by MainComponent whenever the
-    // active venue changes.
-    void setActiveVenueId(const juce::String& venueId) { activeVenueId_ = venueId; }
+    // active venue changes. Also kicks off maybeSyncSharedMetadata() -- a
+    // venue (re)load is as good a moment as any to catch this PC's library up
+    // on any metadata other venues have already found.
+    void setActiveVenueId(const juce::String& venueId) { activeVenueId_ = venueId; maybeSyncSharedMetadata(); }
 
 private:
     //==========================================================================
@@ -136,6 +138,22 @@ private:
     void onEditGenres();        // Genre editor (stub)
     void fetchMetadataForImportedSongs(std::vector<size_t> songIndices,
                        bool allowOnlineLookup = true);
+
+    // Local, offline BPM/key detection (KeyBpmAnalyzer) for songs still
+    // missing tempo/keySignature -- run automatically after every scan/import
+    // since Spotify can no longer supply these two fields (Audio Features
+    // deprecated Nov 2024). One song at a time, off the message thread;
+    // songs_ itself is only ever touched from the message thread.
+    void runLocalAudioAnalysis(std::vector<size_t> songIndices);
+
+    // Silent, low-cost catch-up pass: checks this PC's still-missing-metadata
+    // songs against the shared local cache + Firestore metadataSongs only
+    // (ApiService::lookupSharedMetadataOnly -- never calls Spotify or enqueues
+    // a fetch), so it costs no API quota. Gated by a cooldown in
+    // UserPreferences so it doesn't re-run on every relaunch/venue-switch.
+    // On any hit, persists the songbook (disk + Storage) and fires
+    // onSongbookChanged so Search/Home refresh immediately.
+    void maybeSyncSharedMetadata();
 
     //==========================================================================
     // Helpers

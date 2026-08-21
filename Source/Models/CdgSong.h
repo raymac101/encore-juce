@@ -54,12 +54,25 @@ struct CdgSong
     bool isValid() const;
     juce::String getFormattedDuration() const;
 
-    /** True once the enrichment fields (art, duration, key, tempo, release
-        date, genres) have all been filled in -- either by LibraryScanner's
-        local metadata pass or a remote lookup. Mirrors (inverted) the
-        "needs remote metadata" check LibraryPage uses to decide which
-        songs to queue for a "Get Meta Data" fetch, and backs the Search
-        page's "Only songs with metadata" toggle. */
+    /** True once the enrichment fields Spotify can reliably supply for
+        almost any real track match (art, duration, release date) have been
+        filled in -- either by LibraryScanner's local metadata pass or a
+        remote lookup. keySignature/tempo/genres are NOT required:
+          - keySignature/tempo: Spotify deprecated the Audio Features
+            endpoint in Nov 2024 for apps without Extended Quota Mode (this
+            app was never granted it), so a live lookup can never supply
+            them anymore.
+          - genres: frequently blank on Spotify's own side for smaller/
+            tribute/karaoke-style artists -- a real, final answer, not a
+            sign the lookup needs retrying.
+        All three are still saved whenever present, just no longer block
+        completeness -- otherwise a song with a genuinely genre-less Spotify
+        match would look "still needs metadata" forever and get re-queued
+        into every future fetch pass despite already having the best answer
+        Spotify can give. Mirrors (inverted) the "needs remote metadata"
+        check LibraryPage uses to decide which songs to queue for a "Get
+        Meta Data" fetch, and backs the Search page's "Only songs with
+        metadata" toggle. */
     bool hasMetadata() const;
 
     /** Indices into version[]/code[]/rating[] etc., ordered by rating

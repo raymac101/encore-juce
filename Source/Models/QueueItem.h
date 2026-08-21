@@ -24,6 +24,7 @@ struct QueueItem
 {
     std::string id;                     // Unique identifier
     std::string deviceId;               // Device that submitted the request
+    std::string devicePlatform;         // "ios", "android", "desktop", or unknown
     std::string profileId;              // Firestore profileId (mobile users)
     std::string foxId;                  // Internal fox id
     std::string singerName;             // Name of the singer

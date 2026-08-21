@@ -67,6 +67,13 @@ public:
                    double positionSeconds,
                    double totalSeconds);
 
+    /** Master on/off toggle shown next to the prev/play/next transport
+        buttons. When false, the transport buttons are disabled too --
+        MainComponent is the one that actually enforces "never play"
+        (BackgroundMusicPlayer::setEnabled() / the Spotify branch), this
+        just keeps the ribbon's own controls visually consistent with it. */
+    void setBackgroundMusicEnabled (bool enabled);
+
     /** Pushes the current folder path (empty == using the bundled default)
         into the full-screen library panel's path label. */
     void setBackgroundFolderPath (const juce::String& path);
@@ -123,6 +130,7 @@ public:
     std::function<void(double positionSeconds)> onBackgroundSeekRequested;
     std::function<void()> onBackgroundNextTrack;
     std::function<void()> onBackgroundPrevTrack;
+    std::function<void(bool enabled)> onBackgroundMusicEnabledChanged;
 
     std::function<void (juce::File folder)> onBackgroundFolderChanged;
     std::function<void (juce::StringArray selectedFilenames)> onBackgroundSelectionChanged;
@@ -206,6 +214,7 @@ private:
     static constexpr int maxCollapsedHeightCap_ = 420;
 
     bool backgroundPlaying_ = false;
+    bool backgroundMusicEnabled_ = true;
     float backgroundVolume01_ = 0.5f;
     juce::String backgroundSongName_;
     double backgroundPositionSeconds_ = 0.0;
@@ -239,6 +248,7 @@ private:
     juce::DrawableButton bgPrevButton_       { "bgPrev", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton bgPlayPauseButton_  { "bgPlayPause", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton bgNextButton_       { "bgNext", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton bgEnabledButton_    { "bgEnabled", juce::DrawableButton::ImageOnButtonBackground };
     juce::Slider bgVolumeSlider_;
     juce::Label bgVolumeLabel_;
     juce::Slider bgProgressSlider_;

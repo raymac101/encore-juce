@@ -1053,7 +1053,7 @@ LibraryScanner::ScanStats LibraryScanner::computeStats(const std::vector<CdgSong
             else if (ext == "xml")     ++stats.numXML;
             else if (ext != "audio")   ++stats.numUnknown;
         }
-        if (! s.imageUrl.empty()) ++stats.numMeta;
+        if (s.hasMetadata()) ++stats.numMeta;
     }
     return stats;
 }

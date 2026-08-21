@@ -272,6 +272,41 @@ void UserPreferences::setVenueId(const juce::String& id)
 }
 
 //==============================================================================
+juce::String UserPreferences::getSavedLoginEmail() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("savedLoginEmail", juce::var()).toString();
+}
+
+void UserPreferences::setSavedLoginEmail(const juce::String& email)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginEmail", email);
+    save();
+}
+
+juce::String UserPreferences::getSavedLoginRefreshToken() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("savedLoginRefreshToken", juce::var()).toString();
+}
+
+void UserPreferences::setSavedLoginRefreshToken(const juce::String& refreshToken)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginRefreshToken", refreshToken);
+    save();
+}
+
+void UserPreferences::clearSavedLogin()
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("savedLoginEmail", juce::String());
+    asObj(root_)->setProperty("savedLoginRefreshToken", juce::String());
+    save();
+}
+
+//==============================================================================
 juce::String UserPreferences::getLibraryPath() const
 {
     const juce::ScopedLock sl(lock_);
@@ -283,6 +318,34 @@ void UserPreferences::setLibraryPath(const juce::String& path)
 {
     const juce::ScopedLock sl(lock_);
     asObj(root_)->setProperty("addPath", path);
+    save();
+}
+
+//==============================================================================
+juce::String UserPreferences::getAnthropicApiKey() const
+{
+    const juce::ScopedLock sl(lock_);
+    return root_.getProperty("anthropicApiKey", juce::var()).toString();
+}
+
+void UserPreferences::setAnthropicApiKey(const juce::String& key)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("anthropicApiKey", key);
+    save();
+}
+
+//==============================================================================
+juce::int64 UserPreferences::getLastMetadataSyncAtMs() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (juce::int64) root_.getProperty("lastMetadataSyncAtMs", 0);
+}
+
+void UserPreferences::setLastMetadataSyncAtMs(juce::int64 epochMs)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lastMetadataSyncAtMs", epochMs);
     save();
 }
 
@@ -688,6 +751,19 @@ void UserPreferences::setBackgroundMusicSource(const juce::String& source)
 {
     const juce::ScopedLock sl(lock_);
     asObj(root_)->setProperty("backgroundMusicSource", source);
+    save();
+}
+
+bool UserPreferences::getBackgroundMusicEnabled() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("backgroundMusicEnabled", true);
+}
+
+void UserPreferences::setBackgroundMusicEnabled(bool enabled)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("backgroundMusicEnabled", enabled);
     save();
 }
 

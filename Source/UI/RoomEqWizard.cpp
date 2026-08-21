@@ -70,7 +70,6 @@ RoomEqWizard::RoomEqWizard (AudioEngine& engine, const juce::String& activeVenue
     : engine_ (engine), activeVenueId_ (activeVenueId), activeVenueName_ (activeVenueName)
 {
     auto& lm = LocalizationManager::getInstance();
-    setSize (kWidth, kHeight);
 
     //--- Header ---
     titleLabel_ = std::make_unique<juce::Label> ("title", lm.getText ("roomeq.wizard.title"));
@@ -207,6 +206,9 @@ RoomEqWizard::RoomEqWizard (AudioEngine& engine, const juce::String& activeVenue
     };
     addAndMakeVisible (*closeAfterSaveBtn_);
 
+    // Sized last, once every child component above exists -- setSize()
+    // synchronously triggers resized(), which lays out those children.
+    setSize (kWidth, kHeight);
     setPhase (engine_.isLiveVocalInputActive() ? Phase::Setup : Phase::PreflightBlocked);
 }
 

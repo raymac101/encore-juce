@@ -54,6 +54,22 @@ namespace
         return arr;
     }
 
+    // Same as fromCollection(), but matches `collection` at ANY depth
+    // (Firestore's "collection group" query) rather than only directly
+    // under the query's parent path -- needed for `members`, which lives
+    // at companies/{companyId}/members/{uid} and there's no way to know
+    // companyId up front.
+    juce::var fromCollectionGroup(const juce::String& collection)
+    {
+        juce::DynamicObject::Ptr fc = new juce::DynamicObject();
+        fc->setProperty("collectionId", collection);
+        fc->setProperty("allDescendants", true);
+
+        juce::Array<juce::var> arr;
+        arr.add(juce::var(fc.get()));
+        return arr;
+    }
+
     juce::var buildQuery(const juce::String& collection, juce::var where)
     {
         juce::DynamicObject::Ptr q = new juce::DynamicObject();
@@ -61,6 +77,85 @@ namespace
         if (! where.isVoid())
             q->setProperty("where", where);
         return juce::var(q.get());
+    }
+
+    juce::var buildCollectionGroupQuery(const juce::String& collection, juce::var where)
+    {
+        juce::DynamicObject::Ptr q = new juce::DynamicObject();
+        q->setProperty("from", fromCollectionGroup(collection));
+        if (! where.isVoid())
+            q->setProperty("where", where);
+        return juce::var(q.get());
+    }
+
+    // Company membership isn't in custom claims (nothing in the backend
+    // ever sets them) -- the only real record is the
+    // companies/{companyId}/members/{uid} doc created by
+    // CompanyService::addCompanyMember(). Find it (if any) via a
+    // collection-group query on `members` filtered by userId, and pull
+    // companyId back out of the matched doc's resource name (there's no
+    // field carrying it directly).
+    struct CompanyMembership
+    {
+        bool found = false;
+        juce::String companyId;
+        juce::String role;
+    };
+
+    CompanyMembership queryCompanyMembership(const juce::String& uid)
+    {
+        CompanyMembership result;
+
+        auto query = buildCollectionGroupQuery("members",
+            stringFilter("userId", "EQUAL", FC::stringValue(uid)));
+
+        auto docs = FC::getInstance().runQuery({}, query);
+        if (docs.isEmpty())
+            return result;
+
+        const auto& d = docs.getReference(0);
+        const auto name = d.getProperty("name", "").toString();
+        // .../companies/{companyId}/members/{uid} -- companyId is the
+        // third-from-last path segment.
+        auto segments = juce::StringArray::fromTokens(name, "/", "");
+        if (segments.size() >= 3)
+            result.companyId = segments[segments.size() - 3];
+
+        result.role  = FC::readString(d, "role");
+        result.found = result.companyId.isNotEmpty();
+        return result;
+    }
+
+    // Company-only owners/admins (no personal venue association of their
+    // own) still need *some* venue to boot MainComponent with -- it has no
+    // venue-less mode. Real venues live in the root `venues` collection
+    // (see VenueService::addVenue), tagged with a companyId field, so find
+    // the first one that belongs to this company.
+    struct CompanyVenue
+    {
+        juce::String venueId;
+        juce::String venueName;
+    };
+
+    CompanyVenue queryFirstCompanyVenue(const juce::String& companyId)
+    {
+        CompanyVenue result;
+        if (companyId.isEmpty())
+            return result;
+
+        juce::Array<juce::var> filters;
+        filters.add(stringFilter("companyId", "EQUAL", FC::stringValue(companyId)));
+        auto query = buildQuery("venues", compositeAnd(filters));
+
+        auto docs = FC::getInstance().runQuery({}, query);
+        if (docs.isEmpty())
+            return result;
+
+        const auto& d = docs.getReference(0);
+        const auto name = d.getProperty("name", "").toString();
+        result.venueId   = name.fromLastOccurrenceOf("/", false, false);
+        result.venueName = FC::readString(d, "name");
+        return result;
     }
 
     //--- Host loading / creation ---------------------------------------------
@@ -251,9 +346,9 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             const auto uid   = fc.getUserId();
             const auto email = fc.getEmail().toLowerCase();
-            const auto claims = fc.getAuthClaims();
-            const auto companyId = FirestoreClient::readString(claims, "companyId").trim();
-            const auto companyRole = FirestoreClient::readString(claims, "companyRole").trim();
+            const auto membership = queryCompanyMembership(uid);
+            const auto companyId = membership.companyId;
+            const auto companyRole = membership.role;
 
             // 1) Host bootstrap
             Host host = loadOrCreateHost(uid, email);
@@ -262,9 +357,17 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             // 2) Read stored venueId from prefs
             const auto storedVenueId = UserPreferences::getInstance().getVenueId();
 
-            // 3) Associations + pending invitations
+            // 3) Auto-claim any pending invitations for this email FIRST --
+            //    e.g. a venue admin added this user via Settings > Invite
+            //    while they were signed out. This is what makes that show
+            //    up in `associations` below with no separate "accept" step
+            //    ever surfacing; best-effort (see claimAllPendingSync's own
+            //    comment), so a transient failure here just means the next
+            //    login retries it.
+            InvitationService::claimAllPendingSync(email);
+
+            // 4) Associations
             auto associations = queryAssociations(uid);
-            auto invitations  = InvitationService::queryPendingInvitationsSync(email);
 
             const bool canCreate = (host.role == UserRole::Admin
                                   || host.role == UserRole::EnterpriseAdmin
@@ -274,9 +377,26 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
                                        || companyRole.equalsIgnoreCase("enterprise_admin")
                                        || companyRole.equalsIgnoreCase("platform_admin");
 
+            juce::String companyName;
+            juce::String companyFallbackVenueId, companyFallbackVenueName;
+            if (hasCompanyContext)
+            {
+                auto companyDoc = fc.getDocument("companies/" + companyId);
+                companyName = FirestoreClient::readString(companyDoc, "name");
+
+                // Only needed as a fallback boot target for a company user
+                // with no venue association of their own -- skip the extra
+                // query otherwise.
+                if (associations.empty())
+                {
+                    auto companyVenue = queryFirstCompanyVenue(companyId);
+                    companyFallbackVenueId   = companyVenue.venueId;
+                    companyFallbackVenueName = companyVenue.venueName;
+                }
+            }
+
             DBG("[LoginFlow] storedVenueId=" << storedVenueId
                 << " associations=" << (int) associations.size()
-                << " invitations="  << (int) invitations.size()
                 << " role=" << juce::String(AccessRightsUtil::userRoleToString(host.role))
                 << " companyId=" << companyId
                 << " companyRole=" << companyRole);
@@ -288,14 +408,24 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             result.hasCompanyContext  = hasCompanyContext;
             result.companyId         = companyId;
             result.companyRole       = companyRole;
+            result.companyName       = companyName;
+            result.companyFallbackVenueId   = companyFallbackVenueId;
+            result.companyFallbackVenueName = companyFallbackVenueName;
 
-            // 4) Apply the scenario tree (mirrors Angular start.component logic)
+            // 5) Apply the scenario tree (mirrors Angular start.component logic)
             //    - Multiple associations → ALWAYS show picker (the configured
             //      venue is just badged in the list).
-            //    - Single association → auto-load it.
+            //    - Single association → auto-load it, UNLESS the user also
+            //      has company context: they need the picker so the
+            //      "manage company" card is reachable instead of being
+            //      dropped straight into their one venue.
             //    - Zero associations → request access (if stored venueId set
-            //      and user isn't an admin) / await invitation otherwise.
-            if (associations.size() > 1)
+            //      and user isn't an admin) / await invitation otherwise,
+            //      UNLESS they have company context, in which case they
+            //      still need the picker to reach "Manage Company" (there's
+            //      no venue association to gate it on for a company-only
+            //      owner/admin who never joined a venue directly).
+            if (associations.size() > 1 || hasCompanyContext)
             {
                 result.outcome      = Outcome::PickVenue;
                 result.associations = std::move(associations);
@@ -338,9 +468,13 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
             }
             else
             {
+                // Pending invitations for this email were already claimed
+                // in step 3 above -- if any existed, associations wouldn't
+                // be empty here. Zero associations at this point genuinely
+                // means "nothing to join," so self-serve setup is always
+                // offered rather than blocking on an invitations list.
                 result.outcome             = Outcome::AwaitInvitation;
-                result.offerSelfServeSetup = invitations.empty();
-                result.invitations         = std::move(invitations);
+                result.offerSelfServeSetup = true;
             }
 
             postOnMessageThread([onResult, result = std::move(result)]() mutable

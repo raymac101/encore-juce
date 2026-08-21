@@ -36,6 +36,20 @@ public:
     bool getLyricWindowFullScreen() const;
     void setLyricWindowFullScreen(bool fullScreen);
 
+    //--- Saved login ("stay signed in") -----------------------------------------
+    // The password itself is never stored. Instead, a successful sign-in with
+    // "Remember me" checked saves the Firebase refresh token (see
+    // FirestoreClient::getRefreshToken()/signInWithRefreshToken()), which
+    // LoginWindow uses at next launch to silently start a new session --
+    // same mechanism this app already uses for Spotify's saved login.
+    juce::String getSavedLoginEmail() const;
+    void setSavedLoginEmail(const juce::String& email);
+    juce::String getSavedLoginRefreshToken() const;
+    void setSavedLoginRefreshToken(const juce::String& refreshToken);
+    /** Wipes both of the above -- call on explicit sign-out, or whenever
+        "Remember me" isn't checked at sign-in time. */
+    void clearSavedLogin();
+
     //--- Title bar visibility (applies to both windows) -----------------------
     bool getShowTitleBar() const;
     void setShowTitleBar(bool show);
@@ -65,6 +79,22 @@ public:
     //--- Library path ----------------------------------------------------------
     juce::String getLibraryPath() const;
     void setLibraryPath(const juce::String& path);
+
+    //--- AI song-name cleanup (Viracicom Admin > Bulk Metadata Tool) -----------
+    // Anthropic API key, per-machine -- same security posture as the
+    // ElevenLabs/Spotify keys above (this file, not additionally encrypted).
+    // Used by AiSongNameCleanupService to pre-clean artist/song text (fix
+    // spelling, swapped fields, stray symbols) before a Spotify lookup.
+    juce::String getAnthropicApiKey() const;
+    void setAnthropicApiKey(const juce::String& key);
+
+    //--- Shared metadata startup sync -------------------------------------------
+    // Epoch ms of the last time LibraryPage checked its still-missing-metadata
+    // songs against the shared Firestore metadataSongs cache (see
+    // LibraryPage::maybeSyncSharedMetadata()). 0 means never run. This is a
+    // per-machine cooldown timestamp, not tied to any one venue.
+    juce::int64 getLastMetadataSyncAtMs() const;
+    void setLastMetadataSyncAtMs(juce::int64 epochMs);
 
     //--- Audio -----------------------------------------------------------------
     juce::String getPreferredAudioOutputDevice() const;
@@ -194,6 +224,14 @@ public:
     // played through this app's own audio engine.
     juce::String getBackgroundMusicSource() const;
     void setBackgroundMusicSource(const juce::String& source);
+
+    // Master on/off for background music (Ribbon's toggle button next to
+    // the prev/play/next transport controls). Default true -- matches
+    // existing zero-config behaviour. When false, background music must
+    // never play regardless of source (local or Spotify) or scenario
+    // (auto-fill between singers, manual Play button, etc).
+    bool getBackgroundMusicEnabled() const;
+    void setBackgroundMusicEnabled(bool enabled);
 
     // One-time setup: the Client ID from the host's own Spotify Developer
     // app (developer.spotify.com). Per-machine, same convention as the

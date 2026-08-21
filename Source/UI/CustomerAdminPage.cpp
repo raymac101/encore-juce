@@ -8,6 +8,7 @@
 
 #include "CustomerAdminPage.h"
 #include "MenuTheme.h"
+#include "BulkMetadataTool.h"
 #include "../Localization/LocalizationManager.h"
 #include "../Models/AccessRights.h"
 #include <algorithm>
@@ -104,7 +105,11 @@ CustomerAdminPage::CustomerAdminPage()
     setOpaque (true);
     addAndMakeVisible (viewport_);
     viewport_.setViewedComponent (contentHolder_.get(), false);
-    viewport_.setScrollBarsShown (true, false);
+    // Horizontal too: contentHolder_ is floored at a minimum width (see
+    // resized()) so the two-column layout never gets squeezed illegibly
+    // narrow -- on a viewport narrower than that floor, the right column
+    // was being silently clipped with no way to reach it.
+    viewport_.setScrollBarsShown (true, true);
 
     auto& lm = LocalizationManager::getInstance();
 
@@ -126,6 +131,10 @@ CustomerAdminPage::CustomerAdminPage()
     styleButton (tabSearchButton_, kPanel);
     tabSearchButton_.onClick = [this] { showSearchTab(); };
     contentHolder_->addAndMakeVisible (tabSearchButton_);
+
+    styleButton (bulkMetadataButton_, kPanel);
+    bulkMetadataButton_.onClick = [this] { BulkMetadataTool::launch (this); };
+    contentHolder_->addAndMakeVisible (bulkMetadataButton_);
 
     //--- Unassigned Users tab ------------------------------------------------
     styleLabel (unassignedTitle_, 15.0f, true, kText);
@@ -583,7 +592,7 @@ void CustomerAdminPage::loadProfile (const juce::String& uid)
 {
     setStatus ("Loading profile...");
     juce::Component::SafePointer<CustomerAdminPage> safe (this);
-    CustomerAdminService::getInstance().getUserProfile (uid, [safe] (CustomerAdminService::UserProfile profile)
+    CustomerAdminService::getInstance().getUserProfile (uid, [safe, uid] (CustomerAdminService::UserProfile profile)
     {
         if (safe == nullptr) return;
         if (! profile.ok)
@@ -592,6 +601,18 @@ void CustomerAdminPage::loadProfile (const juce::String& uid)
             return;
         }
         safe->currentProfile_ = profile;
+
+        // Auth-only accounts (no `hosts` doc) come back from the server
+        // with host.userId left empty -- there's no hosts doc to have
+        // populated it from -- which then made every write action below
+        // (setUserPassword/deactivate/reactivate/hardDelete, all keyed off
+        // currentProfile_.host.userId) silently send an empty uid and fail
+        // server-side validation. `uid` here is the real Firebase Auth uid
+        // this profile was fetched for either way, so it's always the
+        // right fallback.
+        if (safe->currentProfile_.host.userId.isEmpty())
+            safe->currentProfile_.host.userId = uid;
+
         safe->profileLoaded_ = true;
         safe->confirmEmailEditor_.setText ({}, false);
         safe->newPasswordEditor_.setText ({}, false);
@@ -979,6 +1000,8 @@ void CustomerAdminPage::layoutContent()
     tabUnassignedButton_.setBounds (tabsRow.removeFromLeft (160));
     tabsRow.removeFromLeft (8);
     tabSearchButton_.setBounds (tabsRow.removeFromLeft (160));
+    tabsRow.removeFromLeft (8);
+    bulkMetadataButton_.setBounds (tabsRow.removeFromLeft (160));
     tabsRow.removeFromLeft (12);
     statusLabel_.setBounds (tabsRow);
 

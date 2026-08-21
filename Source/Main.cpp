@@ -578,7 +578,10 @@ public:
 
         void attachMainContent (const juce::String& venueId,
                                 bool requestInitialScan,
-                                juce::MenuBarModel* menuModel)
+                                juce::MenuBarModel* menuModel,
+                                bool openCompanyDashboard = false,
+                                const juce::String& companyId = {},
+                                const juce::String& companyRole = {})
         {
             const auto previousBounds = getBounds();
 
@@ -595,6 +598,8 @@ public:
             if (auto* content = dynamic_cast<MainComponent*> (getContentComponent()))
             {
                 content->setVenueId (venueId, requestInitialScan);
+                if (openCompanyDashboard)
+                    content->openCompanyDashboard (companyId, companyRole);
                 content->onSignOutRequested = []
                 {
                     if (auto* app = dynamic_cast<EncoreApplication*> (juce::JUCEApplication::getInstance()))
@@ -743,18 +748,22 @@ private:
     //==============================================================================
     void showLoginWindow()
     {
-        loginWindow_.reset (new LoginWindow ([this](juce::String venueId, bool requestInitialScan)
+        loginWindow_.reset (new LoginWindow ([this](juce::String venueId, bool requestInitialScan,
+                                                    bool openCompanyDashboard, juce::String companyId, juce::String companyRole)
         {
             // Create the main shell immediately, then close the login window.
-            juce::MessageManager::callAsync ([this, venueId, requestInitialScan]
+            juce::MessageManager::callAsync ([this, venueId, requestInitialScan,
+                                              openCompanyDashboard, companyId, companyRole]
             {
-                createMainWindow (venueId, requestInitialScan);
+                createMainWindow (venueId, requestInitialScan, openCompanyDashboard, companyId, companyRole);
                 juce::Timer::callAfterDelay(1, [this] { loginWindow_ = nullptr; });
             });
         }));
     }
 
-    void createMainWindow (const juce::String& venueId, bool requestInitialScan = false)
+    void createMainWindow (const juce::String& venueId, bool requestInitialScan = false,
+                          bool openCompanyDashboard = false, const juce::String& companyId = {},
+                          const juce::String& companyRole = {})
     {
         if (mainWindow != nullptr)
             return;
@@ -766,13 +775,15 @@ private:
 
         // Let the main window paint first, then start venue/network loading.
         juce::Component::SafePointer<MainWindow> safeWindow (mainWindow.get());
-        juce::Timer::callAfterDelay(1, [safeWindow, venueId, requestInitialScan, this]
+        juce::Timer::callAfterDelay(1, [safeWindow, venueId, requestInitialScan,
+                                       openCompanyDashboard, companyId, companyRole, this]
         {
             if (safeWindow == nullptr)
                 return;
 
             const auto venueStartMs = juce::Time::getMillisecondCounterHiRes();
-            safeWindow->attachMainContent (venueId, requestInitialScan, this);
+            safeWindow->attachMainContent (venueId, requestInitialScan, this,
+                                          openCompanyDashboard, companyId, companyRole);
             DBG("[Startup] attachMainContent finished in "
                 + juce::String(juce::Time::getMillisecondCounterHiRes() - venueStartMs, 1)
                 + " ms");

@@ -24,6 +24,7 @@
 #include "../Models/AccessRights.h"
 #include "BuildInfo.h"
 #include "Onboarding/OnboardingWizard.h"
+#include "SpriteIcon.h"
 
 namespace
 {
@@ -99,6 +100,39 @@ public:
         passwordEditor_.setPasswordCharacter((juce::juce_wchar) 0x2022); // bullet
         passwordEditor_.onReturnKey = [this] { handleEmailSubmit(); };
 
+        // Small circular clear ('x') buttons overlaid on the right edge of
+        // each field -- only shown while that field actually has text in
+        // it, so the empty/placeholder state stays clean.
+        addChildComponent(emailClearButton_);
+        addChildComponent(passwordClearButton_);
+        for (auto* clearBtn : { &emailClearButton_, &passwordClearButton_ })
+        {
+            auto icon = SpriteIcon::create ("icon-cancel-circle", juce::Colour(LoginTheme::kPlaceholder));
+            auto iconOver = SpriteIcon::create ("icon-cancel-circle", juce::Colours::white);
+            clearBtn->setImages (icon.get(), iconOver.get(), iconOver.get());
+            clearBtn->setTooltip (lm.getText("login.clear_field"));
+        }
+        emailClearButton_.onClick = [this]
+        {
+            emailEditor_.clear();
+            emailEditor_.grabKeyboardFocus();
+            updateClearButtonVisibility();
+        };
+        passwordClearButton_.onClick = [this]
+        {
+            passwordEditor_.clear();
+            passwordEditor_.grabKeyboardFocus();
+            updateClearButtonVisibility();
+        };
+        emailEditor_.onTextChange    = [this] { updateClearButtonVisibility(); };
+        passwordEditor_.onTextChange = [this] { updateClearButtonVisibility(); };
+
+        addChildComponent(rememberMeToggle_);
+        rememberMeToggle_.setButtonText(lm.getText("login.remember_me"));
+        rememberMeToggle_.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+        rememberMeToggle_.setColour(juce::ToggleButton::tickColourId, juce::Colour(LoginTheme::kAccentBlue));
+        rememberMeToggle_.setToggleState(true, juce::dontSendNotification);
+
         loginButton_.setButtonText(lm.getText("login.button_login"));
         switchModeButton_.setButtonText(lm.getText("login.button_switch_to_signup"));
         googleButton_.setButtonText(lm.getText("login.button_google"));
@@ -157,11 +191,6 @@ public:
         venuesViewport_.setColour(juce::ScrollBar::thumbColourId, juce::Colour(0x66000000));
 
         // AwaitingInvitation
-        addChildComponent(invitationsListBox_);
-        invitationsListBox_.setModel(&invitationsListModel_);
-        invitationsListBox_.setRowHeight(58);
-        invitationsListBox_.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
-
         addChildComponent(refreshButton_);
         addChildComponent(signOutButton_);
         addChildComponent(createVenueButton_);
@@ -181,13 +210,18 @@ public:
 
         refreshButton_.onClick = [this]
         {
+            // Re-runs the whole post-auth flow, which retries claiming any
+            // pending invitation for this email before re-checking venue
+            // associations -- lets "I was just added, let me check again"
+            // work without a full sign-out/sign-in.
             if (page_ == Page::AwaitingInvitation)
-                runFlow(); // re-fetch invitations
+                runFlow();
         };
 
         signOutButton_.onClick = [this]
         {
             FirestoreClient::getInstance().signOut();
+            UserPreferences::getInstance().clearSavedLogin();
             page_ = Page::Login;
             applyPage();
         };
@@ -263,16 +297,10 @@ public:
             proceed(false);
         };
 
-        invitationsListModel_.onAccept = [this](int row)
-        {
-            juce::ignoreUnused(row);
-            statusLabel_.setText(
-                LocalizationManager::getInstance().getText("login.awaiting.status_accept_not_implemented"),
-                juce::dontSendNotification);
-        };
-
         applyPage();
-        setSize(720, 820);
+        setSize(720, 860); // was 820 -- +40 for the new Remember-me row
+
+        attemptSavedSignIn();
     }
 
     ~LoginContent() override
@@ -435,6 +463,17 @@ private:
         te.setTextToShowWhenEmpty(placeholder, juce::Colour(LoginTheme::kPlaceholder));
     }
 
+    // Each clear button only shows while the Login page itself is showing
+    // AND its field actually has text -- called from applyPage() (so a
+    // pre-filled saved email shows its clear button immediately) and from
+    // both editors' onTextChange (so typing/clearing updates live).
+    void updateClearButtonVisibility()
+    {
+        const bool login = page_ == Page::Login;
+        emailClearButton_.setVisible(login && emailEditor_.getText().isNotEmpty());
+        passwordClearButton_.setVisible(login && passwordEditor_.getText().isNotEmpty());
+    }
+
     //==============================================================================
     // Layout helpers
     void layoutLoginPage(juce::Rectangle<int> area)
@@ -445,7 +484,21 @@ private:
         area.removeFromTop(16);
         passwordEditor_.setBounds(area.removeFromTop(54));
 
-        area.removeFromTop(22);
+        // Clear buttons sit inside their editor's own bounds, at the right
+        // edge -- derived from a copy so the editor's actual bounds above
+        // are untouched.
+        constexpr int clearBtnSize = 22;
+        auto emailClearArea = emailEditor_.getBounds();
+        emailClearButton_.setBounds(emailClearArea.removeFromRight(clearBtnSize + 12)
+                                         .withSizeKeepingCentre(clearBtnSize, clearBtnSize));
+        auto passwordClearArea = passwordEditor_.getBounds();
+        passwordClearButton_.setBounds(passwordClearArea.removeFromRight(clearBtnSize + 12)
+                                            .withSizeKeepingCentre(clearBtnSize, clearBtnSize));
+
+        area.removeFromTop(10);
+        rememberMeToggle_.setBounds(area.removeFromTop(24));
+
+        area.removeFromTop(12);
 
         // Centred Login button.
         loginButton_.setBounds(area.removeFromTop(48).withSizeKeepingCentre(180, 48));
@@ -481,11 +534,17 @@ private:
 
         venuesViewport_.setBounds(area);
 
-        // Lay out the inner cards stacked vertically.
+        // Lay out the inner cards stacked vertically. The company card (if
+        // any) always leads the list.
         const int viewW = venuesViewport_.getMaximumVisibleWidth();
         const int cardH = 110;
         const int gap = 12;
         int y = 0;
+        if (companyCard_ != nullptr)
+        {
+            companyCard_->setBounds(0, y, viewW, cardH);
+            y += cardH + gap;
+        }
         for (auto& c : venueCards_)
         {
             c->setBounds(0, y, viewW, cardH);
@@ -503,8 +562,7 @@ private:
             createVenueButton_.setBounds(bottom.removeFromRight(190));
         bottom.removeFromRight(8);
         refreshButton_.setBounds(bottom.removeFromRight(120));
-
-        invitationsListBox_.setBounds(area.reduced(0, 8));
+        juce::ignoreUnused(area);
     }
 
     void layoutRequestAccessPage(juce::Rectangle<int> area)
@@ -531,6 +589,8 @@ private:
 
         emailEditor_.setVisible(login);
         passwordEditor_.setVisible(login);
+        rememberMeToggle_.setVisible(login);
+        updateClearButtonVisibility();
         loginButton_.setVisible(login);
         switchModeButton_.setVisible(login);
         googleButton_.setVisible(login);
@@ -542,7 +602,6 @@ private:
         venuesHeadingLabel_.setVisible(sel);
         rememberVenueToggle_.setVisible(sel);
         venuesViewport_.setVisible(sel);
-        invitationsListBox_.setVisible(await_);
         refreshButton_.setVisible(await_);
         createVenueButton_.setVisible(await_ && (flowResult_.canCreateVenue || flowResult_.offerSelfServeSetup));
         createVenueButton_.setButtonText(flowResult_.offerSelfServeSetup ? lm.getText("login.awaiting.button_get_started_alt")
@@ -585,11 +644,8 @@ private:
                 headingLabel_.setText(lm.getText("login.awaiting.heading"), juce::dontSendNotification);
                 headingLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
                 statusLabel_.setText(
-                    flowResult_.invitations.empty()
-                        ? lm.getText("login.awaiting.status_no_invitations")
-                        : lm.getText("login.awaiting.status_has_invitations"),
+                    lm.getText("login.awaiting.status_no_invitations"),
                     juce::dontSendNotification);
-                invitationsListBox_.updateContent();
                 break;
 
             case Page::RequestAccess:
@@ -600,8 +656,6 @@ private:
                     juce::dontSendNotification);
                 break;
         }
-
-        invitationsListModel_.invitations = &flowResult_.invitations;
 
         resized();
         repaint();
@@ -619,6 +673,22 @@ private:
             card->onSelect = [this, venueId] { if (venueListModelOnSelected_) venueListModelOnSelected_(venueId); };
             venuesContainer_.addAndMakeVisible(card.get());
             venueCards_.push_back(std::move(card));
+        }
+
+        // Company card -- lets a company owner/admin jump into the
+        // company-wide dashboard instead of a single venue. Shown whenever
+        // the user has company context at all; selectCompany() itself
+        // handles the (rare) case where there's truly no venue anywhere to
+        // boot MainComponent with yet.
+        if (flowResult_.hasCompanyContext)
+        {
+            companyCard_ = std::make_unique<CompanyCardComponent>(flowResult_.companyName, flowResult_.companyRole);
+            companyCard_->onSelect = [this] { selectCompany(); };
+            venuesContainer_.addAndMakeVisible(companyCard_.get());
+        }
+        else
+        {
+            companyCard_ = nullptr;
         }
     }
 
@@ -651,11 +721,76 @@ private:
     }
 
     //==============================================================================
+    // "Stay signed in" -- called once at construction, before the user has
+    // touched anything. Pre-fills the saved email either way. If a saved
+    // refresh token is also present, quietly exchanges it for a fresh
+    // session in the background so no password is needed later -- but
+    // deliberately does NOT navigate anywhere or act "logged in" on its
+    // own. Login always stays a manual, explicit click: this only means
+    // that when the host does click Log In without changing the pre-filled
+    // email or typing a password, handleEmailSubmit() can use the already-
+    // validated session instead of demanding a password that was never
+    // stored in the first place.
+    void attemptSavedSignIn()
+    {
+        auto& prefs = UserPreferences::getInstance();
+        const auto savedEmail = prefs.getSavedLoginEmail();
+        const auto savedRefreshToken = prefs.getSavedLoginRefreshToken();
+
+        if (savedEmail.isNotEmpty())
+            emailEditor_.setText(savedEmail, juce::dontSendNotification);
+
+        updateClearButtonVisibility();
+
+        if (savedRefreshToken.isEmpty())
+            return;
+
+        juce::Component::SafePointer<LoginContent> safe(this);
+        juce::Thread::launch([safe, savedRefreshToken]
+        {
+            auto result = FirestoreClient::getInstance().signInWithRefreshToken(savedRefreshToken);
+
+            juce::MessageManager::callAsync([safe, result]()
+            {
+                if (safe == nullptr)
+                    return;
+
+                if (! result.ok)
+                {
+                    // Expired/revoked -- nothing to show for it either way,
+                    // since this was never a visible action to begin with.
+                    UserPreferences::getInstance().setSavedLoginRefreshToken({});
+                    return;
+                }
+
+                safe->savedSessionReady_ = true;
+                safe->statusLabel_.setText(
+                    LocalizationManager::getInstance().getText("login.status_saved_session_ready"),
+                    juce::dontSendNotification);
+            });
+        });
+    }
+
+    //==============================================================================
     // Sign-in handlers (run on a background thread to avoid blocking the UI)
     void handleEmailSubmit()
     {
         const auto email    = emailEditor_.getText().trim();
         const auto password = passwordEditor_.getText();
+
+        // A saved session was silently refreshed in the background (see
+        // attemptSavedSignIn()) but held back from navigating anywhere on
+        // its own -- this is the manual confirmation of it. Only takes
+        // this path if nothing's been changed from what was pre-filled;
+        // if the host typed a different email or any password, that's
+        // them deliberately signing in as someone else, so fall through
+        // to the normal flow below instead.
+        if (savedSessionReady_ && isLoginMode_ && password.isEmpty()
+            && email.equalsIgnoreCase(FirestoreClient::getInstance().getEmail()))
+        {
+            runFlow();
+            return;
+        }
 
         auto& lm = LocalizationManager::getInstance();
         if (email.isEmpty() || password.length() < 6)
@@ -666,16 +801,17 @@ private:
         }
 
         const bool signUp = ! isLoginMode_;
+        const bool rememberMe = rememberMeToggle_.getToggleState();
         setBusy(true, signUp ? lm.getText("login.status_creating_account") : lm.getText("login.status_signing_in"));
 
         juce::Component::SafePointer<LoginContent> safe(this);
-        juce::Thread::launch([safe, email, password, signUp]
+        juce::Thread::launch([safe, email, password, signUp, rememberMe]
         {
             auto& fc = FirestoreClient::getInstance();
             auto result = signUp ? fc.signUpWithEmailPassword(email, password)
                                  : fc.signInWithEmailPassword(email, password);
 
-            juce::MessageManager::callAsync([safe, result]()
+            juce::MessageManager::callAsync([safe, result, email, rememberMe]()
             {
                 if (safe == nullptr)
                     return;
@@ -687,6 +823,18 @@ private:
                                          juce::dontSendNotification);
                     return;
                 }
+
+                auto& prefs = UserPreferences::getInstance();
+                if (rememberMe)
+                {
+                    prefs.setSavedLoginEmail(email);
+                    prefs.setSavedLoginRefreshToken(FirestoreClient::getInstance().getRefreshToken());
+                }
+                else
+                {
+                    prefs.clearSavedLogin();
+                }
+
                 safe->runFlow();
             });
         });
@@ -781,7 +929,7 @@ private:
                             setBusy(false, {});
                             if (ok)
                             {
-                                if (onComplete_) onComplete_(pickId, false);
+                                if (onComplete_) onComplete_(pickId, false, false, {}, {});
                             }
                             else
                             {
@@ -839,6 +987,40 @@ private:
         applyPage();
     }
 
+    // Company card click on SelectVenue: there's no venue-less destination
+    // in this app (MainComponent always boots against a venue), so pick
+    // whichever venue would normally be used -- the configured one if it's
+    // still valid, else the first association, else (a company-only user
+    // with no personal venue association) the company's own first venue --
+    // and flag the hand-off so MainComponent opens straight into the
+    // Company Admin dashboard instead of Home once that venue loads.
+    void selectCompany()
+    {
+        juce::String venueId = flowResult_.configuredVenueId;
+        bool stillAssociated = false;
+        for (auto& a : flowResult_.associations)
+            if (a.venueId == venueId) { stillAssociated = true; break; }
+
+        if (venueId.isEmpty() || ! stillAssociated)
+            venueId = flowResult_.associations.empty() ? juce::String() : flowResult_.associations.front().venueId;
+
+        if (venueId.isEmpty())
+            venueId = flowResult_.companyFallbackVenueId;
+
+        if (venueId.isEmpty())
+        {
+            auto& lm = LocalizationManager::getInstance();
+            statusLabel_.setText(lm.getText("login.select_venue.company_card_no_venues"), juce::dontSendNotification);
+            return;
+        }
+
+        pendingOpenCompanyDashboard_ = true;
+        pendingCompanyId_   = flowResult_.companyId;
+        pendingCompanyRole_ = flowResult_.companyRole;
+
+        proceedToVenueAfterChecks(venueId, {}, false);
+    }
+
     // Single hand-off point for BOTH places a venue can actually be opened
     // (the single-association auto-load in runFlow(), and the multi-venue
     // picker's venueListModelOnSelected_) -- runs the two collision-
@@ -894,7 +1076,8 @@ private:
             {
                 if (! otherActive)
                 {
-                    if (onComplete_) onComplete_(venueId, initialScan);
+                    if (onComplete_) onComplete_(venueId, initialScan, pendingOpenCompanyDashboard_,
+                                                 pendingCompanyId_, pendingCompanyRole_);
                     return;
                 }
 
@@ -913,7 +1096,8 @@ private:
                     juce::ModalCallbackFunction::create([this, venueId, initialScan](int result)
                     {
                         if (result == 1 && onComplete_)
-                            onComplete_(venueId, initialScan);
+                            onComplete_(venueId, initialScan, pendingOpenCompanyDashboard_,
+                                       pendingCompanyId_, pendingCompanyRole_);
                         // Cancel: stay on the current page, do nothing.
                     }));
             });
@@ -1128,49 +1312,91 @@ private:
     };
 
     //==============================================================================
-    // ListBox model for invitations (kept; AssociationListModel was removed).
-    struct InvitationsListModel : public juce::ListBoxModel
+    // CompanyCardComponent — sits above the venue cards on the SelectVenue
+    // page for a company owner/admin. Styled in a distinct amber/gold tone
+    // (vs. the venues' blue/grey) so it reads as "a different kind of
+    // destination" rather than just another venue in the list.
+    class CompanyCardComponent : public juce::Component
     {
-        std::vector<VenueInvitation>* invitations = nullptr;
-        std::function<void(int)> onAccept;
-
-        int getNumRows() override { return invitations ? (int) invitations->size() : 0; }
-
-        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool isSelected) override
+    public:
+        CompanyCardComponent(const juce::String& companyName, const juce::String& companyRole)
+            : companyName_(companyName), companyRole_(companyRole)
         {
-            if (invitations == nullptr || row < 0 || row >= (int) invitations->size()) return;
-            const auto& i = (*invitations)[(size_t) row];
-            g.fillAll(isSelected ? juce::Colour(0x33ffffff) : juce::Colour(0x14ffffff));
-            g.setColour(juce::Colours::white);
+            auto& lm = LocalizationManager::getInstance();
+            addAndMakeVisible(selectButton_);
+            selectButton_.setButtonText(lm.getText("login.select_venue.company_card_button"));
+            selectButton_.getProperties().set("greenSelect", true);
+            selectButton_.onClick = [this] { if (onSelect) onSelect(); };
+        }
+
+        std::function<void()> onSelect;
+
+        void paint(juce::Graphics& g) override
+        {
+            auto& lm = LocalizationManager::getInstance();
+            const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+            const float r = 12.0f;
+
+            g.setColour(juce::Colour(0xfffdf0da));
+            g.fillRoundedRectangle(bounds, r);
+            g.setColour(juce::Colour(0xffe8b84b));
+            g.drawRoundedRectangle(bounds, r, 1.5f);
+
+            const int pad = 16;
+            const int logoSize = 56;
+            const juce::Rectangle<int> logoArea(pad, pad, logoSize, logoSize);
+            g.setColour(juce::Colour(0xfff3d488));
+            g.fillRoundedRectangle(logoArea.toFloat(), 6.0f);
+            g.setColour(juce::Colour(0xff92660f));
+            g.setFont(juce::Font(juce::FontOptions(20.0f, juce::Font::bold)));
+            g.drawText(juce::String(juce::CharPointer_UTF8("\xf0\x9f\x8f\xa2")), logoArea, juce::Justification::centred);
+
+            const int textX = pad + logoSize + 16;
+            const int textW = getWidth() - textX - 140;
+            int y = pad - 2;
+
+            const auto displayName = companyName_.isNotEmpty() ? companyName_
+                                                               : lm.getText("login.select_venue.company_card_fallback_name");
+            g.setColour(juce::Colour(0xff5c4108));
             g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-            g.drawText(i.venueName, 12, 6, w - 100, 22, juce::Justification::centredLeft);
-            g.setColour(juce::Colour(LoginTheme::kSubtleText));
+            g.drawText(displayName, textX, y, textW, 22, juce::Justification::centredLeft, true);
+            y += 22;
+
+            g.setColour(juce::Colour(0xff7a5a12));
             g.setFont(juce::Font(juce::FontOptions(12.0f)));
-            g.drawText(LocalizationManager::getInstance().getTextWithParams("login.awaiting.invite_row_subtitle",
-                           { i.invitedByName, juce::String(AccessRightsUtil::userRoleToString(i.role)) }),
-                       12, 28, w - 100, 18, juce::Justification::centredLeft);
+            g.drawText(lm.getText("login.select_venue.company_card_subtitle"), textX, y, textW, 16,
+                       juce::Justification::centredLeft, true);
+            y += 16;
 
-            // "Accept" hint button
-            g.setColour(juce::Colour(0xffc69b3b));
-            g.fillRoundedRectangle((float)(w - 90), 14.0f, 78.0f, 28.0f, 4.0f);
-            g.setColour(juce::Colours::black);
-            g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
-            g.drawText(LocalizationManager::getInstance().getText("login.awaiting.invite_row_accept_button"),
-                       w - 90, 14, 78, 28, juce::Justification::centred);
+            if (companyRole_.isNotEmpty())
+            {
+                g.drawText(lm.getTextWithParams("login.select_venue.card_role_label", { companyRole_ }),
+                           textX, y, textW, 16, juce::Justification::centredLeft);
+            }
         }
 
-        void listBoxItemClicked(int row, const juce::MouseEvent& e) override
+        void resized() override
         {
-            // Only fire onAccept when the click hits the right-side pill.
-            if (onAccept && e.x > 0)
-                onAccept(row);
+            const int w = 150, h = 36;
+            selectButton_.setBounds(getWidth() - w - 16, (getHeight() - h) / 2, w, h);
         }
+
+    private:
+        juce::String companyName_, companyRole_;
+        juce::TextButton selectButton_;
     };
 
     //==============================================================================
     // State
     Page page_ = Page::Login;
     bool isLoginMode_ = true;
+
+    // Set once attemptSavedSignIn()'s background refresh-token exchange
+    // succeeds. Deliberately does NOT advance past the login page by
+    // itself -- see attemptSavedSignIn()'s comment -- it just lets
+    // handleEmailSubmit() skip re-asking for a password we never stored
+    // when the host clicks Log In themselves without changing anything.
+    bool savedSessionReady_ = false;
     LoginFlowController::Result flowResult_;
     LoginCompleteCallback onComplete_;
 
@@ -1188,6 +1414,9 @@ private:
     // Login page
     juce::TextEditor emailEditor_;
     juce::TextEditor passwordEditor_;
+    juce::DrawableButton emailClearButton_    { "emailClear", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton passwordClearButton_ { "passwordClear", juce::DrawableButton::ImageFitted };
+    juce::ToggleButton rememberMeToggle_;
     juce::TextButton loginButton_;
     juce::TextButton switchModeButton_;
     juce::TextButton getStartedButton_;
@@ -1205,17 +1434,24 @@ private:
 
     // SelectVenue page (custom cards instead of ListBox)
     class VenueCardComponent;
+    class CompanyCardComponent;
     juce::Label             venuesHeadingLabel_;
     juce::ToggleButton      rememberVenueToggle_;
     juce::Viewport          venuesViewport_;
     juce::Component         venuesContainer_;
     std::vector<std::unique_ptr<VenueCardComponent>> venueCards_;
+    std::unique_ptr<CompanyCardComponent> companyCard_;
     std::function<void(const juce::String&)> venueListModelOnSelected_;
 
-    // AwaitingInvitation / RequestAccess
-    InvitationsListModel  invitationsListModel_;
-    juce::ListBox          invitationsListBox_;
+    // Set by selectCompany() just before the shared venue-completion hand-
+    // off, so checkLiveElsewhereThenComplete() can tell MainComponent to
+    // open the Company Admin dashboard instead of Home once the (arbitrary,
+    // just-needed-to-boot) venue finishes loading.
+    bool          pendingOpenCompanyDashboard_ = false;
+    juce::String  pendingCompanyId_;
+    juce::String  pendingCompanyRole_;
 
+    // AwaitingInvitation / RequestAccess
     juce::TextButton refreshButton_;
     juce::TextButton signOutButton_;
     juce::TextButton createVenueButton_;
@@ -1237,11 +1473,12 @@ LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
     setUsingNativeTitleBar(true);
     setResizable(false, false);
 
-    auto* c = new LoginContent([this](juce::String venueId, bool requestInitialScan)
+    auto* c = new LoginContent([this](juce::String venueId, bool requestInitialScan,
+                                      bool openCompanyDashboard, juce::String companyId, juce::String companyRole)
     {
         auto cb = std::move(onComplete_);
         onComplete_ = nullptr;
-        if (cb) cb(venueId, requestInitialScan);
+        if (cb) cb(venueId, requestInitialScan, openCompanyDashboard, companyId, companyRole);
     });
     setContentOwned(c, true);
     centreWithSize(720, 820);

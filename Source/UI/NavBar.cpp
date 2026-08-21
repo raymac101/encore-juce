@@ -343,20 +343,16 @@ void NavBar::setCompanyContext(bool enabled, const juce::String& role)
     companyModeEnabled = enabled;
     companyRole = role;
 
-    // Company dashboard is only meaningful for company-admin style roles.
+    // Company Admin is only shown if BOTH conditions are true:
+    // 1. The venue is part of a company (enabled = true)
+    // 2. The user has a company admin role
     companyDashboardVisible = enabled
         && (role.equalsIgnoreCase("Admin")
             || role.equalsIgnoreCase("company_admin")
             || role.equalsIgnoreCase("enterprise_admin")
             || role.equalsIgnoreCase("platform_admin")
-            || role.equalsIgnoreCase("company_admin"));
-
-    if (role.equalsIgnoreCase("Admin")
-        || role.equalsIgnoreCase("EnterpriseAdmin")
-        || role.equalsIgnoreCase("Tester"))
-    {
-        companyDashboardVisible = true;
-    }
+            || role.equalsIgnoreCase("EnterpriseAdmin")
+            || role.equalsIgnoreCase("Tester"));
 
     for (auto& item : menuItems)
     {

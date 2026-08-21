@@ -113,6 +113,7 @@ charts.chart.members_per_night=Members per Night
 charts.chart.top_members=Top Members by Songs Sang
 charts.chart.top_songs=Most Popular Songs
 charts.chart.peak_hours=Peak Hours Activity
+charts.chart.peak_hours_line=Peak Hours (8PM-2AM)
 charts.chart.source_breakdown=Song Addition Source
 charts.chart.device_breakdown=Device Types Used
 charts.col.rank=Rank

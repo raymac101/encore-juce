@@ -131,13 +131,67 @@ service cloud.firestore {
         || (isSignedIn() && isLegacyVenueAdmin(resource.data.venueId));
     }
 
-    match /venues/{venueId} {
-      allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
-      allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
+    // Append-only performance audit written by the active venue operator.
+    match /audit/{auditId} {
+      allow read: if isPlatformAdmin()
+        || isSignedIn();
+      allow create: if isPlatformAdmin()
+        || isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/userAudit/{auditId} {
+      allow read: if isPlatformAdmin()
+        || (isSignedIn() && authUid() == userId)
+        || (isSignedIn() && isLegacyVenueMember(resource.data.venueId));
+      allow create: if isPlatformAdmin()
+        || (isSignedIn() && authUid() == userId)
+        || (isSignedIn() && isLegacyVenueOperator(request.resource.data.venueId));
+      allow update: if isPlatformAdmin()
+        || (isSignedIn()
+          && isLegacyVenueOperator(resource.data.venueId)
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['id']));
+      allow delete: if false;
+    }
+
+    // TAGG mobile profiles and their nested collections. TAGG users are
+    // Firebase-authenticated; access is intentionally broad within /users
+    // to preserve the mobile app's existing profile and history workflows.
+    match /users/{userId} {
+      allow read, write: if isSignedIn();
 
       match /{document=**} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // TAGG social posts, including comments/reactions stored below a post.
+    match /posts/{postId} {
+      allow read, write: if isSignedIn();
+
+      match /{document=**} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    match /venues/{venueId} {
+      // TAGG mobile users authenticate with Firebase and address a venue by
+      // its known venueId. They need the venue document plus all operational
+      // subcollections (queue, requested, audit, emojis, membersAudit, etc.).
+      allow read: if isSignedIn();
+      allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
+
+      // Ad scheduling/rotation metadata (AdsService / AdsPage). Narrower than
+      // the generic wildcard below -- writes are Admin/Tester/EnterpriseAdmin
+      // only, matching the client-side AccessRight::Ads gate (Host does NOT
+      // see the Ads nav item, so Host shouldn't be able to write here either).
+      match /Ads/{adId} {
         allow read: if isPlatformAdmin() || isLegacyVenueMember(venueId);
-        allow write: if isPlatformAdmin() || isLegacyVenueOperator(venueId);
+        allow create, update, delete: if isPlatformAdmin() || isLegacyVenueAdmin(venueId);
+      }
+
+      match /{document=**} {
+        allow read, write: if isSignedIn();
       }
     }
 
@@ -222,7 +276,10 @@ service cloud.firestore {
     }
 
     match /{document=**} {
-      allow read, write: if false;
+      // Encore and TAGG share this Firebase project across desktop and mobile.
+      // Any Firebase-authenticated user may use the application data model;
+      // unauthenticated access remains denied.
+      allow read, write: if isSignedIn();
     }
   }
 }

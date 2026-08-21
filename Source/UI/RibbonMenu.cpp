@@ -184,6 +184,17 @@ RibbonMenu::RibbonMenu()
     setSpriteButtonIcon (bgNextButton_, "icon-next2");
     bgNextButton_.onClick = [this]() { if (onBackgroundNextTrack) onBackgroundNextTrack(); };
 
+    addAndMakeVisible (bgEnabledButton_);
+    styleActionButton (bgEnabledButton_);
+    setSpriteButtonIcon (bgEnabledButton_, "icon-toggle-on");
+    bgEnabledButton_.onClick = [this]()
+    {
+        backgroundMusicEnabled_ = ! backgroundMusicEnabled_;
+        updateControlState();
+        if (onBackgroundMusicEnabledChanged)
+            onBackgroundMusicEnabledChanged (backgroundMusicEnabled_);
+    };
+
     addAndMakeVisible (bgVolumeSlider_);
     bgVolumeSlider_.setSliderStyle (juce::Slider::LinearHorizontal);
     bgVolumeSlider_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
@@ -544,6 +555,7 @@ void RibbonMenu::resized()
         bgPrevButton_.setVisible (false);
         bgPlayPauseButton_.setVisible (false);
         bgNextButton_.setVisible (false);
+        bgEnabledButton_.setVisible (false);
         bgVolumeSlider_.setVisible (false);
         bgVolumeLabel_.setVisible (false);
         bgProgressSlider_.setVisible (false);
@@ -595,6 +607,7 @@ void RibbonMenu::resized()
     bgPrevButton_.setVisible (showBackground);
     bgPlayPauseButton_.setVisible (showBackground);
     bgNextButton_.setVisible (showBackground);
+    bgEnabledButton_.setVisible (showBackground);
     bgVolumeSlider_.setVisible (showBackground);
     bgVolumeLabel_.setVisible (expandedPanel_ == PanelId::backgroundMusic);
     bgProgressSlider_.setVisible (showBackground);
@@ -691,6 +704,8 @@ void RibbonMenu::resized()
         bgPlayPauseButton_.setBounds (bgButtonsRow.removeFromLeft (38));
         bgButtonsRow.removeFromLeft (2);
         bgNextButton_.setBounds (bgButtonsRow.removeFromLeft (30));
+        bgButtonsRow.removeFromLeft (10);
+        bgEnabledButton_.setBounds (bgButtonsRow.removeFromLeft (30));
 
         if (lyricPreview_ != nullptr)
             lyricPreview_->setBounds (lyricCardBounds.reduced (8));
@@ -744,6 +759,8 @@ void RibbonMenu::resized()
         bgPlayPauseButton_.setBounds (transportRow.removeFromLeft (120));
         transportRow.removeFromLeft (8);
         bgNextButton_.setBounds (transportRow.removeFromLeft (46));
+        transportRow.removeFromLeft (16);
+        bgEnabledButton_.setBounds (transportRow.removeFromLeft (46));
         content.removeFromTop (8);
 
         auto volumeRow = content.removeFromTop (28);
@@ -858,6 +875,12 @@ void RibbonMenu::setBackgroundState (bool playing, float volume01)
 {
     backgroundPlaying_ = playing;
     backgroundVolume01_ = juce::jlimit (0.0f, 1.0f, volume01);
+    updateControlState();
+}
+
+void RibbonMenu::setBackgroundMusicEnabled (bool enabled)
+{
+    backgroundMusicEnabled_ = enabled;
     updateControlState();
 }
 
@@ -1006,6 +1029,12 @@ void RibbonMenu::updateControlState()
     collapsePanelButton_.setButtonText (tr ("ribbon.back"));
 
     setSpriteButtonIcon (bgPlayPauseButton_, backgroundPlaying_ ? "icon-pause2" : "icon-play3");
+    setSpriteButtonIcon (bgEnabledButton_, backgroundMusicEnabled_ ? "icon-toggle-on" : "icon-toggle-off");
+    bgEnabledButton_.setTooltip (backgroundMusicEnabled_ ? tr ("ribbon.background.disable")
+                                                          : tr ("ribbon.background.enable"));
+    bgPrevButton_.setEnabled (backgroundMusicEnabled_);
+    bgPlayPauseButton_.setEnabled (backgroundMusicEnabled_);
+    bgNextButton_.setEnabled (backgroundMusicEnabled_);
     bgVolumeSlider_.setValue (backgroundVolume01_ * 10.0f, juce::dontSendNotification);
     bgVolumeLabel_.setText (tr ("ribbon.volume"), juce::dontSendNotification);
     bgTrackLabel_.setText (backgroundSongName_.isNotEmpty() ? backgroundSongName_ : tr ("ribbon.background.none"),

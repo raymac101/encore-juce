@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "main": "index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
+    "test": "node --test performanceEvents.test.js",
     "serve": "firebase emulators:start --only functions,firestore",
     "deploy": "firebase deploy --config ../firebase.json --only functions,firestore",
     "import:metadata": "node scripts/importMetadataJson.js",

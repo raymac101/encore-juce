@@ -100,6 +100,15 @@ public:
         to the Library page and start the initial song-load flow. */
     void setVenueId (const juce::String& venueId, bool requestInitialScan = false);
 
+    /** Switches straight to the Company Admin page and pushes company
+        context into NavBar / MainArea's CompanyAdminPage. Called once from
+        Main.cpp right after setVenueId() when the user picked "Manage
+        Company" on the login window's venue-select screen rather than a
+        specific venue (a venue is still loaded underneath -- MainComponent
+        has no venue-less mode -- but the host lands on the company
+        dashboard instead of Home). */
+    void openCompanyDashboard (const juce::String& companyId, const juce::String& companyRole);
+
     /** Shows a small, persistent "Update" pill in TopBar, just left of the
         avatar (VS Code-style) -- stays until the host clicks it or the app
         restarts. Called either directly from UpdateService's
@@ -214,6 +223,19 @@ private:
     // processApprovedRequest / processRejectedRequest / processDeleteRequest
     // in queue-bar.component.ts.
     void startRequestPipelineFor (const juce::String& venueId);
+
+    /** Called for every incoming TAGG request (regardless of auto-approve
+        outcome) so a song missing metadata gets enriched the moment someone
+        actually requests it, not only during a library scan. Looks up the
+        request's songId (falling back to artist/song name) in the local
+        library; on a match with no metadata, kicks off a silent background
+        ApiService::searchArtistAndSong() and -- if it finds something --
+        upserts the result into the songbook (local + Firebase Storage,
+        via LibraryPage::upsertSong(), which also refreshes Search/Home). */
+    void enrichSongMetadataIfMissing (const juce::String& songId,
+                                      const juce::String& artistHint,
+                                      const juce::String& songHint);
+
     void onIncomingNewRequest      (const ::QueueItem& item);
     void onIncomingApprovedRequest (const ::QueueItem& item);
     void onIncomingRejectedRequest (const ::QueueItem& item);

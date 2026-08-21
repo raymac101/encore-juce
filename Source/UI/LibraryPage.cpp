@@ -13,6 +13,7 @@
 #include "MenuTheme.h"
 #include "../Services/ApiService.h"
 #include "../Services/UserPreferences.h"
+#include "../Audio/KeyBpmAnalyzer.h"
 #include "../Services/GlobalProgressService.h"
 #include "../Services/SongbookStorageService.h"
 #include "../Localization/LocalizationManager.h"
@@ -36,6 +37,25 @@ static bool needsRemoteMetadata(const CdgSong& song)
     return ! song.hasMetadata();
 }
 
+// tempo/keySignature are intentionally NOT part of CdgSong::hasMetadata()
+// (Spotify can no longer supply them -- see KeyBpmAnalyzer.h), so they need
+// their own separate "still missing" check to drive the local analysis pass.
+static bool needsAudioAnalysis(const CdgSong& song)
+{
+    return song.tempo <= 0.0 || song.keySignature.empty();
+}
+
+namespace
+{
+    struct AudioAnalysisState
+    {
+        juce::Component::SafePointer<LibraryPage> owner;
+        std::vector<size_t> targets;
+        size_t position = 0;
+        int updatedCount = 0;
+    };
+}
+
 //==============================================================================
 LibraryPage::LibraryPage()
     : juce::Timer()
@@ -44,7 +64,10 @@ LibraryPage::LibraryPage()
     setOpaque(true);
     addAndMakeVisible(viewport_);
     viewport_.setViewedComponent(contentHolder_.get(), false);
-    viewport_.setScrollBarsShown(true, false);
+    // Horizontal too: contentHolder_ has a minimum width floor (see
+    // resized()) that can exceed a narrow viewport, clipping content with
+    // no way to reach it otherwise.
+    viewport_.setScrollBarsShown(true, true);
 
     auto& lm = LocalizationManager::getInstance();
 
@@ -199,6 +222,15 @@ LibraryPage::LibraryPage()
 
         if (! needsMetadata.empty())
             fetchMetadataForImportedSongs(std::move(needsMetadata), lastScanWasAppend_);
+
+        std::vector<size_t> needsAudio;
+        needsAudio.reserve(songs_.size());
+        for (size_t i = 0; i < songs_.size(); ++i)
+            if (needsAudioAnalysis(songs_[i]))
+                needsAudio.push_back(i);
+
+        if (! needsAudio.empty())
+            runLocalAudioAnalysis(std::move(needsAudio));
     };
 
     scanner_.onError = [this](juce::String err) {
@@ -213,9 +245,15 @@ LibraryPage::LibraryPage()
     // staying fixed while the text/buttons scroll past them.
     contentHolder_->onPaint = [this](juce::Graphics& g)
     {
-        auto bounds = contentHolder_->getLocalBounds();
-        auto header = bounds.reduced(20, 16).removeFromTop(128);
-        MenuTheme::drawHeaderPanel(g, header);
+        auto bounds  = contentHolder_->getLocalBounds();
+        auto reduced = bounds.reduced(20, 16);
+
+        // Header panel height tracks its actual content (title/path/progress-or-message)
+        // rather than a fixed constant, so it doesn't overlap the button row when the
+        // progress bar is hidden and the content above the buttons is shorter.
+        int headerTop    = reduced.getY();
+        int headerHeight = juce::jmax(80, initialSongLoadBtn_->getY() - 20 - headerTop);
+        MenuTheme::drawHeaderPanel(g, juce::Rectangle<int>(reduced.getX(), headerTop, reduced.getWidth(), headerHeight));
 
         // Stats panel starts below the buttons, with spacing
         int panelY = initialSongLoadBtn_->getBottom() + 20;
@@ -537,45 +575,50 @@ void LibraryPage::resized()
 void LibraryPage::layoutContent()
 {
     auto area   = contentHolder_->getLocalBounds().reduced(20, 16);
-    int  w      = area.getWidth();
+
+    // Inset all content from the decorative panel borders drawn in onPaint
+    // (which sit at the `area` edges) so text/controls never touch the box.
+    const int innerPad = 16;
+    int  contentX = area.getX() + innerPad;
+    int  w        = area.getWidth() - innerPad * 2;
     int  lineH  = 24;
     int  btnH   = 32;
     int  gap    = 12;
     int  y      = area.getY();
 
     // Title
-    titleLabel_->setBounds(area.getX(), y, w, 30);
+    titleLabel_->setBounds(contentX, y, w, 30);
     y += 34;
 
     // Path label
-    pathLabel_->setBounds(area.getX(), y, w, lineH);
+    pathLabel_->setBounds(contentX, y, w, lineH);
     y += lineH + 4;
 
     // Path editor + browse button
     int browseW = 36;
-    pathEditor_->setBounds(area.getX(), y, w - browseW - 4, lineH);
-    browseBtn_->setBounds(area.getX() + w - browseW, y, browseW, lineH);
+    pathEditor_->setBounds(contentX, y, w - browseW - 4, lineH);
+    browseBtn_->setBounds(contentX + w - browseW, y, browseW, lineH);
     y += lineH + gap;
 
     // Progress section
     if (progressBar_->isVisible())
     {
-        progressLabel_->setBounds(area.getX(), y, 100, lineH);
-        progressBar_->setBounds(area.getX() + 104, y, w - 104, lineH);
+        progressLabel_->setBounds(contentX, y, 100, lineH);
+        progressBar_->setBounds(contentX + 104, y, w - 104, lineH);
         y += lineH + 6;
-        currentSongLabel_->setBounds(area.getX(), y, w, lineH - 4);
+        currentSongLabel_->setBounds(contentX, y, w, lineH - 4);
         y += lineH + gap;
     }
 
     // Message label
-    messageLabel_->setBounds(area.getX(), y, w, lineH - 4);
+    messageLabel_->setBounds(contentX, y, w, lineH - 4);
     y += messageLabel_->isVisible() ? (lineH - 4 + 8) : 8;
 
     // Button bar (4 buttons equally spaced)
     int btnGap  = 8;
     int numBtns = 4;
     int btnW    = (w - btnGap * (numBtns - 1)) / numBtns;
-    int bx      = area.getX();
+    int bx      = contentX;
 
     initialSongLoadBtn_->setBounds(bx, y, btnW, btnH); bx += btnW + btnGap;
     addSongsBtn_       ->setBounds(bx, y, btnW, btnH); bx += btnW + btnGap;
@@ -584,8 +627,8 @@ void LibraryPage::layoutContent()
     y += btnH + gap + 8;
 
     // Stats panel — two columns
-    int statsX    = area.getX() + 16;
-    int statsW    = (w - 48) / 2;
+    int statsX    = contentX;
+    int statsW    = (w - 16) / 2;
     int statsLineH = 22;
 
     auto placeStat = [&](juce::Label* lbl, int col) {
@@ -651,7 +694,9 @@ void LibraryPage::onAddSongs()
                     onSongsAddedViaAddSongs(added);
                 }
 
+                auto newlyImportedForAudio = newlyImported;
                 fetchMetadataForImportedSongs(std::move(newlyImported), true);
+                runLocalAudioAnalysis(std::move(newlyImportedForAudio));
             }
         });
 }
@@ -1065,6 +1110,184 @@ void LibraryPage::onAddSongs()
     };
 
     scheduleNext(0);
+}
+
+//==============================================================================
+void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
+{
+    std::vector<size_t> targets;
+    targets.reserve(songIndices.size());
+    for (auto index : songIndices)
+        if (index < songs_.size() && needsAudioAnalysis(songs_[index]))
+            targets.push_back(index);
+
+    if (targets.empty())
+        return;
+
+    reportStatus("Analyzing tempo/key for " + juce::String((int) targets.size()) + " song(s)...");
+
+    auto state = std::make_shared<AudioAnalysisState>();
+    state->owner = juce::Component::SafePointer<LibraryPage>(this);
+    state->targets = std::move(targets);
+
+    auto processNext = std::make_shared<std::function<void()>>();
+    *processNext = [state, processNext]()
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        if (state->position >= state->targets.size())
+        {
+            if (state->updatedCount > 0)
+            {
+                owner->persistSongbook();
+                owner->stats_ = LibraryScanner::computeStats(owner->songs_);
+                owner->refreshStats();
+                if (owner->onSongbookChanged)
+                    owner->onSongbookChanged(owner->songs_);
+            }
+            owner->showMessage("Analyzed tempo/key for " + juce::String(state->updatedCount) + " song(s).", false);
+            return;
+        }
+
+        const size_t songIndex = state->targets[state->position++];
+        if (songIndex >= owner->songs_.size())
+        {
+            (*processNext)();
+            return;
+        }
+
+        // Copy off the message thread before handing to the background
+        // thread -- songs_ itself is only ever read/written here, never
+        // from the analysis thread, so there's no data race to reason about.
+        const CdgSong current = owner->songs_[songIndex];
+
+        juce::Thread::launch([state, processNext, songIndex, current]()
+        {
+            juce::File tempFile;
+            auto audioFile = KeyBpmAnalyzer::resolvePlayableAudioFile(current, 0, tempFile);
+
+            KeyBpmAnalyzer::Result analysis;
+            if (audioFile.existsAsFile())
+                analysis = KeyBpmAnalyzer::analyze(audioFile);
+
+            if (tempFile.existsAsFile())
+                tempFile.deleteFile();
+
+            juce::MessageManager::callAsync([state, processNext, songIndex, analysis]()
+            {
+                auto* ownerInner = state->owner.getComponent();
+                if (ownerInner != nullptr && analysis.ok && songIndex < ownerInner->songs_.size())
+                {
+                    ownerInner->songs_[songIndex].tempo = (double) analysis.bpm;
+                    ownerInner->songs_[songIndex].keySignature = analysis.keySignature.toStdString();
+                    ++state->updatedCount;
+                }
+
+                (*processNext)();
+            });
+        });
+    };
+
+    (*processNext)();
+}
+
+//==============================================================================
+namespace
+{
+    constexpr juce::int64 kMetadataSyncCooldownMs = (juce::int64) 6 * 60 * 60 * 1000; // 6 hours
+
+    // Local state for maybeSyncSharedMetadata()'s sequential shared-cache
+    // sweep -- deliberately separate from fetchMetadataForImportedSongs'
+    // State struct above, since this pass never touches Spotify/the queue
+    // and never shows scan-progress UI.
+    struct SharedSyncState
+    {
+        juce::Component::SafePointer<LibraryPage> owner;
+        std::vector<size_t> targets;
+        size_t position = 0;
+        int updatedCount = 0;
+    };
+}
+
+void LibraryPage::maybeSyncSharedMetadata()
+{
+    auto& prefs = UserPreferences::getInstance();
+    const auto now = juce::Time::currentTimeMillis();
+    const auto last = prefs.getLastMetadataSyncAtMs();
+    if (last > 0 && (now - last) < kMetadataSyncCooldownMs)
+        return;
+
+    std::vector<size_t> targets;
+    targets.reserve(songs_.size());
+    for (size_t i = 0; i < songs_.size(); ++i)
+        if (needsRemoteMetadata(songs_[i]))
+            targets.push_back(i);
+
+    // Record the attempt regardless of outcome, so a library with nothing
+    // left to fix doesn't get rechecked on every relaunch/venue-switch.
+    prefs.setLastMetadataSyncAtMs(now);
+
+    if (targets.empty())
+        return;
+
+    DBG ("[Metadata] startup sync: checking " << (int) targets.size()
+         << " song(s) missing metadata against the shared cache");
+
+    auto state = std::make_shared<SharedSyncState>();
+    state->owner = juce::Component::SafePointer<LibraryPage>(this);
+    state->targets = std::move(targets);
+
+    auto checkNext = std::make_shared<std::function<void()>>();
+    *checkNext = [state, checkNext]()
+    {
+        auto* owner = state->owner.getComponent();
+        if (owner == nullptr)
+            return;
+
+        if (state->position >= state->targets.size())
+        {
+            if (state->updatedCount > 0)
+            {
+                owner->persistSongbook();
+                owner->stats_ = LibraryScanner::computeStats(owner->songs_);
+                owner->refreshStats();
+                if (owner->onSongbookChanged)
+                    owner->onSongbookChanged(owner->songs_);
+                owner->showMessage("Synced " + juce::String(state->updatedCount)
+                                   + " song(s) with shared metadata.", false);
+            }
+            return;
+        }
+
+        const size_t songIndex = state->targets[state->position++];
+        if (songIndex >= owner->songs_.size())
+        {
+            (*checkNext)();
+            return;
+        }
+
+        const auto current = owner->songs_[songIndex];
+        ApiService::getInstance().lookupSharedMetadataOnly(current,
+            juce::String(current.artistName), juce::String(current.songName),
+            [state, checkNext, songIndex](ApiService::Result result)
+            {
+                auto* ownerInner = state->owner.getComponent();
+                if (ownerInner == nullptr)
+                    return;
+
+                if (result.ok && songIndex < ownerInner->songs_.size())
+                {
+                    ownerInner->songs_[songIndex] = result.song;
+                    ++state->updatedCount;
+                }
+
+                (*checkNext)();
+            });
+    };
+
+    (*checkNext)();
 }
 
 void LibraryPage::startFolderChooser(bool appendMode)

@@ -24,12 +24,15 @@
 #include "../Services/FirestoreClient.h"
 #include "../Services/SongbookStorageService.h"
 #include "../Services/ArchiveService.h"
+#include "../Services/AuditService.h"
+#include "../Services/PerformanceEventOutbox.h"
 #include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
 #include "../Services/IntroVoiceService.h"
 #include "../Services/SpotifyService.h"
 #include "../Services/RoomEqMeasurementService.h"
+#include "../Services/InvitationService.h"
 #include "SpriteIcon.h"
 #include "EditSingerModal.h"
 #include <cmath>
@@ -394,6 +397,7 @@ MainComponent::MainComponent()
                 bgPlayer_->setPlaylistDirectory(folder);
         }
         bgPlayer_->setTrackSelection(prefs.getBackgroundMusicSelectedTracks());
+        bgPlayer_->setEnabled(prefs.getBackgroundMusicEnabled());
     }
 
     DBG("[Startup] BackgroundMusicPlayer initialized: "
@@ -438,6 +442,10 @@ MainComponent::MainComponent()
         
         // Ensure components are visible and painted
         repaint();
+
+        // Retry any V2 audit events left pending by a previous shutdown or
+        // network outage. The worker waits for an authenticated token.
+        PerformanceEventOutbox::getInstance().start();
         
         // Start timer for periodic updates - disabled until safer implementation
         // startTimer(2000);
@@ -463,6 +471,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    PerformanceEventOutbox::getInstance().stop();
     // Close the secondary display before the audio engine goes away — its
     // timer may be trying to poll the engine's position.
     lyricWindow_.reset();
@@ -899,6 +908,11 @@ void MainComponent::setupUI()
         else if (audioEngine)
             audioEngine->stop();
 
+        // Fill the silence while nobody's singing, same as a natural
+        // song-finish or a manual pause.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
+
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(true);
 
@@ -925,6 +939,11 @@ void MainComponent::setupUI()
                 lyricWindow_->pauseVideo();
             else
                 audioEngine->pause();
+
+            // Fill the silence while paused, same as a natural song-finish
+            // or a manual stop.
+            if (bgPlayer_ != nullptr)
+                bgPlayer_->fadeIn (2.0f);
 
             if (lyricWindow_ != nullptr)
                 lyricWindow_->setForceIdleScreen(true);
@@ -1016,6 +1035,14 @@ void MainComponent::setupUI()
 
     ribbonMenu->onBackgroundPlayPause = [this](bool shouldPlay)
     {
+        // The ribbon's own transport buttons are disabled while the
+        // master toggle is off (see RibbonMenu::updateControlState), but
+        // guard here too -- background music must never start regardless
+        // of what triggers this callback. bgPlayer_->play() is already
+        // self-gated; Spotify isn't, so that branch needs its own check.
+        if (shouldPlay && ! UserPreferences::getInstance().getBackgroundMusicEnabled())
+            return;
+
         if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
         {
             if (shouldPlay) SpotifyService::getInstance().play (nullptr);
@@ -1069,6 +1096,40 @@ void MainComponent::setupUI()
         }
         if (bgPlayer_ != nullptr)
             bgPlayer_->skipToPrev();
+    };
+
+    ribbonMenu->onBackgroundMusicEnabledChanged = [this](bool enabled)
+    {
+        UserPreferences::getInstance().setBackgroundMusicEnabled (enabled);
+
+        // BackgroundMusicPlayer::setEnabled() covers the "local" source --
+        // it fades itself out immediately if disabled, and refuses to
+        // start again (from any call site) until re-enabled.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->setEnabled (enabled);
+
+        if (UserPreferences::getInstance().getBackgroundMusicSource() == "spotify")
+        {
+            if (! enabled)
+            {
+                // Spotify isn't gated inside SpotifyService the way
+                // bgPlayer_ is, so force it silent right now rather than
+                // just blocking future Play presses.
+                SpotifyService::getInstance().pause (nullptr);
+            }
+            // Deliberately not auto-resuming Spotify on re-enable: nothing
+            // in this app auto-ducks Spotify around karaoke songs today,
+            // so there's no existing "should be playing right now" rule
+            // to honour here the way there is for the local player below.
+            return;
+        }
+
+        // Local source: if re-enabling while no karaoke song is currently
+        // playing, background music should be filling that silence right
+        // now (same rule handleSongFinished()/pause/stop already apply) --
+        // don't make the host wait for the next singer just to hear it.
+        if (enabled && bgPlayer_ != nullptr && audioEngine != nullptr && ! audioEngine->isPlaying())
+            bgPlayer_->fadeIn (1.0f);
     };
 
     // Pushes the current folder path + available/selected tracks into the
@@ -1137,6 +1198,7 @@ void MainComponent::setupUI()
             return;
         auto& prefs = UserPreferences::getInstance();
         ribbonMenu->setBackgroundSource (prefs.getBackgroundMusicSource());
+        ribbonMenu->setBackgroundMusicEnabled (prefs.getBackgroundMusicEnabled());
         ribbonMenu->setSpotifyClientId (prefs.getSpotifyClientId());
 
         if (! SpotifyService::getInstance().isConnected())
@@ -2142,58 +2204,23 @@ void MainComponent::setupUI()
 
             juce::Component::SafePointer<MainComponent> safe(this);
             const auto venueId = activeVenueId_;
-            const auto venueName = mainArea != nullptr && mainArea->getSettingsPage() != nullptr
-                                 ? juce::String(mainArea->getSettingsPage()->getVenueData().name)
-                                 : juce::String();
 
-            juce::Thread::launch([safe, venueId, venueName, email = email.trim(), role = normalizeRoleForFirestore(roleLabel)]
-            {
-                auto& fc = FirestoreClient::getInstance();
-                const auto lowerEmail = email.toLowerCase();
-
-                bool hasPendingInvite = false;
-                auto invites = fc.listCollection("venueInvitations", 500);
-                for (auto& inv : invites)
-                {
-                    if (FirestoreClient::readString(inv, "venueId") != venueId)
-                        continue;
-                    if (FirestoreClient::readString(inv, "invitedUserEmail").toLowerCase() != lowerEmail)
-                        continue;
-                    if (FirestoreClient::readBool(inv, "isAccepted", false))
-                        continue;
-                    if (FirestoreClient::readBool(inv, "isExpired", false))
-                        continue;
-                    hasPendingInvite = true;
-                    break;
-                }
-
-                if (! hasPendingInvite)
-                {
-                    const auto inviterEmail = fc.getEmail();
-                    const auto now = juce::Time::getCurrentTime();
-                    const auto expiry = now + juce::RelativeTime::days(30.0);
-                    auto fields = FirestoreClient::makeFields({
-                        { "venueId",          FirestoreClient::stringValue(venueId) },
-                        { "venueName",        FirestoreClient::stringValue(venueName) },
-                        { "invitedUserEmail", FirestoreClient::stringValue(lowerEmail) },
-                        { "invitedByEmail",   FirestoreClient::stringValue(inviterEmail) },
-                        { "invitedByName",    FirestoreClient::stringValue(inviterEmail) },
-                        { "role",             FirestoreClient::stringValue(role) },
-                        { "invitationDate",   FirestoreClient::timestampValue(now) },
-                        { "expirationDate",   FirestoreClient::timestampValue(expiry) },
-                        { "isAccepted",       FirestoreClient::booleanValue(false) },
-                        { "isExpired",        FirestoreClient::booleanValue(false) }
-                    });
-                    fc.createDocument("venueInvitations", fields);
-                }
-
-                juce::MessageManager::callAsync([safe]
+            // addVenueMember (firebase/functions/venueMembers.js) does the
+            // rest server-side: if `email` already has an Encore account,
+            // it's added as an active venue member immediately (shows up
+            // next time they sign in, no accept step); if not, it leaves a
+            // pending venueInvitations doc for them to auto-claim on their
+            // first sign-up/in. Either way it also enqueues a notification
+            // email via the Firebase "Trigger Email" extension.
+            InvitationService::getInstance().addVenueMember(venueId, email.trim(), normalizeRoleForFirestore(roleLabel),
+                [safe](bool ok, bool /*activated*/, juce::String error)
                 {
                     if (safe == nullptr) return;
+                    if (! ok)
+                        DBG("[Settings] addVenueMember failed: " << error);
                     safe->refreshSettingsUsers();
                     safe->refreshSettingsInvitations();
                 });
-            });
         };
 
         sp->onChangeUserRole = [this, normalizeRoleForFirestore, findAssociationByEmail, countActivePrivilegedUsers, isPrivilegedRole](const juce::String& email, const juce::String& roleLabel)
@@ -2635,6 +2662,11 @@ void MainComponent::setupUI()
             lyricWindow_->pauseVideo();
         else if (audioEngine != nullptr)
             audioEngine->pause();
+
+        // Fill the silence while paused, same as a natural song-finish or
+        // a manual stop.
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
 
         if (lyricWindow_ != nullptr)
             lyricWindow_->setForceIdleScreen(true);
@@ -4027,6 +4059,23 @@ void MainComponent::setLargeTextMode(bool enabled)
     resized(); // Relayout with new font sizes
 }
 */
+
+//==============================================================================
+void MainComponent::openCompanyDashboard(const juce::String& companyId, const juce::String& companyRole)
+{
+    companyContextEnabled_ = true;
+    companyId_ = companyId;
+    companyRole_ = companyRole;
+
+    if (mainArea) mainArea->setCompanyContext(companyId, companyRole);
+    if (navBar)
+    {
+        navBar->setCompanyContext(true, companyRole);
+        navBar->setActivePage(NavPage::CompanyAdmin);
+    }
+    if (mainArea) mainArea->setCurrentPage(NavPage::CompanyAdmin);
+}
+
 //==============================================================================
 // Song playback
 //==============================================================================
@@ -5992,6 +6041,64 @@ void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)
         });
 }
 
+void MainComponent::enrichSongMetadataIfMissing (const juce::String& songId,
+                                                  const juce::String& artistHint,
+                                                  const juce::String& songHint)
+{
+    if (mainArea == nullptr)
+        return;
+
+    const auto& songs = mainArea->getLibrarySongs();
+    const CdgSong* match = nullptr;
+
+    if (songId.isNotEmpty())
+    {
+        for (auto& s : songs)
+        {
+            if (juce::String (s.id) == songId)
+            {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    if (match == nullptr && artistHint.isNotEmpty() && songHint.isNotEmpty())
+    {
+        for (auto& s : songs)
+        {
+            if (juce::String (s.artistName).equalsIgnoreCase (artistHint)
+             && juce::String (s.songName).equalsIgnoreCase (songHint))
+            {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    // No local match (shouldn't normally happen -- TAGG requests are chosen
+    // from this venue's own songbook) or metadata already present.
+    if (match == nullptr || match->hasMetadata())
+        return;
+
+    const CdgSong current = *match;
+    DBG ("[Metadata] auto-enriching '" << juce::String (current.artistName)
+         << " - " << juce::String (current.songName) << "' (triggered by TAGG request)");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    ApiService::getInstance().searchArtistAndSong (current,
+        juce::String (current.artistName), juce::String (current.songName),
+        [safe] (ApiService::Result result)
+        {
+            if (safe == nullptr || ! result.ok || ! result.song.hasMetadata())
+                return;
+
+            auto* lib = safe->mainArea != nullptr ? safe->mainArea->getLibraryPage() : nullptr;
+            if (lib != nullptr)
+                lib->upsertSong (result.song);
+        });
+}
+
 void MainComponent::onIncomingNewRequest (const QueueItem& item)
 {
     // Mirrors autoApproveSong() in queue-bar.component.ts.
@@ -5999,6 +6106,13 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
     const juce::String venueId = activeVenueId_;
     if (venueId.isEmpty())
         return;
+
+    // Independent of the auto-approve outcome below -- even a request that
+    // gets rejected (queue closed, too many songs, duplicate) still tells us
+    // someone wants this song, so it's worth having metadata for it.
+    enrichSongMetadataIfMissing (juce::String (item.songId),
+                                 juce::String (item.songArtist),
+                                 juce::String (item.songName));
 
     // Local desktop request — bypass checks and add straight to queue.
     if (juce::String(item.deviceId).equalsIgnoreCase("local"))
@@ -6319,6 +6433,9 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
     const auto venueId = activeVenueId_;
     if (venueId.isEmpty()) return;
 
+    const auto startedAtMs = playStartTimeMs_;
+    const auto endedAtMs = juce::Time::currentTimeMillis();
+
     VenueService::PlayHistoryEntry entry;
     entry.songId     = currentSong.id;
     entry.songName   = currentSong.songName;
@@ -6328,10 +6445,48 @@ void MainComponent::logPlayHistoryIfNeeded(bool naturalEnd)
 
     playStartTimeMs_ = 0; // Reset before the async write to prevent duplicate entries.
 
+    if (hasLocalNowPlaying_ && ! localNowPlaying_.songs.empty())
+    {
+        auto playedItem = localNowPlaying_.songs.front();
+        if (playedItem.singerName.empty())
+            playedItem.singerName = localNowPlaying_.name;
+
+        const auto kjId = FirestoreClient::getInstance().getUserId().trim();
+        if (!PerformanceEventOutbox::getInstance().enqueuePerformance(
+                currentSong, localNowPlaying_, playedItem, venueId,
+                startedAtMs, endedAtMs, naturalEnd))
+            DBG("[AuditV2] failed to enqueue qualified performance");
+
+        AuditService::getInstance().addAudit(currentSong, localNowPlaying_, playedItem,
+                                             venueId, activeVenueName_, kjId);
+    }
+    else
+    {
+        DBG("[AuditService] playback qualified but singer/item state was unavailable");
+    }
+
+    juce::Component::SafePointer<MainComponent> safe (this);
     VenueService::getInstance().addPlayHistory(entry,
-        [venueId](bool ok, juce::String err)
+        [safe, venueId](bool ok, juce::String err)
         {
-            if (! ok) DBG("[History] addPlayHistory failed: " << err);
+            if (! ok) { DBG("[History] addPlayHistory failed: " << err); return; }
+
+            // HomePage's Recently Played is otherwise only ever populated
+            // once, at venue-load time (see setVenueId) -- without this,
+            // songs played during the session never show up until the
+            // venue is reloaded. Re-fetch now that the write landed.
+            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                return;
+
+            VenueService::getInstance().getRecentlyPlayed(venueId,
+                [safe, venueId](bool ok2, std::vector<Playlist> list, juce::String err2)
+                {
+                    if (safe == nullptr || safe->activeVenueId_ != venueId)
+                        return;
+                    if (! ok2) { DBG("[History] RecentlyPlayed refresh failed: " << err2); return; }
+                    if (auto* hp = safe->mainArea ? safe->mainArea->getHomePage() : nullptr)
+                        hp->setRecentlyPlayedFromHistory(list);
+                });
         });
 }
 

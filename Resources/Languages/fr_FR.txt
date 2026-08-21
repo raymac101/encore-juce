@@ -113,6 +113,7 @@ charts.chart.members_per_night=Membres par soirée
 charts.chart.top_members=Membres par chansons chantées
 charts.chart.top_songs=Chansons les plus populaires
 charts.chart.peak_hours=Heures de pointe
+charts.chart.peak_hours_line=Heures de pointe (20h-2h)
 charts.chart.source_breakdown=Source d'ajout des chansons
 charts.chart.device_breakdown=Types d'appareils utilisés
 charts.col.rank=Rang
