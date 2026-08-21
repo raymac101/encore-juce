@@ -687,6 +687,7 @@ void LyricDisplayComponent::layoutVideoBounds()
 void LyricDisplayComponent::paint (juce::Graphics& g)
 {
     auto area = getLocalBounds();
+    const auto contentArea = getContentRenderArea (area);
     const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
 
     // Solid backdrop — matches the Angular theme's --background-color (#393939).
@@ -696,18 +697,15 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
     // skip CDG/idle painting and only draw the overlays on top.
     if (forceIdleScreen_)
     {
-        paintIdle (g, getContentRenderArea (area));
+        paintIdle (g, contentArea);
     }
     else if (! isVideoActive())
     {
         if (decoder_.isLoaded())
             paintCdg (g, getContentRenderArea (getPrimaryRenderArea (area, false)));
         else
-            paintIdle (g, getContentRenderArea (area));
+            paintIdle (g, contentArea);
     }
-
-    if (! idleMode && adPanelVisibility_ > 0.01f)
-        paintAdPanel (g, getContentRenderArea (getAdRenderArea (area, false)), true);
 
     // Keep lower-third overlays full-width in all modes.
     paintOverlay (g, area);
@@ -716,6 +714,16 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
     // never on the idle/ad screen between singers.
     if (! idleMode)
         paintEmojis (g, area);
+
+    // Paint ads last so they stay above any translucent overlays.
+    if (idleMode)
+    {
+        paintAdPanel (g, getAdRenderArea (contentArea, true), false);
+    }
+    else if (adPanelVisibility_ > 0.01f)
+    {
+        paintAdPanel (g, getContentRenderArea (getAdRenderArea (area, false)), true);
+    }
 }
 
 void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> area)
@@ -932,7 +940,6 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
         }
     }
 
-    paintAdPanel (g, right, false);
 }
 
 void LyricDisplayComponent::paintAdPanel (juce::Graphics& g, juce::Rectangle<int> area, bool addFrame)

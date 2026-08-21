@@ -8,6 +8,7 @@
 
 #include "IntroVoiceService.h"
 #include <algorithm>
+#include <array>
 
 namespace
 {
@@ -80,6 +81,26 @@ namespace
         stream.release(); // writer now owns it
         return writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
     }
+
+    juce::String sanitizeApiKey (juce::String key)
+    {
+        key = key.trim();
+
+        // Common copy/paste artifact from notes/JSON: quoted keys.
+        if (key.length() >= 2
+            && ((key.startsWithChar ('"') && key.endsWithChar ('"'))
+                || (key.startsWithChar ('\'') && key.endsWithChar ('\''))))
+        {
+            key = key.substring (1, key.length() - 1).trim();
+        }
+
+        return key;
+    }
+
+    bool looksLikeElevenLabsApiKey (const juce::String& key)
+    {
+        return key.trim().startsWithIgnoreCase ("sk_");
+    }
 }
 
 //==============================================================================
@@ -110,66 +131,94 @@ void IntroVoiceService::fetchAvailableVoices (const juce::String& apiKey,
 {
     juce::Thread::launch ([apiKey, onDone]
     {
-        const juce::URL url (kVoicesUrl);
-        int status = 0;
-        const auto headers = juce::String ("xi-api-key: ") + apiKey +
-                             "\r\nAccept: application/json" +
+        const auto key = sanitizeApiKey (apiKey);
+
+        const auto headers = juce::String ("xi-api-key: ") + key +
+                     "\r\nAccept: application/json" +
                              "\r\nUser-Agent: EncoreKaraoke/1.0";
 
-        auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                        .withConnectionTimeoutMs (kConnectionTimeoutMs)
-                        .withExtraHeaders (headers)
-                        .withHttpRequestCmd ("GET")
-                        .withStatusCode (&status);
-
-        auto stream = std::unique_ptr<juce::InputStream> (url.createInputStream (opts));
-        const auto responseBody = stream != nullptr ? stream->readEntireStreamAsString() : juce::String();
-        if (stream == nullptr || status != 200)
+        const std::array<juce::String, 4> voiceUrls =
         {
-            if (onDone)
-                juce::MessageManager::callAsync ([onDone, status, responseBody]
-                {
-                    juce::String details;
-                    if (responseBody.isNotEmpty())
-                    {
-                        details = responseBody.replaceCharacters ("\r\n", "  ").trim();
-                        if (details.length() > 180)
-                            details = details.substring (0, 180) + "...";
-                        details = " - " + details;
-                    }
+            "https://api.elevenlabs.io/v2/voices",
+            "https://api.us.elevenlabs.io/v2/voices",
+            "https://api.eu.residency.elevenlabs.io/v2/voices",
+            juce::String (kVoicesUrl)
+        };
 
-                    onDone (false, {}, "Could not reach ElevenLabs (HTTP " + juce::String (status) + ")" + details);
+        int lastStatus = 0;
+        juce::String lastResponseBody;
+        bool sawAuthFailure = false;
+
+        for (const auto& urlStr : voiceUrls)
+        {
+            const juce::URL url (urlStr);
+            int status = 0;
+
+            auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                            .withConnectionTimeoutMs (kConnectionTimeoutMs)
+                            .withExtraHeaders (headers)
+                            .withHttpRequestCmd ("GET")
+                            .withStatusCode (&status);
+
+            auto stream = std::unique_ptr<juce::InputStream> (url.createInputStream (opts));
+            const auto responseBody = stream != nullptr ? stream->readEntireStreamAsString() : juce::String();
+
+            lastStatus = status;
+            lastResponseBody = responseBody;
+
+            if (stream == nullptr || status != 200)
+            {
+                if (status == 401 || status == 403 || status == 440)
+                    sawAuthFailure = true;
+                continue;
+            }
+
+            const auto parsed = juce::JSON::parse (responseBody);
+            const auto voicesVar = parsed.getProperty ("voices", {});
+            if (! voicesVar.isArray())
+                continue;
+
+            std::vector<VoiceInfo> voices;
+            for (int i = 0; i < voicesVar.size(); ++i)
+            {
+                const auto v = voicesVar[i];
+                VoiceInfo info;
+                info.id = v.getProperty ("voice_id", "").toString();
+                info.name = v.getProperty ("name", "").toString();
+                if (info.id.isNotEmpty())
+                    voices.push_back (info);
+            }
+
+            if (onDone)
+                juce::MessageManager::callAsync ([onDone, voices]
+                {
+                    onDone (true, voices, {});
                 });
             return;
-        }
-
-        const auto parsed = juce::JSON::parse (responseBody);
-        const auto voicesVar = parsed.getProperty ("voices", {});
-        if (! voicesVar.isArray())
-        {
-            if (onDone)
-                juce::MessageManager::callAsync ([onDone]
-                {
-                    onDone (false, {}, "Unexpected response from ElevenLabs");
-                });
-            return;
-        }
-
-        std::vector<VoiceInfo> voices;
-        for (int i = 0; i < voicesVar.size(); ++i)
-        {
-            const auto v = voicesVar[i];
-            VoiceInfo info;
-            info.id = v.getProperty ("voice_id", "").toString();
-            info.name = v.getProperty ("name", "").toString();
-            if (info.id.isNotEmpty())
-                voices.push_back (info);
         }
 
         if (onDone)
-            juce::MessageManager::callAsync ([onDone, voices]
+            juce::MessageManager::callAsync ([onDone, lastStatus, lastResponseBody, sawAuthFailure, key]
             {
-                onDone (true, voices, {});
+                juce::String details;
+                if (lastResponseBody.isNotEmpty())
+                {
+                    details = lastResponseBody.replaceCharacters ("\r\n", "  ").trim();
+                    if (details.length() > 180)
+                        details = details.substring (0, 180) + "...";
+                    details = " - " + details;
+                }
+
+                juce::String prefix = sawAuthFailure
+                    ? juce::String ("ElevenLabs rejected the API key (or it is tied to a different regional endpoint).")
+                    : juce::String ("Could not reach ElevenLabs");
+
+                if (sawAuthFailure && ! looksLikeElevenLabsApiKey (key))
+                {
+                    prefix << " Use an ElevenLabs API key that starts with 'sk_' from ElevenLabs Dashboard > Profile > API Keys.";
+                }
+
+                onDone (false, {}, prefix + " (HTTP " + juce::String (lastStatus) + ")" + details);
             });
     });
 }
@@ -182,13 +231,15 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
 {
     juce::Thread::launch ([apiKey, scriptText, voiceId, introMusicFile, onDone]
     {
+        const auto key = sanitizeApiKey (apiKey);
+
         auto fail = [&onDone] (const juce::String& error)
         {
             if (onDone)
                 juce::MessageManager::callAsync ([onDone, error] { onDone (false, {}, error); });
         };
 
-        if (apiKey.isEmpty() || scriptText.isEmpty() || voiceId.isEmpty())
+        if (key.isEmpty() || scriptText.isEmpty() || voiceId.isEmpty())
         {
             fail ("Missing API key, script, or voice.");
             return;
@@ -207,7 +258,10 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
 
         const juce::URL url (juce::String (kTtsUrlPrefix) + voiceId);
         int status = 0;
-        const auto headers = juce::String ("xi-api-key: ") + apiKey + "\r\nContent-Type: application/json";
+        const auto headers = juce::String ("xi-api-key: ") + key
+                   + "\r\nContent-Type: application/json"
+                   + "\r\nAccept: application/json"
+                   + "\r\nUser-Agent: EncoreKaraoke/1.0";
 
         auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
                         .withConnectionTimeoutMs (kConnectionTimeoutMs)
@@ -219,7 +273,11 @@ void IntroVoiceService::generateAndCache (const juce::String& apiKey,
         auto stream = std::unique_ptr<juce::InputStream> (postUrl.createInputStream (opts));
         if (stream == nullptr || status != 200)
         {
-            fail ("ElevenLabs request failed (HTTP " + juce::String (status) + ")");
+            juce::String hint;
+            if ((status == 401 || status == 403 || status == 440) && ! looksLikeElevenLabsApiKey (key))
+                hint = " Use an ElevenLabs API key that starts with 'sk_'.";
+
+            fail ("ElevenLabs request failed (HTTP " + juce::String (status) + ")" + hint);
             return;
         }
 
