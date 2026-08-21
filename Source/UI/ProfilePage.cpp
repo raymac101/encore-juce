@@ -538,7 +538,10 @@ ProfilePage::ProfilePage()
     setOpaque (true);
     addAndMakeVisible (viewport_);
     viewport_.setViewedComponent (content_.get(), false);
-    viewport_.setScrollBarsShown (true, false);
+    // Horizontal too: content_ is floored at kMinContentWidth (see
+    // resized()), which can exceed a narrow viewport and clip content with
+    // no way to reach it otherwise.
+    viewport_.setScrollBarsShown (true, true);
 
     content_->onProfileSaved = [this] { if (onProfileSaved) onProfileSaved(); };
 }

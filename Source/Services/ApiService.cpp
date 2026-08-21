@@ -11,6 +11,20 @@
 
 namespace
 {
+    // Names exactly the fields CdgSong::hasMetadata() actually checks, so
+    // this list can never drift out of sync with it again -- lists only the
+    // ones that are ACTUALLY absent on `s`, not every field that could be
+    // required, so callers can tell at a glance which specific lookup came
+    // back incomplete instead of guessing.
+    juce::String describeMissingMetadataFields(const CdgSong& s)
+    {
+        juce::StringArray missing;
+        if (s.imageUrl.empty())     missing.add("image");
+        if (s.durationMS <= 0)      missing.add("duration");
+        if (s.releaseDate.empty()) missing.add("release date");
+        return missing.joinIntoString(", ");
+    }
+
     //--- Vendor disc-code suffixes stripped by fixBrackets (mirror of the
     //    Angular if/else ladder). Listed once so we only loop the array.
     const char* const kBracketCodes[] = {
@@ -302,13 +316,22 @@ ApiService::Result ApiService::tryFirestoreLookup(const CdgSong& currentSong,
     if (out.tempo > 0.0)
         out.tempo = std::round(out.tempo);
 
-    // Same rationale as tryCachedLookup: a Firestore metadataSongs doc that
-    // exists but is missing fields (this codebase's own May bootstrap-import
-    // left every doc's "genres" empty) must NOT short-circuit as a hit, or
-    // it permanently blocks the song from ever reaching a real Spotify call.
-    r.ok = out.hasMetadata();
+    // Accept a genuine Firestore hit even with some fields blank -- Spotify
+    // itself is frequently blank for certain fields (genres especially) on
+    // smaller/tribute artists, and that blank IS the real answer, not an
+    // error. The one exception is this codebase's own one-time "bootstrap-
+    // import" batch, which never even attempted several fields (see
+    // METADATA_MIGRATION_DESIGN.md) -- those entries still need one real
+    // pass through Spotify before being trusted, or every song in that
+    // batch looks "done" forever and the bulk metadata tool has nothing
+    // left to actually fetch.
+    auto source = fsString(fields, "source");
+    const bool isStaleBootstrapImport = source.equalsIgnoreCase("bootstrap-import") && ! out.hasMetadata();
+
+    r.ok = ! isStaleBootstrapImport;
     if (! r.ok)
-        r.errorMessage = "Firestore metadataSongs entry is missing required fields.";
+        r.errorMessage = "Bootstrap-imported entry still needs a real Spotify lookup (missing: "
+                        + describeMissingMetadataFields(out) + ")";
     r.fromCache = true;
     r.source = Result::Source::firestore;
     r.song = std::move(out);
@@ -459,14 +482,11 @@ ApiService::Result ApiService::tryCachedLookup(const CdgSong& currentSong,
     auto vs = arrayToStrings(getProp(entry, "version"));
     if (! vs.empty())     out.version = vs;
 
-    // A cached entry that's missing fields (e.g. genres never got backfilled
-    // by an older import) must NOT be reported as a hit -- otherwise callers
-    // (SongEditDialog, LibraryPage's batch fetcher, the bulk metadata tool)
-    // treat it as "done" forever and never fall through to Firestore/Spotify
-    // to actually complete it.
-    r.ok = out.hasMetadata();
-    if (! r.ok)
-        r.errorMessage = "Local cache entry is missing required fields.";
+    // Unlike Firestore's metadataSongs, the local cache is only ever written
+    // by our own already-accepted results (see saveSharedMetadata) -- there
+    // is no equivalent "stale bulk import" batch to distrust here, so any
+    // hit is final, blanks included.
+    r.ok = true;
     r.fromCache = true;
     r.source = Result::Source::localCache;
     r.song = std::move(out);
@@ -690,9 +710,13 @@ ApiService::Result ApiService::doSpotifyApiCall(const CdgSong& currentSong,
     if (out.tempo > 0.0)
         out.tempo = std::round(out.tempo);
 
-    r.ok = out.hasMetadata();
-    if (! r.ok)
-        r.errorMessage = "Spotify response was missing required fields (image/duration/key/tempo/release date/genres).";
+    // We already have a genuine Spotify track match by this point (a search
+    // miss returns a 404 earlier and never reaches here) -- accept whatever
+    // fields it actually returned. Spotify itself is frequently blank for
+    // certain fields (genres especially) on smaller/tribute artists; that's
+    // the real answer for this song, not an error, so record the blanks and
+    // move on rather than treating a partial-but-real hit as a failure.
+    r.ok = true;
     r.source = Result::Source::legacyApi;
     r.song = std::move(out);
     return r;

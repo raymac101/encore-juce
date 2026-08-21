@@ -7,6 +7,7 @@
 */
 
 #include "SongEditDialog.h"
+#include "BorderlessModalWindow.h"
 #include "../Services/ImageCache.h"
 #include "../Localization/LocalizationManager.h"
 
@@ -625,39 +626,6 @@ void SongEditDialog::resized()
 }
 
 //==============================================================================
-namespace
-{
-    // Borderless modal host — DocumentWindow with the title bar fully
-    // suppressed so we don't get a duplicate "Edit Song" header above the
-    // dialog's own painted title.
-    class BorderlessModalWindow : public juce::DocumentWindow
-    {
-    public:
-        BorderlessModalWindow(juce::Component* contentToOwn, juce::Colour bg)
-            : juce::DocumentWindow({}, bg, /*requiredButtons*/ 0, /*addToDesktop*/ true)
-        {
-            setUsingNativeTitleBar(false);
-            setTitleBarHeight(0);                 // hides the chrome strip
-            setDropShadowEnabled(true);
-            setResizable(false, false);
-            setContentOwned(contentToOwn, true);
-            centreAroundComponent(nullptr,
-                                  contentToOwn->getWidth(),
-                                  contentToOwn->getHeight());
-            setVisible(true);
-            enterModalState(true,
-                            juce::ModalCallbackFunction::create(
-                                [this](int) { delete this; }),
-                            /*deleteWhenDismissed*/ false);
-        }
-
-        void closeButtonPressed() override
-        {
-            exitModalState(0);
-        }
-    };
-}
-
 void SongEditDialog::launch(juce::Component* parent,
                             const CdgSong& song,
                             InitialPlaylists pls,

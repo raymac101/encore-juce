@@ -7,6 +7,7 @@
 */
 
 #include "AdEditDialog.h"
+#include "BorderlessModalWindow.h"
 #include "../Localization/LocalizationManager.h"
 
 namespace
@@ -229,7 +230,7 @@ void AdEditDialog::closeWith (AdEditResult::Action action)
 
     auto cb = onResult;
 
-    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+    if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
         dw->exitModalState (0);
 
     if (cb)
@@ -309,16 +310,7 @@ void AdEditDialog::launch (juce::Component* parent,
                            const AdMetadata& ad,
                            std::function<void (const AdEditResult&)> onResult)
 {
-    auto content = std::make_unique<AdEditDialog> (ad);
+    auto* content = new AdEditDialog (ad);
     content->onResult = std::move (onResult);
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned (content.release());
-    opts.dialogTitle                  = LocalizationManager::getInstance().getText ("ads.edit.title");
-    opts.dialogBackgroundColour       = juce::Colour (kBgColour);
-    opts.componentToCentreAround      = parent;
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar            = false;
-    opts.resizable                    = false;
-    opts.launchAsync();
+    BorderlessModalWindow::launch (parent, content, juce::Colour (kBgColour));
 }

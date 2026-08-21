@@ -319,7 +319,10 @@ AdsPage::AdsPage()
     setOpaque (true);
     addAndMakeVisible (viewport_);
     viewport_.setViewedComponent (contentHolder_.get(), false);
-    viewport_.setScrollBarsShown (true, false);
+    // Horizontal too: contentHolder_ has a minimum width floor (see
+    // resized()) that can exceed a narrow viewport, clipping content with
+    // no way to reach it otherwise.
+    viewport_.setScrollBarsShown (true, true);
 
     title_.setFont (juce::Font (juce::FontOptions().withHeight (30.0f)).boldened());
     title_.setColour (juce::Label::textColourId, kText);

@@ -8,6 +8,7 @@
 
 #include "BulkMetadataTool.h"
 #include "SongEditDialog.h"
+#include "BorderlessModalWindow.h"
 #include "../Services/AiSongNameCleanupService.h"
 #include "../Services/MetadataQuotaService.h"
 #include "../Services/LibraryScanner.h"
@@ -86,7 +87,7 @@ BulkMetadataTool::BulkMetadataTool()
     closeButton_.setColour (juce::TextButton::textColourOffId, juce::Colour (kMutedColour));
     closeButton_.onClick = [this]()
     {
-        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+        if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
             dw->exitModalState (0);
     };
     addAndMakeVisible (closeButton_);
@@ -389,18 +390,17 @@ bool BulkMetadataTool::entryHasMetadata (juce::DynamicObject* obj)
 {
     if (obj == nullptr) return false;
 
-    // Mirrors CdgSong::hasMetadata() -- keySignature/tempo are intentionally
-    // NOT required (Spotify deprecated Audio Features for this app in Nov
-    // 2024, so a live lookup can never supply them anymore).
+    // Mirrors CdgSong::hasMetadata() -- keySignature/tempo/genres are
+    // intentionally NOT required: Spotify deprecated Audio Features for this
+    // app in Nov 2024 (tempo/key can never come back from a live lookup
+    // anymore), and genres is frequently genuinely blank on Spotify's own
+    // side for smaller/tribute artists -- a real final answer, not a sign
+    // the song still needs fetching.
     const auto imageUrl    = obj->getProperty ("imageUrl").toString();
     const auto releaseDate = obj->getProperty ("releaseDate").toString();
     const int  durationMS  = (int) obj->getProperty ("durationMS");
 
-    bool hasGenres = false;
-    if (auto* arr = obj->getProperty ("genres").getArray())
-        hasGenres = ! arr->isEmpty();
-
-    return imageUrl.isNotEmpty() && releaseDate.isNotEmpty() && durationMS > 0 && hasGenres;
+    return imageUrl.isNotEmpty() && releaseDate.isNotEmpty() && durationMS > 0;
 }
 
 CdgSong BulkMetadataTool::entryToCdgSong (const juce::String& docId, juce::DynamicObject* obj)
@@ -800,15 +800,6 @@ void BulkMetadataTool::finalizeRun()
 //==============================================================================
 void BulkMetadataTool::launch (juce::Component* parent)
 {
-    auto content = std::make_unique<BulkMetadataTool>();
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned (content.release());
-    opts.dialogTitle                  = "Bulk Metadata Tool";
-    opts.dialogBackgroundColour       = juce::Colour (kBgColour);
-    opts.componentToCentreAround      = parent;
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar            = false;
-    opts.resizable                    = false;
-    opts.launchAsync();
+    auto* content = new BulkMetadataTool();
+    BorderlessModalWindow::launch (parent, content, juce::Colour (kBgColour));
 }

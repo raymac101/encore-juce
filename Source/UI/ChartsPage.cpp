@@ -483,7 +483,10 @@ ChartsPage::ChartsPage()
     setOpaque(true);
     addAndMakeVisible(viewport_);
     viewport_.setViewedComponent(contentHolder_.get(), false);
-    viewport_.setScrollBarsShown(true, false);
+    // Horizontal too: contentHolder_ has a minimum width floor (see
+    // resized()) that can exceed a narrow viewport, clipping content with
+    // no way to reach it otherwise.
+    viewport_.setScrollBarsShown(true, true);
 
     contentHolder_->addAndMakeVisible(titleLabel_);
     titleLabel_.setText(tr("charts.title", "Analytics Dashboard"), juce::dontSendNotification);

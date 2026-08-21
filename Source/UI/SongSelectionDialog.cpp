@@ -7,6 +7,7 @@
 */
 
 #include "SongSelectionDialog.h"
+#include "BorderlessModalWindow.h"
 #include "../Services/ImageCache.h"
 #include "../Localization/LocalizationManager.h"
 
@@ -202,7 +203,7 @@ void SongSelectionDialog::closeWithResult(SongSelectionResult::Action action)
     // Copy the callback locally — closing the window will delete `this`.
     auto cb = onResult;
 
-    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+    if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
         dw->exitModalState(0);
 
     // Defer the callback so it runs AFTER JUCE finishes tearing down the
@@ -323,16 +324,7 @@ void SongSelectionDialog::launch(juce::Component* parent,
                                  const CdgSong& song,
                                  std::function<void(const SongSelectionResult&)> onResult)
 {
-    auto content = std::make_unique<SongSelectionDialog>(song);
+    auto* content = new SongSelectionDialog(song);
     content->onResult = std::move(onResult);
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned(content.release());
-    opts.dialogTitle                   = LocalizationManager::getInstance().getText("song_selection.title");
-    opts.dialogBackgroundColour        = juce::Colour(kBgColour);
-    opts.componentToCentreAround       = parent;
-    opts.escapeKeyTriggersCloseButton  = true;
-    opts.useNativeTitleBar             = false;
-    opts.resizable                     = false;
-    opts.launchAsync();
+    BorderlessModalWindow::launch(parent, content, juce::Colour(kBgColour));
 }

@@ -64,7 +64,10 @@ LibraryPage::LibraryPage()
     setOpaque(true);
     addAndMakeVisible(viewport_);
     viewport_.setViewedComponent(contentHolder_.get(), false);
-    viewport_.setScrollBarsShown(true, false);
+    // Horizontal too: contentHolder_ has a minimum width floor (see
+    // resized()) that can exceed a narrow viewport, clipping content with
+    // no way to reach it otherwise.
+    viewport_.setScrollBarsShown(true, true);
 
     auto& lm = LocalizationManager::getInstance();
 

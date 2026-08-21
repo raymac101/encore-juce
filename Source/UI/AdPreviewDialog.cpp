@@ -7,6 +7,7 @@
 */
 
 #include "AdPreviewDialog.h"
+#include "BorderlessModalWindow.h"
 #include "../Services/AdMediaCache.h"
 #include "../Services/ImageCache.h"
 #include "../Localization/LocalizationManager.h"
@@ -38,7 +39,7 @@ AdPreviewDialog::AdPreviewDialog (const AdMetadata& ad)
     closeButton_.setColour (juce::TextButton::textColourOffId, juce::Colour (kMutedColour));
     closeButton_.onClick = [this]()
     {
-        if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+        if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
             dw->exitModalState (0);
     };
     addAndMakeVisible (closeButton_);
@@ -138,15 +139,6 @@ void AdPreviewDialog::resized()
 //==============================================================================
 void AdPreviewDialog::launch (juce::Component* parent, const AdMetadata& ad)
 {
-    auto content = std::make_unique<AdPreviewDialog> (ad);
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.content.setOwned (content.release());
-    opts.dialogTitle                  = LocalizationManager::getInstance().getText ("ads.preview.title");
-    opts.dialogBackgroundColour       = juce::Colour (kBgColour);
-    opts.componentToCentreAround      = parent;
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar            = false;
-    opts.resizable                    = false;
-    opts.launchAsync();
+    auto* content = new AdPreviewDialog (ad);
+    BorderlessModalWindow::launch (parent, content, juce::Colour (kBgColour));
 }

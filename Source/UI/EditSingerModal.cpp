@@ -6,6 +6,7 @@
 
 #include "EditSingerModal.h"
 #include "SpriteIcon.h"
+#include "BorderlessModalWindow.h"
 #include "../Services/SongDatabase.h"
 
 namespace
@@ -390,7 +391,7 @@ void EditSingerModal::showVersionPickerFor (int songIndex, juce::Component* anch
 
 void EditSingerModal::closeWindow()
 {
-    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+    if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
         dw->exitModalState(0);
 }
 
@@ -402,14 +403,5 @@ void EditSingerModal::show(juce::Component* parent,
 {
     auto* modal = new EditSingerModal(singerName, songs);
     modal->onApply = std::move(onApply);
-
-    juce::DialogWindow::LaunchOptions opts;
-    opts.dialogTitle             = "Edit Singer";
-    opts.dialogBackgroundColour  = juce::Colour(0xff1a1a1a);
-    opts.escapeKeyTriggersCloseButton = true;
-    opts.useNativeTitleBar       = true;
-    opts.resizable               = false;
-    opts.componentToCentreAround = parent;
-    opts.content.setOwned(modal);
-    opts.launchAsync();
+    BorderlessModalWindow::launch(parent, modal, juce::Colour(0xff1a1a1a));
 }

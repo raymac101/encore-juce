@@ -105,7 +105,11 @@ CustomerAdminPage::CustomerAdminPage()
     setOpaque (true);
     addAndMakeVisible (viewport_);
     viewport_.setViewedComponent (contentHolder_.get(), false);
-    viewport_.setScrollBarsShown (true, false);
+    // Horizontal too: contentHolder_ is floored at a minimum width (see
+    // resized()) so the two-column layout never gets squeezed illegibly
+    // narrow -- on a viewport narrower than that floor, the right column
+    // was being silently clipped with no way to reach it.
+    viewport_.setScrollBarsShown (true, true);
 
     auto& lm = LocalizationManager::getInstance();
 
