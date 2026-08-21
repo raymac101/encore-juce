@@ -111,7 +111,10 @@ void FirestoreClient::ensureFreshToken()
     }
     else
     {
-        DBG("FirestoreClient: token refresh failed, status=" << status);
+        // DBG() is compiled out in Release -- writeToLog() is not, and this
+        // is exactly the kind of silent-degradation bug that's otherwise
+        // invisible in the field (see AdsService's auth-gated calls).
+        juce::Logger::writeToLog ("FirestoreClient: token refresh failed, status=" + juce::String (status));
     }
 }
 

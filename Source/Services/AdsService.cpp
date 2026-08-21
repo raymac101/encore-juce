@@ -82,9 +82,14 @@ namespace
         const auto listJson = httpGetJson (juce::URL (listUrl), headers, &status);
         if (! (status >= 200 && status < 300) || ! listJson.isObject())
         {
-            DBG ("AdsService: list failed for prefix " + prefix + " (HTTP " + juce::String (status) + ")");
+            juce::Logger::writeToLog ("AdsService: list failed for prefix " + prefix
+                                     + " (HTTP " + juce::String (status) + ", auth="
+                                     + (token.isNotEmpty() ? "present" : "MISSING") + ")");
             return out;
         }
+
+        juce::Logger::writeToLog ("AdsService: list OK for prefix " + prefix + " -- "
+                                 + juce::String (listJson.getProperty ("items", juce::var()).size()) + " item(s)");
 
         const auto items = listJson.getProperty ("items", juce::var());
         if (auto* arr = items.getArray())
@@ -298,6 +303,10 @@ std::vector<AdMetadata> AdsService::fetchActiveAdsSync (const juce::String& venu
     for (auto& ad : all)
         if (ad.isActiveAt (now))
             active.push_back (std::move (ad));
+
+    juce::Logger::writeToLog ("AdsService: fetchActiveAdsSync(" + venueId + ") -- "
+                             + juce::String ((int) all.size()) + " total, "
+                             + juce::String ((int) active.size()) + " active right now");
 
     return active;
 }

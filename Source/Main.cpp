@@ -37,6 +37,15 @@ public:
     //==============================================================================
     void initialise (const juce::String& commandLine) override
     {
+        // DBG() is compiled out entirely in Release builds, so without this
+        // there is no way to diagnose field issues (e.g. a venue's ads not
+        // appearing) after the fact -- writeToLog() calls throughout the app
+        // are NOT compiled out and land here instead.
+        fileLogger_.reset (juce::FileLogger::createDefaultAppLogger (
+            "EncoreKaraoke", "EncoreKaraoke.log",
+            "Encore Karaoke " + ENCORE_VERSION_WITH_BUILD));
+        juce::Logger::setCurrentLogger (fileLogger_.get());
+
         // Plugin-scan child-process mode: if this invocation was launched
         // by PluginHostService::scanForPlugins() with --scan-plugin=/
         // --scan-output= arguments, do ONLY that (metadata scan of a single
@@ -100,6 +109,9 @@ public:
         loginWindow_ = nullptr;
 
         // Note: LocalizationManager will be cleaned up automatically as static instance
+
+        juce::Logger::setCurrentLogger (nullptr);
+        fileLogger_ = nullptr;
     }
 
     //==============================================================================
@@ -796,6 +808,7 @@ private:
 
     std::unique_ptr<LoginWindow> loginWindow_;
     std::unique_ptr<MainWindow>  mainWindow;
+    std::unique_ptr<juce::FileLogger> fileLogger_;
 
     // Language codes for the dynamic Local menu, index matches (menuID - cmdLanguageBase).
     juce::StringArray languageCodes_;
