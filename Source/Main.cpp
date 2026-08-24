@@ -43,7 +43,7 @@ public:
         // are NOT compiled out and land here instead.
         fileLogger_.reset (juce::FileLogger::createDefaultAppLogger (
             "EncoreKaraoke", "EncoreKaraoke.log",
-            "Encore Karaoke " + ENCORE_VERSION_WITH_BUILD));
+            juce::String ("Encore Karaoke ") + ENCORE_VERSION_WITH_BUILD));
         juce::Logger::setCurrentLogger (fileLogger_.get());
 
         // Plugin-scan child-process mode: if this invocation was launched

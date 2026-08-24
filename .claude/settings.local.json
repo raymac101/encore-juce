@@ -133,7 +133,10 @@
       "Bash(xcodebuild -project EncoreJUCE.xcodeproj -target EncoreJUCE -configuration Debug build)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(mkdir -p /private/tmp/claude-501/-Users-ray-Projects-Code-Projects-encore-juce/09c6bf86-0abb-47d1-95a5-023f280495dd/scratchpad)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(env -i /usr/bin/which brew)",
+      "Bash(/usr/bin/env -i PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\" brew --prefix rubberband)",
+      "Bash(xargs -I{} cat {})"
     ]
   }
 }
