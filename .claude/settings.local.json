@@ -141,7 +141,8 @@
       "Read(//Users/ray/Library/Logs/**)",
       "Read(//Users/ray/Library/Application Support/**)",
       "Bash(grep -i \"runQuery failed\\\\|members\" \"/Users/ray/Library/Logs/EncoreKaraoke/EncoreKaraoke.log\" 2>/dev/null | tail -20)",
-      "Read(//Users/ray/Library/Logs/EncoreKaraoke/**)"
+      "Read(//Users/ray/Library/Logs/EncoreKaraoke/**)",
+      "Bash(cmake --preset macos-debug -DJUCE_SOURCE_DIR=\"/Users/ray/Projects/Code Projects/encore-juce/JUCE\")"
     ]
   }
 }

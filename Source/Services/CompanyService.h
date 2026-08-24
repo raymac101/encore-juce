@@ -19,6 +19,7 @@
 
 #include <JuceHeader.h>
 #include "../Models/Company.h"
+#include <vector>
 
 class CompanyService
 {
@@ -49,6 +50,31 @@ public:
         (e.g. the TopBar "My Company" menu action) that isn't already
         running on a background thread. */
     void findMembershipForUser(const juce::String& userId, MembershipCallback onDone);
+
+    struct VenueMember
+    {
+        juce::String userId;
+        juce::String email;
+        juce::String stageName;
+        juce::String role;
+        juce::String status;
+    };
+    using VenueMembersCallback = std::function<void(bool ok, std::vector<VenueMember> members, juce::String error)>;
+
+    /** Lists everyone assigned to `venueId` via `user-venue-lookup` (the
+        per-venue staffing model -- distinct from company-wide
+        companies/{id}/members). Enriches each result with email/stageName
+        from `hosts/{userId}` on a best-effort basis (small N per venue).
+        Requires the Firestore rules' isCompanyAdminOfVenue() grant (or
+        platform admin) to actually return anything for a non-legacy-venue-
+        admin caller. */
+    void getVenueMembers(const juce::String& venueId, VenueMembersCallback onDone);
+
+    using RemoveVenueMemberCallback = std::function<void(bool ok, juce::String error)>;
+
+    /** Deletes `user-venue-lookup/{userId}_{venueId}`. Requires the same
+        rules grant as getVenueMembers(). */
+    void removeVenueMember(const juce::String& venueId, const juce::String& userId, RemoveVenueMemberCallback onDone);
 
 private:
     CompanyService() = default;

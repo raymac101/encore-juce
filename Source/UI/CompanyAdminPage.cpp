@@ -7,9 +7,14 @@
 
 #include "CompanyAdminPage.h"
 #include "MenuTheme.h"
+#include "EditVenueDialog.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/VenueService.h"
 #include "../Services/SongbookStorageService.h"
+#include "../Services/SongDeliveryService.h"
+#include "../Services/CompanyService.h"
+#include "../Services/InvitationService.h"
+#include "../Services/ImageCache.h"
 #include "../Firebase/FirebaseConfig.h"
 
 namespace
@@ -33,8 +38,178 @@ const juce::Colour kBorder { 0x664f78c4 };
 const juce::Colour kAccent { 0xff5a8fd8 };
 const juce::Colour kText   { 0xffffffff };
 const juce::Colour kMuted  { 0xffc7d2e0 };
+const juce::Colour kWarn   { 0xffe0a030 };
+
+constexpr int kCardWidth  = 230;
+constexpr int kCardHeight = 220;
+constexpr int kCardGap    = 12;
 }
 
+//==============================================================================
+// VenueCard
+//==============================================================================
+CompanyAdminPage::VenueCard::VenueCard()
+{
+    nameLabel_.setColour (juce::Label::textColourId, kText);
+    nameLabel_.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)).boldened());
+    addAndMakeVisible (nameLabel_);
+
+    addressLabel_.setColour (juce::Label::textColourId, kMuted);
+    addressLabel_.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+    addressLabel_.setJustificationType (juce::Justification::topLeft);
+    addAndMakeVisible (addressLabel_);
+
+    countsLabel_.setColour (juce::Label::textColourId, kMuted);
+    countsLabel_.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+    addAndMakeVisible (countsLabel_);
+
+    syncStatusLabel_.setColour (juce::Label::textColourId, kMuted);
+    syncStatusLabel_.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+    addAndMakeVisible (syncStatusLabel_);
+
+    editButton_.setColour (juce::TextButton::buttonColourId, kPanel);
+    editButton_.setColour (juce::TextButton::textColourOnId, kText);
+    editButton_.setColour (juce::TextButton::textColourOffId, kText);
+    editButton_.onClick = [this]() { if (onEdit) onEdit (venueId_); };
+    addAndMakeVisible (editButton_);
+
+    enableToggle_.setColour (juce::TextButton::buttonColourId, kPanel);
+    enableToggle_.setColour (juce::TextButton::textColourOnId, kText);
+    enableToggle_.setColour (juce::TextButton::textColourOffId, kText);
+    enableToggle_.onClick = [this]() { if (onToggleEnabled) onToggleEnabled (venueId_); };
+    addAndMakeVisible (enableToggle_);
+}
+
+void CompanyAdminPage::VenueCard::setVenue (const VenueItem& venue)
+{
+    venueId_ = juce::String (venue.id);
+    logoUrl_ = juce::String (venue.logoUrl);
+    enabled_ = venue.enabled;
+
+    nameLabel_.setText (juce::String (venue.name), juce::dontSendNotification);
+
+    juce::String address = juce::String (venue.address);
+    juce::String city = juce::String (venue.city);
+    if (city.isNotEmpty())
+        address = address.isNotEmpty() ? address + "\n" + city : city;
+    addressLabel_.setText (address, juce::dontSendNotification);
+
+    setEnabledState (enabled_);
+    refreshLogo();
+    repaint();
+}
+
+void CompanyAdminPage::VenueCard::setEnabledState (bool enabled)
+{
+    enabled_ = enabled;
+    auto& lm = LocalizationManager::getInstance();
+    enableToggle_.setButtonText (enabled_ ? lm.getText ("company_admin.venue_disable")
+                                           : lm.getText ("company_admin.venue_enable"));
+}
+
+void CompanyAdminPage::VenueCard::setCounts (const juce::String& text)
+{
+    countsLabel_.setText (text, juce::dontSendNotification);
+}
+
+void CompanyAdminPage::VenueCard::setSyncStatus (const juce::String& text, bool stale)
+{
+    syncStatusLabel_.setText (text, juce::dontSendNotification);
+    syncStatusLabel_.setColour (juce::Label::textColourId, stale ? kWarn : kMuted);
+}
+
+void CompanyAdminPage::VenueCard::setSelected (bool selected)
+{
+    if (selected_ == selected)
+        return;
+    selected_ = selected;
+    repaint();
+}
+
+void CompanyAdminPage::VenueCard::refreshLogo()
+{
+    if (logoUrl_.isEmpty())
+    {
+        logo_ = {};
+        return;
+    }
+
+    juce::Component::SafePointer<VenueCard> safe (this);
+    const auto url = logoUrl_;
+    auto img = ArtworkCache::getInstance().getOrFetch (url, [safe, url]()
+    {
+        if (safe == nullptr || safe->logoUrl_ != url)
+            return;
+        auto loaded = ArtworkCache::getInstance().getOrFetch (url, nullptr);
+        if (loaded.isValid())
+            safe->logo_ = loaded;
+        safe->repaint();
+    });
+
+    if (img.isValid())
+        logo_ = img;
+}
+
+void CompanyAdminPage::VenueCard::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+    g.setColour (kPanel);
+    g.fillRoundedRectangle (bounds, 10.0f);
+    g.setColour (selected_ ? kAccent : kBorder);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 10.0f, selected_ ? 2.0f : 1.0f);
+
+    auto logoArea = getLocalBounds().reduced (10);
+    logoArea = logoArea.removeFromTop (90);
+
+    if (logo_.isValid())
+    {
+        g.drawImageWithin (logo_, logoArea.getX(), logoArea.getY(),
+                           logoArea.getWidth(), logoArea.getHeight(),
+                           juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
+                           false);
+    }
+    else
+    {
+        g.setColour (kBorder);
+        g.drawRoundedRectangle (logoArea.toFloat(), 6.0f, 1.0f);
+        g.setColour (kMuted.withAlpha (0.5f));
+        g.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+        g.drawFittedText (LocalizationManager::getInstance().getText ("company_admin.no_logo"),
+                          logoArea, juce::Justification::centred, 1);
+    }
+
+    if (! enabled_)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (bounds, 10.0f);
+    }
+}
+
+void CompanyAdminPage::VenueCard::resized()
+{
+    auto area = getLocalBounds().reduced (10);
+    area.removeFromTop (90); // logo area, drawn in paint()
+    area.removeFromTop (4);
+
+    nameLabel_.setBounds (area.removeFromTop (18));
+    addressLabel_.setBounds (area.removeFromTop (32));
+    countsLabel_.setBounds (area.removeFromTop (16));
+    syncStatusLabel_.setBounds (area.removeFromTop (16));
+    area.removeFromTop (4);
+
+    auto buttons = area.removeFromTop (26);
+    editButton_.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2 - 4));
+    buttons.removeFromLeft (8);
+    enableToggle_.setBounds (buttons);
+}
+
+void CompanyAdminPage::VenueCard::mouseUp (const juce::MouseEvent&)
+{
+    if (onSelected)
+        onSelected (venueId_);
+}
+
+//==============================================================================
 CompanyAdminPage::CompanyAdminPage()
     : contentHolder_ (std::make_unique<ContentHolder>())
 {
@@ -60,6 +235,13 @@ CompanyAdminPage::CompanyAdminPage()
     status_.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)));
     status_.setColour (juce::Label::textColourId, kMuted);
     contentHolder_->addAndMakeVisible (status_);
+
+    editCompanyToggle_.onClick = [this]()
+    {
+        companyEditFormVisible_ = ! companyEditFormVisible_;
+        resized();
+    };
+    contentHolder_->addAndMakeVisible (editCompanyToggle_);
 
     companyInfoTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
     companyInfoTitle_.setColour (juce::Label::textColourId, kText);
@@ -162,14 +344,69 @@ CompanyAdminPage::CompanyAdminPage()
     venuesEmptyLabel_.setColour (juce::Label::textColourId, kMuted);
     contentHolder_->addAndMakeVisible (venuesEmptyLabel_);
 
+    // --- Venue staff section (populated when a card is selected) --------
+    staffTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
+    staffTitle_.setColour (juce::Label::textColourId, kText);
+    contentHolder_->addAndMakeVisible (staffTitle_);
+
+    staffEmptyLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+    staffEmptyLabel_.setColour (juce::Label::textColourId, kMuted);
+    staffEmptyLabel_.setText (lm.getText ("company_admin.staff_select_venue"), juce::dontSendNotification);
+    contentHolder_->addAndMakeVisible (staffEmptyLabel_);
+
+    staffInviteEmailEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.staff_email_hint"), kMuted);
+    staffInviteEmailEditor_.setColour (juce::TextEditor::backgroundColourId, kPanel);
+    staffInviteEmailEditor_.setColour (juce::TextEditor::textColourId, kText);
+    staffInviteEmailEditor_.setColour (juce::TextEditor::outlineColourId, kBorder);
+    staffInviteEmailEditor_.setColour (juce::TextEditor::focusedOutlineColourId, kAccent);
+    contentHolder_->addAndMakeVisible (staffInviteEmailEditor_);
+
+    staffInviteRoleBox_.addItem ("Host", 1);
+    staffInviteRoleBox_.addItem ("Admin", 2);
+    staffInviteRoleBox_.setSelectedId (1, juce::dontSendNotification);
+    staffInviteRoleBox_.setColour (juce::ComboBox::backgroundColourId, kPanel);
+    staffInviteRoleBox_.setColour (juce::ComboBox::textColourId, kText);
+    staffInviteRoleBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
+    contentHolder_->addAndMakeVisible (staffInviteRoleBox_);
+
+    staffInviteButton_.onClick = [this]() { inviteVenueStaff(); };
+    contentHolder_->addAndMakeVisible (staffInviteButton_);
+
+    // --- Song distribution section ---------------------------------------
+    songSectionTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
+    songSectionTitle_.setColour (juce::Label::textColourId, kText);
+    songSectionTitle_.setText (lm.getText ("company_admin.songs_title"), juce::dontSendNotification);
+    contentHolder_->addAndMakeVisible (songSectionTitle_);
+
+    songFileLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+    songFileLabel_.setColour (juce::Label::textColourId, kMuted);
+    songFileLabel_.setText (lm.getText ("company_admin.songs_no_file"), juce::dontSendNotification);
+    contentHolder_->addAndMakeVisible (songFileLabel_);
+
+    browseSongButton_.onClick = [this]() { chooseSongFile(); };
+    contentHolder_->addAndMakeVisible (browseSongButton_);
+
+    targetAllVenuesToggle_.setClickingTogglesState (true);
+    targetAllVenuesToggle_.setToggleState (true, juce::dontSendNotification);
+    targetAllVenuesToggle_.onClick = [this]()
+    {
+        targetAllVenues_ = targetAllVenuesToggle_.getToggleState();
+        resized();
+    };
+    contentHolder_->addAndMakeVisible (targetAllVenuesToggle_);
+
+    uploadSongButton_.onClick = [this]() { sendSongToTargetVenues(); };
+    contentHolder_->addAndMakeVisible (uploadSongButton_);
+
     for (auto* button : { &applyCompanyIdButton_, &browseLogoButton_, &clearLogoButton_, &saveCompanyButton_,
                           &saveMemberButton_, &refreshMembersButton_,
-                          &refreshButton_, &inviteButton_, &registerButton_, &uploadButton_ })
+                          &refreshButton_, &registerButton_,
+                          &staffInviteButton_, &browseSongButton_, &uploadSongButton_,
+                          &editCompanyToggle_, &targetAllVenuesToggle_ })
     {
         button->setColour (juce::TextButton::buttonColourId, kPanel);
-        button->setColour (juce::TextButton::textColourOffId, kText);
         button->setColour (juce::TextButton::textColourOnId, kText);
-        contentHolder_->addAndMakeVisible (*button);
+        button->setColour (juce::TextButton::textColourOffId, kText);
     }
 
     applyCompanyIdButton_.onClick = [this]() { applyCompanyIdFromEditor(); };
@@ -202,7 +439,8 @@ CompanyAdminPage::CompanyAdminPage()
     clearLogoButton_.onClick = [this]() { clearLogo(); };
     saveCompanyButton_.onClick = [this]() { saveCompanyInfo(); };
     refreshMembersButton_.onClick = [this]() { loadMembers(); };
-    uploadButton_.onClick = [this]() { pushSongsToCompanyVenues(); };
+    saveMemberButton_.onClick = [this]() { saveMemberMapping(); };
+    refreshButton_.onClick = [this]() { loadCompanyVenues(); pushSongsToCompanyVenues(); };
 
     configureCard (venueCard_,    lm.getText ("company_admin.venues"),    "0");
     configureCard (hostCard_,     lm.getText ("company_admin.hosts"),     "0");
@@ -212,41 +450,28 @@ CompanyAdminPage::CompanyAdminPage()
 
     // Decorative panels/cards, drawn against contentHolder_'s own bounds
     // (not CompanyAdminPage's) so they scroll along with the rest of the
-    // content.
+    // content. Uses cached *_Bottom_ member rectangles set in layoutContent()
+    // rather than re-deriving section heights independently here, since
+    // several sections now have data-dependent heights.
     contentHolder_->onPaint = [this] (juce::Graphics& g)
     {
         auto bounds = contentHolder_->getLocalBounds().reduced (22);
         MenuTheme::drawHeaderPanel (g, bounds);
 
-        auto header = bounds.removeFromTop (110);
-        MenuTheme::drawHeaderPanel (g, header);
+        MenuTheme::drawHeaderPanel (g, headerPanelBounds_);
 
-        auto infoArea = contentHolder_->getLocalBounds().reduced (28);
-        infoArea.removeFromTop (110);
-        infoArea.removeFromTop (12);
-        auto formArea = infoArea.removeFromTop (220);
-        MenuTheme::drawHeaderPanel (g, formArea);
-
-        auto preview = formArea.removeFromRight (180).reduced (16);
         g.setColour (kBorder);
-        g.drawRoundedRectangle (preview.toFloat(), 14.0f, 1.0f);
-        if (logoPreview_.isValid())
+        g.drawRoundedRectangle (headerLogoBounds_.toFloat(), 10.0f, 1.0f);
+        if (companyHeaderLogo_.isValid())
         {
-            g.drawImageWithin (logoPreview_, preview.getX() + 8, preview.getY() + 8,
-                               preview.getWidth() - 16, preview.getHeight() - 16,
+            g.drawImageWithin (companyHeaderLogo_, headerLogoBounds_.getX() + 4, headerLogoBounds_.getY() + 4,
+                               headerLogoBounds_.getWidth() - 8, headerLogoBounds_.getHeight() - 8,
                                juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize,
                                false);
         }
-        else
-        {
-            g.setColour (kMuted.withAlpha (0.55f));
-            g.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
-            g.drawFittedText (LocalizationManager::getInstance().getText ("company_admin.logo_preview"),
-                              preview.reduced (10), juce::Justification::centred, 2);
-        }
 
-        infoArea.removeFromTop (12);
-        MenuTheme::drawHeaderPanel (g, infoArea);
+        if (companyEditFormVisible_)
+            MenuTheme::drawHeaderPanel (g, editFormPanelBounds_);
 
         auto drawStatCard = [&g] (const StatCard& card)
         {
@@ -263,6 +488,8 @@ CompanyAdminPage::CompanyAdminPage()
 
     setCompanyContext ({}, {});
 }
+
+CompanyAdminPage::~CompanyAdminPage() = default;
 
 void CompanyAdminPage::updateLogoPreviewFromFile (const juce::File& file)
 {
@@ -289,13 +516,14 @@ void CompanyAdminPage::setCompanyContext (const juce::String& companyId, const j
 {
     companyId_ = companyId;
     companyRole_ = companyRole;
+    selectedVenueId_.clear();
 
     auto& lm = LocalizationManager::getInstance();
-    title_.setText (lm.getText ("page.company_admin"), juce::dontSendNotification);
+    title_.setText (companyId_.isNotEmpty() ? lm.getText ("page.company_admin") : lm.getText ("page.company_admin"), juce::dontSendNotification);
 
-    juce::String context = companyId_.isNotEmpty() ? companyId_ : lm.getText ("company_admin.no_company");
+    juce::String context = companyId_.isNotEmpty() ? juce::String() : lm.getText ("company_admin.no_company");
     if (companyRole_.isNotEmpty())
-        context << "  |  Role: " << companyRole_;
+        context << (context.isNotEmpty() ? "  |  " : "") << "Role: " << companyRole_;
     subtitle_.setText (context, juce::dontSendNotification);
 
     companyIdEditor_.setText (companyId_, juce::dontSendNotification);
@@ -303,6 +531,7 @@ void CompanyAdminPage::setCompanyContext (const juce::String& companyId, const j
     loadCompanyInfo();
     loadMembers();
     loadCompanyVenues();
+    loadVenueStaff ({});
     repaint();
 }
 
@@ -320,13 +549,9 @@ void CompanyAdminPage::applyCompanyIdFromEditor()
     if (onCompanyIdChanged)
         onCompanyIdChanged (companyId_);
 
-    juce::String context = companyId_;
-    if (companyRole_.isNotEmpty())
-        context << "  |  Role: " << companyRole_;
-    subtitle_.setText (context, juce::dontSendNotification);
-
     loadCompanyInfo();
     loadMembers();
+    loadCompanyVenues();
 }
 
 void CompanyAdminPage::loadCompanyInfo()
@@ -336,6 +561,7 @@ void CompanyAdminPage::loadCompanyInfo()
     companyLogoStoragePath_.clear();
     selectedLogoFile_ = juce::File();
     logoPreview_ = {};
+    companyHeaderLogo_ = {};
 
     if (companyId_.isEmpty())
         return;
@@ -384,6 +610,24 @@ void CompanyAdminPage::loadCompanyInfo()
                 : LocalizationManager::getInstance().getText ("company_admin.no_logo");
             safe->logoPathLabel_.setText (logoText, juce::dontSendNotification);
             safe->logoPreview_ = {};
+            safe->title_.setText (name.isNotEmpty() ? name : LocalizationManager::getInstance().getText ("page.company_admin"),
+                                  juce::dontSendNotification);
+
+            if (logoUrl.isNotEmpty())
+            {
+                auto img = ArtworkCache::getInstance().getOrFetch (logoUrl, [safe, logoUrl]()
+                {
+                    if (safe == nullptr || safe->companyLogoUrl_ != logoUrl)
+                        return;
+                    auto loaded = ArtworkCache::getInstance().getOrFetch (logoUrl, nullptr);
+                    if (loaded.isValid())
+                        safe->companyHeaderLogo_ = loaded;
+                    safe->repaint();
+                });
+                if (img.isValid())
+                    safe->companyHeaderLogo_ = img;
+            }
+
             safe->repaint();
             safe->status_.setText (exists ? LocalizationManager::getInstance().getText ("company_admin.info_loaded")
                                           : LocalizationManager::getInstance().getText ("company_admin.create_info"), juce::dontSendNotification);
@@ -393,7 +637,7 @@ void CompanyAdminPage::loadCompanyInfo()
 
 void CompanyAdminPage::loadCompanyVenues()
 {
-    venueRows_.clear();
+    venueCards_.clear();
 
     if (companyId_.isEmpty())
     {
@@ -422,61 +666,50 @@ void CompanyAdminPage::loadCompanyVenues()
                 return;
             }
 
-            safe->venueRows_.clear();
+            safe->venueCards_.clear();
             safe->venueCard_.value.setText (juce::String ((int) venues.size()), juce::dontSendNotification);
             safe->venuesEmptyLabel_.setVisible (venues.empty());
             if (venues.empty())
                 safe->venuesEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.venue_none"), juce::dontSendNotification);
 
+            // Rebuild the song-target checkboxes to match the current venue
+            // set (see layoutSongSection / sendSongToTargetVenues).
+            safe->venueTargets_.clear();
+
             for (auto& v : venues)
             {
-                auto row = std::make_unique<VenueRow>();
-                row->venueId = juce::String (v.id);
-                row->enabled = v.enabled;
-                row->name.setText (juce::String (v.name), juce::dontSendNotification);
-                row->name.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)).boldened());
-                row->name.setColour (juce::Label::textColourId, kText);
-                safe->contentHolder_->addAndMakeVisible (row->name);
-
-                auto& lmBtn = LocalizationManager::getInstance();
-                row->enableToggle.setButtonText (row->enabled ? lmBtn.getText ("company_admin.venue_disable")
-                                                               : lmBtn.getText ("company_admin.venue_enable"));
-                row->enableToggle.setColour (juce::TextButton::buttonColourId, kPanel);
-                row->enableToggle.setColour (juce::TextButton::textColourOffId, kText);
-                row->enableToggle.setColour (juce::TextButton::textColourOnId, kText);
-                const auto toggleVenueId = row->venueId;
-                row->enableToggle.onClick = [safe, toggleVenueId]() { if (safe != nullptr) safe->toggleVenueEnabled (toggleVenueId); };
-                safe->contentHolder_->addAndMakeVisible (row->enableToggle);
-
-                row->counts.setText (LocalizationManager::getInstance().getText ("company_admin.venue_loading_counts"), juce::dontSendNotification);
-                row->counts.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
-                row->counts.setColour (juce::Label::textColourId, kMuted);
-                safe->contentHolder_->addAndMakeVisible (row->counts);
-
-                row->syncStatus.setText (LocalizationManager::getInstance().getText ("company_admin.venue_sync_checking"), juce::dontSendNotification);
-                row->syncStatus.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
-                row->syncStatus.setColour (juce::Label::textColourId, kMuted);
-                safe->contentHolder_->addAndMakeVisible (row->syncStatus);
-
-                safe->venueRows_.push_back (std::move (row));
-
+                auto card = std::make_unique<VenueCard>();
+                card->setVenue (v);
                 const auto venueId = juce::String (v.id);
+                card->setSelected (venueId == safe->selectedVenueId_);
+                card->onSelected = [safe] (const juce::String& id) { if (safe != nullptr) safe->selectVenue (id); };
+                card->onEdit = [safe] (const juce::String& id) { if (safe != nullptr) safe->openEditVenueDialog (id); };
+                card->onToggleEnabled = [safe] (const juce::String& id) { if (safe != nullptr) safe->toggleVenueEnabled (id); };
+                card->setCounts (LocalizationManager::getInstance().getText ("company_admin.venue_loading_counts"));
+                card->setSyncStatus (LocalizationManager::getInstance().getText ("company_admin.venue_sync_checking"), false);
+                safe->contentHolder_->addAndMakeVisible (*card);
+                safe->venueCards_.push_back (std::move (card));
+
+                auto target = std::make_unique<VenueTargetToggle>();
+                target->venueId = venueId;
+                target->toggle.setButtonText (juce::String (v.name));
+                target->toggle.setColour (juce::ToggleButton::textColourId, kText);
+                safe->contentHolder_->addAndMakeVisible (target->toggle);
+                safe->venueTargets_.push_back (std::move (target));
+
                 VenueService::getInstance().checkExistingSessionData (venueId,
                     [safe, venueId] (bool countsOk, VenueService::SessionCounts counts, juce::String /*err*/)
                     {
                         if (safe == nullptr || ! countsOk)
                             return;
 
-                        for (auto& r : safe->venueRows_)
+                        for (auto& c : safe->venueCards_)
                         {
-                            if (r->venueId != venueId)
+                            if (c->getVenueId() != venueId)
                                 continue;
-
                             auto& lm = LocalizationManager::getInstance();
-                            r->counts.setText (
-                                lm.getText ("company_admin.venue_queue") + ": " + juce::String (counts.queueCount)
-                                + "   " + lm.getText ("company_admin.venue_requested") + ": " + juce::String (counts.requestedCount),
-                                juce::dontSendNotification);
+                            c->setCounts (lm.getText ("company_admin.venue_queue") + ": " + juce::String (counts.queueCount)
+                                + "  " + lm.getText ("company_admin.venue_requested") + ": " + juce::String (counts.requestedCount));
                             break;
                         }
                     });
@@ -497,19 +730,18 @@ void CompanyAdminPage::refreshVenueSyncStatus (const juce::String& venueId)
             if (safe == nullptr)
                 return;
 
-            for (auto& r : safe->venueRows_)
+            for (auto& c : safe->venueCards_)
             {
-                if (r->venueId != venueId)
+                if (c->getVenueId() != venueId)
                     continue;
 
                 auto& lm = LocalizationManager::getInstance();
-                r->syncStatus.setText (
+                const bool stale = error.isEmpty() && ! inSync;
+                c->setSyncStatus (
                     error.isNotEmpty() ? lm.getText ("company_admin.venue_sync_unknown")
                     : inSync           ? lm.getText ("company_admin.venue_sync_ok")
                                         : lm.getText ("company_admin.venue_sync_stale"),
-                    juce::dontSendNotification);
-                r->syncStatus.setColour (juce::Label::textColourId,
-                    (! error.isNotEmpty() && ! inSync) ? juce::Colour (0xffe0a030) : kMuted);
+                    stale);
                 break;
             }
         });
@@ -517,66 +749,29 @@ void CompanyAdminPage::refreshVenueSyncStatus (const juce::String& venueId)
 
 void CompanyAdminPage::pushSongsToCompanyVenues()
 {
-    if (venueRows_.empty())
-    {
-        setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.venue_none"));
+    if (venueCards_.empty())
         return;
-    }
 
-    // Snapshot the venue ids up front -- venueRows_ can be rebuilt from
-    // under us by a concurrent loadCompanyVenues() (e.g. Refresh clicked
-    // mid-upload), so each per-venue callback below looks itself up by id
-    // rather than trusting a captured row pointer.
     std::vector<juce::String> venueIds;
-    venueIds.reserve (venueRows_.size());
-    for (auto& r : venueRows_)
-        venueIds.push_back (r->venueId);
-
-    auto total = std::make_shared<int> ((int) venueIds.size());
-    auto done  = std::make_shared<int> (0);
-    auto ok    = std::make_shared<int> (0);
-
-    uploadButton_.setEnabled (false);
-    setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.venue_uploading"));
+    venueIds.reserve (venueCards_.size());
+    for (auto& c : venueCards_)
+        venueIds.push_back (c->getVenueId());
 
     juce::Component::SafePointer<CompanyAdminPage> safe (this);
     for (auto& venueId : venueIds)
-    {
-        SongbookStorageService::getInstance().uploadLocalSongbook (venueId,
-            [safe, venueId, total, done, ok] (bool uploadOk, juce::String /*error*/)
-            {
-                ++(*done);
-                if (uploadOk) ++(*ok);
-
-                if (safe != nullptr)
-                {
-                    safe->refreshVenueSyncStatus (venueId);
-
-                    auto& lm = LocalizationManager::getInstance();
-                    safe->setStatusMessage (lm.getText ("company_admin.venue_uploading")
-                        + " (" + juce::String (*done) + "/" + juce::String (*total) + ")");
-
-                    if (*done >= *total)
-                    {
-                        safe->uploadButton_.setEnabled (true);
-                        safe->setStatusMessage (lm.getText ("company_admin.venue_upload_done")
-                            .replace ("{ok}", juce::String (*ok)).replace ("{total}", juce::String (*total)));
-                    }
-                }
-            });
-    }
+        refreshVenueSyncStatus (venueId);
 }
 
 void CompanyAdminPage::toggleVenueEnabled (const juce::String& venueId)
 {
-    VenueRow* target = nullptr;
-    for (auto& r : venueRows_)
-        if (r->venueId == venueId) { target = r.get(); break; }
+    VenueCard* target = nullptr;
+    for (auto& c : venueCards_)
+        if (c->getVenueId() == venueId) { target = c.get(); break; }
     if (target == nullptr)
         return;
 
-    const bool nextEnabled = ! target->enabled;
-    target->enableToggle.setEnabled (false);
+    const bool nextEnabled = ! target->isVenueEnabled();
+    target->setInteractionsEnabled (false);
 
     juce::Component::SafePointer<CompanyAdminPage> safe (this);
     VenueService::getInstance().setVenueEnabled (venueId, nextEnabled,
@@ -585,27 +780,44 @@ void CompanyAdminPage::toggleVenueEnabled (const juce::String& venueId)
             if (safe == nullptr)
                 return;
 
-            for (auto& r : safe->venueRows_)
+            for (auto& c : safe->venueCards_)
             {
-                if (r->venueId != venueId)
+                if (c->getVenueId() != venueId)
                     continue;
 
-                r->enableToggle.setEnabled (true);
+                c->setInteractionsEnabled (true);
                 if (ok)
-                {
-                    r->enabled = nextEnabled;
-                    auto& lm = LocalizationManager::getInstance();
-                    r->enableToggle.setButtonText (r->enabled ? lm.getText ("company_admin.venue_disable")
-                                                               : lm.getText ("company_admin.venue_enable"));
-                }
+                    c->setEnabledState (nextEnabled);
                 else
-                {
                     safe->setStatusMessage (error.isNotEmpty() ? error
                         : LocalizationManager::getInstance().getText ("company_admin.venue_toggle_failed"));
-                }
+                c->repaint();
                 break;
             }
         });
+}
+
+void CompanyAdminPage::selectVenue (const juce::String& venueId)
+{
+    if (selectedVenueId_ == venueId)
+        return;
+
+    selectedVenueId_ = venueId;
+    for (auto& c : venueCards_)
+        c->setSelected (c->getVenueId() == venueId);
+
+    loadVenueStaff (venueId);
+    resized();
+}
+
+void CompanyAdminPage::openEditVenueDialog (const juce::String& venueId)
+{
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    EditVenueDialog::launch (this, venueId, [safe] (bool changed)
+    {
+        if (safe != nullptr && changed)
+            safe->loadCompanyVenues();
+    });
 }
 
 void CompanyAdminPage::clearLogo()
@@ -759,6 +971,7 @@ void CompanyAdminPage::saveCompanyInfo()
                     safe->onCompanyIdChanged (companyId);
                 safe->setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.saved"));
                 safe->loadMembers();
+                safe->loadCompanyInfo();
             }
             else
             {
@@ -855,6 +1068,191 @@ void CompanyAdminPage::saveMemberMapping()
     });
 }
 
+//==============================================================================
+// Venue staff
+//==============================================================================
+void CompanyAdminPage::loadVenueStaff (const juce::String& venueId)
+{
+    staffRows_.clear();
+
+    if (venueId.isEmpty())
+    {
+        staffEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.staff_select_venue"), juce::dontSendNotification);
+        staffEmptyLabel_.setVisible (true);
+        resized();
+        return;
+    }
+
+    staffEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.staff_loading"), juce::dontSendNotification);
+    staffEmptyLabel_.setVisible (true);
+    resized();
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    CompanyService::getInstance().getVenueMembers (venueId,
+        [safe, venueId] (bool ok, std::vector<CompanyService::VenueMember> members, juce::String /*error*/)
+        {
+            if (safe == nullptr || venueId != safe->selectedVenueId_)
+                return;
+
+            safe->staffRows_.clear();
+            safe->staffEmptyLabel_.setVisible (! ok || members.empty());
+            if (! ok || members.empty())
+                safe->staffEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.staff_none"), juce::dontSendNotification);
+
+            for (auto& m : members)
+            {
+                auto row = std::make_unique<StaffRow>();
+                row->userId = m.userId;
+
+                juce::String display = m.stageName.isNotEmpty() ? m.stageName
+                                       : m.email.isNotEmpty() ? m.email : m.userId;
+                row->nameLabel.setText (display, juce::dontSendNotification);
+                row->nameLabel.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)).boldened());
+                row->nameLabel.setColour (juce::Label::textColourId, kText);
+                safe->contentHolder_->addAndMakeVisible (row->nameLabel);
+
+                row->roleStatusLabel.setText (m.role + "  |  " + m.status, juce::dontSendNotification);
+                row->roleStatusLabel.setFont (juce::Font (juce::FontOptions().withHeight (11.0f)));
+                row->roleStatusLabel.setColour (juce::Label::textColourId, kMuted);
+                safe->contentHolder_->addAndMakeVisible (row->roleStatusLabel);
+
+                row->removeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff7f1d1d));
+                row->removeButton.setColour (juce::TextButton::textColourOnId, kText);
+                row->removeButton.setColour (juce::TextButton::textColourOffId, kText);
+                const auto userId = m.userId;
+                row->removeButton.onClick = [safe, venueId, userId]() { if (safe != nullptr) safe->removeVenueStaffMember (venueId, userId); };
+                safe->contentHolder_->addAndMakeVisible (row->removeButton);
+
+                safe->staffRows_.push_back (std::move (row));
+            }
+
+            safe->resized();
+        });
+}
+
+void CompanyAdminPage::inviteVenueStaff()
+{
+    if (selectedVenueId_.isEmpty())
+        return;
+
+    const auto email = staffInviteEmailEditor_.getText().trim();
+    if (email.isEmpty())
+    {
+        setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.staff_email_required"));
+        return;
+    }
+
+    const auto role = staffInviteRoleBox_.getText().trim();
+    const auto venueId = selectedVenueId_;
+    setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.staff_inviting"));
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    InvitationService::getInstance().addVenueMember (venueId, email, role,
+        [safe, venueId] (bool ok, bool /*activated*/, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->setStatusMessage (ok ? LocalizationManager::getInstance().getText ("company_admin.staff_invited")
+                : (error.isNotEmpty() ? error : LocalizationManager::getInstance().getText ("company_admin.staff_invite_failed")));
+
+            if (ok)
+            {
+                safe->staffInviteEmailEditor_.clear();
+                safe->loadVenueStaff (venueId);
+            }
+        });
+}
+
+void CompanyAdminPage::removeVenueStaffMember (const juce::String& venueId, const juce::String& userId)
+{
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    CompanyService::getInstance().removeVenueMember (venueId, userId,
+        [safe, venueId] (bool ok, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            if (ok)
+                safe->loadVenueStaff (venueId);
+            else
+                safe->setStatusMessage (error.isNotEmpty() ? error
+                    : LocalizationManager::getInstance().getText ("company_admin.staff_remove_failed"));
+        });
+}
+
+//==============================================================================
+// Song distribution
+//==============================================================================
+void CompanyAdminPage::chooseSongFile()
+{
+    fileChooser_ = std::make_unique<juce::FileChooser> (
+        LocalizationManager::getInstance().getText ("company_admin.songs_choose_file"),
+        juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+        "*.cdg;*.zip;*.mp4;*.m4a");
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [safe] (const juce::FileChooser& chooser)
+        {
+            if (safe == nullptr)
+                return;
+
+            auto file = chooser.getResult();
+            if (! file.existsAsFile())
+                return;
+
+            safe->selectedSongFile_ = file;
+            safe->songFileLabel_.setText (file.getFileName(), juce::dontSendNotification);
+        });
+}
+
+void CompanyAdminPage::sendSongToTargetVenues()
+{
+    if (! selectedSongFile_.existsAsFile())
+    {
+        setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.songs_no_file"));
+        return;
+    }
+
+    std::vector<juce::String> targetVenueIds;
+    if (targetAllVenues_)
+    {
+        for (auto& t : venueTargets_)
+            targetVenueIds.push_back (t->venueId);
+    }
+    else
+    {
+        for (auto& t : venueTargets_)
+            if (t->toggle.getToggleState())
+                targetVenueIds.push_back (t->venueId);
+    }
+
+    if (targetVenueIds.empty())
+    {
+        setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.songs_no_target"));
+        return;
+    }
+
+    uploadSongButton_.setEnabled (false);
+    setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.songs_uploading"));
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    SongDeliveryService::getInstance().uploadSongToVenues (selectedSongFile_, targetVenueIds,
+        [safe] (bool ok, int succeeded, int total, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->uploadSongButton_.setEnabled (true);
+            auto& lm = LocalizationManager::getInstance();
+            safe->setStatusMessage (ok
+                ? lm.getText ("company_admin.songs_upload_done").replace ("{ok}", juce::String (succeeded)).replace ("{total}", juce::String (total))
+                : (error.isNotEmpty() ? error : lm.getText ("company_admin.songs_upload_failed")));
+        });
+}
+
+//==============================================================================
 void CompanyAdminPage::setSummary (const Summary& summary)
 {
     summary_ = summary;
@@ -874,11 +1272,11 @@ void CompanyAdminPage::setStatusMessage (const juce::String& message)
 void CompanyAdminPage::updateAllText()
 {
     auto& lm = LocalizationManager::getInstance();
-    title_.setText (lm.getText ("page.company_admin"), juce::dontSendNotification);
-    subtitle_.setText ((companyId_.isNotEmpty() ? companyId_ : lm.getText ("company_admin.no_company"))
+    subtitle_.setText ((companyId_.isNotEmpty() ? juce::String() : lm.getText ("company_admin.no_company"))
                        + (companyRole_.isNotEmpty() ? "  |  Role: " + companyRole_ : ""),
                        juce::dontSendNotification);
     status_.setText (statusMessage_, juce::dontSendNotification);
+    editCompanyToggle_.setButtonText (lm.getText ("company_admin.edit_company_toggle"));
     companyInfoTitle_.setText (lm.getText ("company_admin.edit_info"), juce::dontSendNotification);
     companyIdLabel_.setText (lm.getText ("company_admin.company_id") + ": " + companyId_, juce::dontSendNotification);
     companyIdEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.company_id_hint"), kMuted);
@@ -904,12 +1302,17 @@ void CompanyAdminPage::updateAllText()
     saveMemberButton_.setButtonText (lm.getText ("company_admin.member_save"));
     refreshMembersButton_.setButtonText (lm.getText ("company_admin.member_refresh"));
     venuesTitle_.setText (lm.getText ("company_admin.venues_title"), juce::dontSendNotification);
-    if (venueRows_.empty())
+    if (venueCards_.empty())
         venuesEmptyLabel_.setText (lm.getText ("company_admin.venue_none"), juce::dontSendNotification);
     refreshButton_.setButtonText (lm.getText ("company_admin.refresh"));
-    inviteButton_.setButtonText (lm.getText ("company_admin.invite_host"));
     registerButton_.setButtonText (lm.getText ("company_admin.register_device"));
-    uploadButton_.setButtonText (lm.getText ("company_admin.upload_songs"));
+    staffTitle_.setText (lm.getText ("company_admin.staff_title"), juce::dontSendNotification);
+    staffInviteEmailEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.staff_email_hint"), kMuted);
+    staffInviteButton_.setButtonText (lm.getText ("company_admin.staff_add"));
+    songSectionTitle_.setText (lm.getText ("company_admin.songs_title"), juce::dontSendNotification);
+    browseSongButton_.setButtonText (lm.getText ("company_admin.songs_choose_file"));
+    targetAllVenuesToggle_.setButtonText (lm.getText ("company_admin.songs_all_venues"));
+    uploadSongButton_.setButtonText (lm.getText ("company_admin.songs_send"));
 }
 
 void CompanyAdminPage::paint (juce::Graphics& g)
@@ -917,9 +1320,9 @@ void CompanyAdminPage::paint (juce::Graphics& g)
     MenuTheme::drawPageBackground (g, getLocalBounds());
 }
 
-void CompanyAdminPage::layoutVenueRows (juce::Rectangle<int> area)
+void CompanyAdminPage::layoutVenueCards (juce::Rectangle<int> area)
 {
-    if (venueRows_.empty())
+    if (venueCards_.empty())
     {
         venuesEmptyLabel_.setVisible (true);
         venuesEmptyLabel_.setBounds (area.removeFromTop (24));
@@ -927,16 +1330,63 @@ void CompanyAdminPage::layoutVenueRows (juce::Rectangle<int> area)
     }
 
     venuesEmptyLabel_.setVisible (false);
-    for (auto& row : venueRows_)
+    int x = 0, y = 0;
+    for (auto& card : venueCards_)
     {
-        auto rowArea = area.removeFromTop (56);
-        auto nameRow = rowArea.removeFromTop (20);
-        row->enableToggle.setBounds (nameRow.removeFromRight (110));
-        nameRow.removeFromRight (8);
-        row->name.setBounds (nameRow);
-        auto detailRow = rowArea.removeFromTop (18);
-        row->counts.setBounds (detailRow.removeFromLeft (detailRow.getWidth() * 2 / 3));
-        row->syncStatus.setBounds (detailRow);
+        card->setBounds (area.getX() + x, area.getY() + y, kCardWidth, kCardHeight);
+        x += kCardWidth + kCardGap;
+        if (x + kCardWidth > area.getWidth())
+        {
+            x = 0;
+            y += kCardHeight + kCardGap;
+        }
+    }
+}
+
+void CompanyAdminPage::layoutStaffRows (juce::Rectangle<int> area)
+{
+    if (staffRows_.empty())
+    {
+        staffEmptyLabel_.setVisible (true);
+        staffEmptyLabel_.setBounds (area.removeFromTop (24));
+        return;
+    }
+
+    staffEmptyLabel_.setVisible (false);
+    for (auto& row : staffRows_)
+    {
+        auto rowArea = area.removeFromTop (36);
+        row->removeButton.setBounds (rowArea.removeFromRight (90));
+        rowArea.removeFromRight (8);
+        row->nameLabel.setBounds (rowArea.removeFromTop (18));
+        row->roleStatusLabel.setBounds (rowArea);
+    }
+}
+
+void CompanyAdminPage::layoutSongSection (juce::Rectangle<int> area)
+{
+    songFileLabel_.setBounds (area.removeFromTop (20));
+    auto pickerRow = area.removeFromTop (28);
+    browseSongButton_.setBounds (pickerRow.removeFromLeft (170));
+    pickerRow.removeFromLeft (8);
+    uploadSongButton_.setBounds (pickerRow.removeFromLeft (150));
+    area.removeFromTop (6);
+    targetAllVenuesToggle_.setBounds (area.removeFromTop (22));
+    area.removeFromTop (4);
+
+    if (targetAllVenues_)
+        return;
+
+    const int cols = juce::jmax (1, area.getWidth() / 180);
+    int col = 0;
+    juce::Rectangle<int> row;
+    for (auto& t : venueTargets_)
+    {
+        if (col == 0)
+            row = area.removeFromTop (22);
+        t->toggle.setBounds (row.removeFromLeft (180));
+        if (++col >= cols)
+            col = 0;
     }
 }
 
@@ -970,50 +1420,109 @@ void CompanyAdminPage::resized()
 void CompanyAdminPage::layoutContent()
 {
     auto bounds = contentHolder_->getLocalBounds().reduced (28);
+
+    // --- Header: logo left, name in title font, right --------------------
     auto header = bounds.removeFromTop (110).reduced (18, 16);
+    headerPanelBounds_ = header.expanded (18, 16);
 
-    title_.setBounds (header.removeFromTop (38));
-    subtitle_.setBounds (header.removeFromTop (24));
-    status_.setBounds (header.removeFromTop (20));
+    auto logoArea = header.removeFromLeft (78);
+    headerLogoBounds_ = logoArea.withHeight (78);
+    header.removeFromLeft (16);
 
-    auto buttonsRow = header.removeFromTop (34);
-    refreshButton_.setBounds (buttonsRow.removeFromLeft (120));
-    buttonsRow.removeFromLeft (8);
-    inviteButton_.setBounds (buttonsRow.removeFromLeft (120));
+    title_.setBounds (header.removeFromTop (36));
+    subtitle_.setBounds (header.removeFromTop (22));
+    status_.setBounds (header.removeFromTop (18));
+
+    auto buttonsRow = header.removeFromTop (28);
+    refreshButton_.setBounds (buttonsRow.removeFromLeft (100));
     buttonsRow.removeFromLeft (8);
     registerButton_.setBounds (buttonsRow.removeFromLeft (140));
     buttonsRow.removeFromLeft (8);
-    uploadButton_.setBounds (buttonsRow.removeFromLeft (130));
+    editCompanyToggle_.setBounds (buttonsRow.removeFromLeft (150));
 
     bounds.removeFromTop (16);
 
-    auto formArea = bounds.removeFromTop (220);
-    auto _previewSpace = formArea.removeFromRight (180);
-    juce::ignoreUnused (_previewSpace);
+    // --- Edit Company Info (collapsed by default) -------------------------
+    if (companyEditFormVisible_)
+    {
+        auto formArea = bounds.removeFromTop (220);
+        editFormPanelBounds_ = formArea;
+        auto preview = formArea.removeFromRight (180).reduced (16);
+        juce::ignoreUnused (preview);
 
-    companyInfoTitle_.setBounds (formArea.removeFromTop (24));
-    companyIdEditor_.setBounds (formArea.removeFromTop (28).reduced (0, 2));
-    formArea.removeFromTop (4);
-    applyCompanyIdButton_.setBounds (formArea.removeFromTop (28).withWidth (180));
-    formArea.removeFromTop (4);
-    companyIdLabel_.setBounds (formArea.removeFromTop (20));
-    formArea.removeFromTop (6);
-    companyNameLabel_.setBounds (formArea.removeFromTop (20));
-    companyNameEditor_.setBounds (formArea.removeFromTop (28).reduced (0, 2));
-    formArea.removeFromTop (4);
-    companyStatusLabel_.setBounds (formArea.removeFromTop (20));
-    companyStatusBox_.setBounds (formArea.removeFromTop (28).withWidth (160));
-    formArea.removeFromTop (6);
-    logoLabel_.setBounds (formArea.removeFromTop (20));
-    logoPathLabel_.setBounds (formArea.removeFromTop (22));
-    auto logoButtons = formArea.removeFromTop (30);
-    browseLogoButton_.setBounds (logoButtons.removeFromLeft (120));
-    logoButtons.removeFromLeft (8);
-    clearLogoButton_.setBounds (logoButtons.removeFromLeft (100));
-    logoButtons.removeFromLeft (8);
-    saveCompanyButton_.setBounds (logoButtons.removeFromLeft (150));
+        companyInfoTitle_.setBounds (formArea.removeFromTop (24));
+        companyIdEditor_.setBounds (formArea.removeFromTop (28).reduced (0, 2));
+        formArea.removeFromTop (4);
+        applyCompanyIdButton_.setBounds (formArea.removeFromTop (28).withWidth (180));
+        formArea.removeFromTop (4);
+        companyIdLabel_.setBounds (formArea.removeFromTop (20));
+        formArea.removeFromTop (6);
+        companyNameLabel_.setBounds (formArea.removeFromTop (20));
+        companyNameEditor_.setBounds (formArea.removeFromTop (28).reduced (0, 2));
+        formArea.removeFromTop (4);
+        companyStatusLabel_.setBounds (formArea.removeFromTop (20));
+        companyStatusBox_.setBounds (formArea.removeFromTop (28).withWidth (160));
+        formArea.removeFromTop (6);
+        logoLabel_.setBounds (formArea.removeFromTop (20));
+        logoPathLabel_.setBounds (formArea.removeFromTop (22));
+        auto logoButtons = formArea.removeFromTop (30);
+        browseLogoButton_.setBounds (logoButtons.removeFromLeft (120));
+        logoButtons.removeFromLeft (8);
+        clearLogoButton_.setBounds (logoButtons.removeFromLeft (100));
+        logoButtons.removeFromLeft (8);
+        saveCompanyButton_.setBounds (logoButtons.removeFromLeft (150));
+
+        bounds.removeFromTop (12);
+    }
+
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &companyInfoTitle_, &companyIdEditor_, &applyCompanyIdButton_, &companyIdLabel_,
+                     &companyNameLabel_, &companyNameEditor_, &companyStatusLabel_, &companyStatusBox_,
+                     &logoLabel_, &logoPathLabel_, &browseLogoButton_, &clearLogoButton_, &saveCompanyButton_ })
+        c->setVisible (companyEditFormVisible_);
+
+    // --- Venue cards -------------------------------------------------------
+    venuesTitle_.setBounds (bounds.removeFromTop (22));
+    bounds.removeFromTop (4);
+    const int cardColumns = juce::jmax (1, (bounds.getWidth() + kCardGap) / (kCardWidth + kCardGap));
+    const int cardRows = venueCards_.empty() ? 1
+        : (int) ((venueCards_.size() + (size_t) cardColumns - 1) / (size_t) cardColumns);
+    const int venuesAreaHeight = venueCards_.empty() ? 30
+        : cardRows * (kCardHeight + kCardGap);
+    auto venuesArea = bounds.removeFromTop (venuesAreaHeight);
+    layoutVenueCards (venuesArea);
+
+    bounds.removeFromTop (16);
+
+    // --- Venue staff (selected card) ---------------------------------------
+    staffTitle_.setBounds (bounds.removeFromTop (22));
+    bounds.removeFromTop (4);
+    const int staffAreaHeight = 40 + (staffRows_.empty() ? 24 : (int) staffRows_.size() * 36);
+    auto staffArea = bounds.removeFromTop (staffAreaHeight).reduced (12, 0);
+    layoutStaffRows (staffArea);
+    auto inviteRow = bounds.removeFromTop (34).reduced (12, 0);
+    staffInviteEmailEditor_.setBounds (inviteRow.removeFromLeft (240));
+    inviteRow.removeFromLeft (8);
+    staffInviteRoleBox_.setBounds (inviteRow.removeFromLeft (120));
+    inviteRow.removeFromLeft (8);
+    staffInviteButton_.setBounds (inviteRow.removeFromLeft (100));
+    staffInviteEmailEditor_.setVisible (selectedVenueId_.isNotEmpty());
+    staffInviteRoleBox_.setVisible (selectedVenueId_.isNotEmpty());
+    staffInviteButton_.setVisible (selectedVenueId_.isNotEmpty());
+
+    bounds.removeFromTop (16);
+
+    // --- Song distribution ---------------------------------------------------
+    songSectionTitle_.setBounds (bounds.removeFromTop (22));
+    bounds.removeFromTop (4);
+    const int targetRows = targetAllVenues_ ? 0
+        : (venueTargets_.empty() ? 0 : ((int) venueTargets_.size() + juce::jmax (1, bounds.getWidth() / 180) - 1) / juce::jmax (1, bounds.getWidth() / 180));
+    const int songAreaHeight = 96 + targetRows * 22;
+    auto songArea = bounds.removeFromTop (songAreaHeight).reduced (12, 0);
+    layoutSongSection (songArea);
 
     bounds.removeFromTop (12);
+
+    // --- Members (company-wide) ---------------------------------------------
     auto membersArea = bounds.removeFromTop (160).reduced (12);
     membersTitle_.setBounds (membersArea.removeFromTop (22));
     membersArea.removeFromTop (4);
@@ -1038,13 +1547,6 @@ void CompanyAdminPage::layoutContent()
     refreshMembersButton_.setBounds (memberButtons.removeFromLeft (140));
     membersArea.removeFromTop (8);
     membersListLabel_.setBounds (membersArea);
-
-    bounds.removeFromTop (12);
-    const int venuesAreaHeight = 30 + (! venueRows_.empty() ? (int) venueRows_.size() * 56 : 24);
-    auto venuesArea = bounds.removeFromTop (venuesAreaHeight).reduced (12, 0);
-    venuesTitle_.setBounds (venuesArea.removeFromTop (22));
-    venuesArea.removeFromTop (4);
-    layoutVenueRows (venuesArea);
 
     bounds.removeFromTop (12);
     // Fixed height, not "whatever's left" -- the content now grows to fit

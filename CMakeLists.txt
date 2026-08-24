@@ -113,6 +113,7 @@ target_sources(EncoreJUCE
         Source/UI/SettingsPage.cpp
         Source/UI/CompanyAdminPage.cpp
         Source/UI/CreateCompanyDialog.cpp
+        Source/UI/EditVenueDialog.cpp
         Source/UI/CustomerAdminPage.cpp
         Source/UI/BulkMetadataTool.cpp
         Source/UI/ProfilePage.cpp
@@ -137,6 +138,7 @@ target_sources(EncoreJUCE
         Source/Services/WaveformGenerator.cpp
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
+        Source/Services/SongDeliveryService.cpp
         Source/Services/AdsService.cpp
         Source/Services/AiSongNameCleanupService.cpp
         Source/Services/MetadataQuotaService.cpp

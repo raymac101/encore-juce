@@ -336,6 +336,12 @@ private:
         currently looks live on this venue. */
     void runSongbookSyncCheck(const juce::String& venueId);
 
+    /** Checks venues/<venueId>/pendingSongs (SongDeliveryService) for songs
+        a company admin has pushed to this venue but that haven't been
+        downloaded yet, and offers to fetch them. Runs once per venue load,
+        alongside the songbook sync check above. */
+    void checkPendingSongDeliveries(const juce::String& venueId);
+
     /** Write a play-history entry if the song played long enough (>30 s).
         Pass `naturalEnd=true` when the audio finished on its own (always
         qualifies); `false` when the KJ skipped — checked against the 30 s

@@ -33,6 +33,7 @@
 #include "../Services/SpotifyService.h"
 #include "../Services/RoomEqMeasurementService.h"
 #include "../Services/CompanyService.h"
+#include "../Services/SongDeliveryService.h"
 #include "CreateCompanyDialog.h"
 #include "../Services/InvitationService.h"
 #include "SpriteIcon.h"
@@ -3649,6 +3650,47 @@ void MainComponent::runSongbookSyncCheck(const juce::String& venueId)
         });
 }
 
+void MainComponent::checkPendingSongDeliveries(const juce::String& venueId)
+{
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+
+    SongDeliveryService::getInstance().getPendingSongs(venueId,
+        [safe, venueId](bool ok, std::vector<SongDeliveryService::PendingSong> songs, juce::String /*error*/)
+        {
+            if (safe == nullptr || safe->activeVenueId_ != venueId || ! ok || songs.empty())
+                return;
+
+            auto& lm = LocalizationManager::getInstance();
+            juce::AlertWindow::showOkCancelBox(
+                juce::AlertWindow::InfoIcon,
+                lm.getText("songs.pending_title"),
+                juce::String(songs.size()) + " " + lm.getText("songs.pending_body"),
+                lm.getText("songs.pending_download"),
+                lm.getText("songs.pending_dismiss"),
+                safe.getComponent(),
+                juce::ModalCallbackFunction::create([safe, venueId, songs](int result)
+                {
+                    if (safe == nullptr || result != 1 || safe->activeVenueId_ != venueId)
+                        return;
+
+                    safe->showMaintenanceToast(LocalizationManager::getInstance().getText("songs.pending_downloading_toast"));
+
+                    for (auto& s : songs)
+                    {
+                        SongDeliveryService::getInstance().downloadAndInstall(venueId, s,
+                            [safe](bool downloadOk, juce::String downloadError)
+                            {
+                                if (safe == nullptr) return;
+                                auto& lm2 = LocalizationManager::getInstance();
+                                safe->showMaintenanceToast(downloadOk
+                                    ? lm2.getText("songs.pending_downloaded_toast")
+                                    : lm2.getText("songs.pending_download_failed_toast") + " " + downloadError);
+                            });
+                    }
+                }));
+        });
+}
+
 void MainComponent::showUpdateAvailableBanner(const juce::String& version)
 {
     if (topBar != nullptr)
@@ -5417,6 +5459,8 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
                         }
                     });
             }
+
+            safe->checkPendingSongDeliveries (venueId);
 
             safe->refreshSettingsUsers();
             safe->refreshSettingsInvitations();

@@ -40,6 +40,17 @@ service cloud.firestore {
       return request.resource.data.companyId == companyId;
     }
 
+    // Lets a company_admin manage venue-level staffing (user-venue-lookup)
+    // for any venue their company owns, even when they have no personal
+    // legacy user-venue-lookup row of their own for that venue (e.g. a
+    // venue run day-to-day by a hired KJ, not the owner). Additive to
+    // isLegacyVenueAdmin below, not a replacement for it.
+    function isCompanyAdminOfVenue(venueId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/venues/$(venueId))
+        && isCompanyAdmin(get(/databases/$(database)/documents/venues/$(venueId)).data.companyId);
+    }
+
     function legacyVenueLookupPath(venueId) {
       return /databases/$(database)/documents/user-venue-lookup/$(authUid() + "_" + venueId);
     }
@@ -93,7 +104,8 @@ service cloud.firestore {
     match /user-venue-lookup/{lookupId} {
       allow read: if isPlatformAdmin()
         || (isSignedIn() && lookupId == authUid() + "_" + resource.data.venueId)
-        || (isSignedIn() && resource.data.userId == authUid());
+        || (isSignedIn() && resource.data.userId == authUid())
+        || isCompanyAdminOfVenue(resource.data.venueId);
 
       allow update: if isPlatformAdmin()
         || (isSignedIn()
@@ -102,7 +114,11 @@ service cloud.firestore {
           && request.resource.data.venueId == resource.data.venueId
           && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastActive']));
 
-      allow create, delete: if isPlatformAdmin();
+      allow create: if isPlatformAdmin()
+        || isCompanyAdminOfVenue(request.resource.data.venueId);
+
+      allow delete: if isPlatformAdmin()
+        || isCompanyAdminOfVenue(resource.data.venueId);
     }
 
     match /venueInvitations/{invitationId} {

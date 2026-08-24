@@ -62,6 +62,20 @@ namespace
             q->setProperty("where", where);
         return juce::var(q.get());
     }
+
+    juce::var buildQuery(const juce::String& collection, juce::var where)
+    {
+        juce::DynamicObject::Ptr fc = new juce::DynamicObject();
+        fc->setProperty("collectionId", collection);
+        juce::Array<juce::var> from;
+        from.add(juce::var(fc.get()));
+
+        juce::DynamicObject::Ptr q = new juce::DynamicObject();
+        q->setProperty("from", from);
+        if (! where.isVoid())
+            q->setProperty("where", where);
+        return juce::var(q.get());
+    }
 }
 
 //==============================================================================
@@ -161,5 +175,63 @@ void CompanyService::findMembershipForUser(const juce::String& userId, Membershi
         if (onDone)
             juce::MessageManager::callAsync([onDone, found, companyId, role]()
                 { onDone(found, companyId, role); });
+    });
+}
+
+void CompanyService::getVenueMembers(const juce::String& venueId, VenueMembersCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(true, {}, {}); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, onDone = std::move(onDone)]()
+    {
+        auto query = buildQuery("user-venue-lookup",
+            stringFilter("venueId", "EQUAL", FC::stringValue(venueId)));
+        auto docs = FC::getInstance().runQuery({}, query);
+
+        std::vector<VenueMember> out;
+        out.reserve((size_t) docs.size());
+        for (auto& d : docs)
+        {
+            VenueMember m;
+            m.userId = FC::readString(d, "userId");
+            m.role   = FC::readString(d, "role");
+            m.status = FC::readString(d, "status");
+            if (m.userId.isEmpty())
+                continue;
+
+            // Best-effort enrichment -- small N per venue, matches the N+1
+            // style already used elsewhere in this codebase (e.g. the
+            // venue-enabled check in LoginFlowController).
+            auto hostDoc = FC::getInstance().getDocument("hosts/" + m.userId);
+            m.email     = FC::readString(hostDoc, "email");
+            m.stageName = FC::readString(hostDoc, "stageName");
+
+            out.push_back(std::move(m));
+        }
+
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, out = std::move(out)]() mutable
+                { onDone(true, std::move(out), {}); });
+    });
+}
+
+void CompanyService::removeVenueMember(const juce::String& venueId, const juce::String& userId, RemoveVenueMemberCallback onDone)
+{
+    if (venueId.isEmpty() || userId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "Missing venueId/userId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, userId, onDone = std::move(onDone)]()
+    {
+        const bool ok = FC::getInstance().deleteDocument("user-venue-lookup/" + userId + "_" + venueId);
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok]()
+                { onDone(ok, ok ? juce::String() : juce::String("deleteDocument failed")); });
     });
 }
