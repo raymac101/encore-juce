@@ -32,6 +32,8 @@
 #include "../Services/IntroVoiceService.h"
 #include "../Services/SpotifyService.h"
 #include "../Services/RoomEqMeasurementService.h"
+#include "../Services/CompanyService.h"
+#include "CreateCompanyDialog.h"
 #include "../Services/InvitationService.h"
 #include "SpriteIcon.h"
 #include "EditSingerModal.h"
@@ -509,6 +511,7 @@ void MainComponent::setupUI()
 
         juce::PopupMenu menu;
         menu.addItem (1, lm.getText ("topbar.menu_edit_profile"));
+        menu.addItem (4, lm.getText ("topbar.menu_my_company"));
         menu.addItem (2, lm.getText ("topbar.menu_sign_out"));
         menu.addSeparator();
         menu.addItem (3, lm.getText ("topbar.menu_close_app"));
@@ -555,6 +558,32 @@ void MainComponent::setupUI()
                 // "Close App" -- the same graceful-quit path the window's
                 // own close button uses.
                 juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            }
+            else if (result == 4)
+            {
+                // "My Company" -- jump straight into the company dashboard
+                // if this account already belongs to one; otherwise offer to
+                // create one on the spot, then jump in. No relogin needed
+                // either way (see MainComponent::openCompanyDashboard()).
+                const auto uid = FirestoreClient::getInstance().getUserId();
+                CompanyService::getInstance().findMembershipForUser (uid,
+                    [safe] (bool found, juce::String companyId, juce::String role)
+                    {
+                        if (safe == nullptr) return;
+
+                        if (found)
+                        {
+                            safe->openCompanyDashboard (companyId, role);
+                            return;
+                        }
+
+                        CreateCompanyDialog::launch (safe.getComponent(),
+                            [safe] (const Company& created)
+                            {
+                                if (safe == nullptr) return;
+                                safe->openCompanyDashboard (juce::String (created.id), "company_admin");
+                            });
+                    });
             }
         });
     };
@@ -4067,13 +4096,14 @@ void MainComponent::openCompanyDashboard(const juce::String& companyId, const ju
     companyId_ = companyId;
     companyRole_ = companyRole;
 
+    // Reveals the "Company Admin" nav item -- does NOT force navigation to
+    // it. The venue session underneath (Home/Search/Queue/playback, all
+    // driven by activeVenueId_, which is always set before this can run --
+    // see Main.cpp's attachMainContent) keeps working exactly like a normal
+    // venue sign-in. The user clicks into Company Admin themselves when
+    // they want it, same as any other nav item.
     if (mainArea) mainArea->setCompanyContext(companyId, companyRole);
-    if (navBar)
-    {
-        navBar->setCompanyContext(true, companyRole);
-        navBar->setActivePage(NavPage::CompanyAdmin);
-    }
-    if (mainArea) mainArea->setCurrentPage(NavPage::CompanyAdmin);
+    if (navBar) navBar->setCompanyContext(true, companyRole);
 }
 
 //==============================================================================

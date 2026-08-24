@@ -93,6 +93,48 @@ namespace
         return docName.fromLastOccurrenceOf("/", false, false);
     }
 
+    //--- Firestore structured-query helpers (mirrors LoginFlowController.cpp's
+    //    file-local equivalents) — used by getVenuesForCompany().
+    juce::var stringFilter(const juce::String& fieldPath, const juce::String& op, const juce::var& value)
+    {
+        juce::DynamicObject::Ptr field = new juce::DynamicObject();
+        field->setProperty("fieldPath", fieldPath);
+
+        juce::DynamicObject::Ptr filter = new juce::DynamicObject();
+        filter->setProperty("field", juce::var(field.get()));
+        filter->setProperty("op", op);
+        filter->setProperty("value", value);
+
+        juce::DynamicObject::Ptr wrap = new juce::DynamicObject();
+        wrap->setProperty("fieldFilter", juce::var(filter.get()));
+        return juce::var(wrap.get());
+    }
+
+    juce::var compositeAnd(juce::Array<juce::var> filters)
+    {
+        juce::DynamicObject::Ptr c = new juce::DynamicObject();
+        c->setProperty("op", "AND");
+        c->setProperty("filters", filters);
+
+        juce::DynamicObject::Ptr wrap = new juce::DynamicObject();
+        wrap->setProperty("compositeFilter", juce::var(c.get()));
+        return juce::var(wrap.get());
+    }
+
+    juce::var buildQuery(const juce::String& collection, juce::var where)
+    {
+        juce::DynamicObject::Ptr fc = new juce::DynamicObject();
+        fc->setProperty("collectionId", collection);
+        juce::Array<juce::var> from;
+        from.add(juce::var(fc.get()));
+
+        juce::DynamicObject::Ptr q = new juce::DynamicObject();
+        q->setProperty("from", from);
+        if (! where.isVoid())
+            q->setProperty("where", where);
+        return juce::var(q.get());
+    }
+
     // ── Bulk-delete helper: synchronously DELETE every doc in a collection.
     //   Runs in one thread; not transactional but safe for housekeeping.
     int deleteCollectionContents(const juce::String& collectionPath)
@@ -418,6 +460,41 @@ void VenueService::getVenues(ListCallback onDone)
     });
 }
 
+void VenueService::getVenuesForCompany(const juce::String& companyId, ListCallback onDone)
+{
+    if (companyId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(true, {}, {}); });
+        return;
+    }
+
+    juce::Thread::launch([companyId, onDone = std::move(onDone)]()
+    {
+        juce::Array<juce::var> filters;
+        filters.add(stringFilter("companyId", "EQUAL", FC::stringValue(companyId)));
+        auto query = buildQuery("venues", compositeAnd(filters));
+        auto docs = FC::getInstance().runQuery({}, query);
+
+        std::vector<VenueItem> out;
+        out.reserve((size_t) docs.size());
+        for (auto& d : docs)
+        {
+            auto unwrapped = FC::unwrapFields(d);
+            auto venue = VenueItem::fromJson(juce::JSON::toString(unwrapped));
+            venue.id = docIdFromName(d.getProperty("name", "").toString()).toStdString();
+            out.push_back(std::move(venue));
+        }
+
+        if (onDone)
+        {
+            juce::MessageManager::callAsync([onDone, out = std::move(out)]() mutable
+            {
+                onDone(true, std::move(out), {});
+            });
+        }
+    });
+}
+
 void VenueService::addVenue(const VenueItem& venue, AddVenueCallback onDone)
 {
     VenueItem v = venue;
@@ -491,6 +568,29 @@ void VenueService::updateVenueCode(const juce::String& venueId,
     {
         auto fields = FC::makeFields({ { "code", FC::stringValue(newCode) } });
         const auto path = "venues/" + venueId + "?updateMask.fieldPaths=code";
+        const bool ok = FC::getInstance().patchDocument(path, fields);
+        if (onDone)
+        {
+            juce::MessageManager::callAsync([onDone, ok]()
+            {
+                onDone(ok, ok ? juce::String() : juce::String("patch failed"));
+            });
+        }
+    });
+}
+
+void VenueService::setVenueEnabled(const juce::String& venueId, bool enabled, WriteCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, enabled, onDone = std::move(onDone)]()
+    {
+        auto fields = FC::makeFields({ { "enabled", FC::booleanValue(enabled) } });
+        const auto path = "venues/" + venueId + "?updateMask.fieldPaths=enabled";
         const bool ok = FC::getInstance().patchDocument(path, fields);
         if (onDone)
         {

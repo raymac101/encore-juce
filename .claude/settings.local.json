@@ -136,7 +136,12 @@
       "Bash(git checkout *)",
       "Bash(env -i /usr/bin/which brew)",
       "Bash(/usr/bin/env -i PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\" brew --prefix rubberband)",
-      "Bash(xargs -I{} cat {})"
+      "Bash(xargs -I{} cat {})",
+      "Bash(python3 -c \"import json; json.load\\(open\\('/Users/ray/Projects/Code Projects/encore-juce/firebase/firestore.indexes.json'\\)\\); print\\('valid JSON'\\)\")",
+      "Read(//Users/ray/Library/Logs/**)",
+      "Read(//Users/ray/Library/Application Support/**)",
+      "Bash(grep -i \"runQuery failed\\\\|members\" \"/Users/ray/Library/Logs/EncoreKaraoke/EncoreKaraoke.log\" 2>/dev/null | tail -20)",
+      "Read(//Users/ray/Library/Logs/EncoreKaraoke/**)"
     ]
   }
 }

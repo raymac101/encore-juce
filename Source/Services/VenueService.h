@@ -70,6 +70,10 @@ public:
     /** GET /venues. Returns every venue document. */
     void getVenues(ListCallback onDone);
 
+    /** Query `venues` where companyId == companyId. Used by the company
+        dashboard's venue oversight list (see CompanyAdminPage). */
+    void getVenuesForCompany(const juce::String& companyId, ListCallback onDone);
+
     /** Create a new venue document. Generates code/codePlus, sets dateTime
         and updateSongs to "now", uses Firestore auto-ID for the new doc.
         Returns the new venueId in the callback. */
@@ -83,6 +87,14 @@ public:
     /** Update only the `code` field on a venue. */
     void updateVenueCode(const juce::String& venueId,
                          const juce::String& newCode,
+                         WriteCallback onDone);
+
+    /** Update only the `enabled` field on a venue -- the company-admin
+        kill switch that blocks future sign-in (see
+        LoginFlowController::queryAssociations/queryFirstCompanyVenue).
+        Does not affect an already-running Encore instance on that venue. */
+    void setVenueEnabled(const juce::String& venueId,
+                         bool enabled,
                          WriteCallback onDone);
 
     /** Re-generate code + codePlus on a venue and persist them. Mirrors the

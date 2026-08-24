@@ -170,11 +170,16 @@ public:
     /** Direct access to the Ads management page. */
     AdsPage* getAdsPage() const noexcept { return adsPage; }
 
+    /** Direct access to the charts/analytics page. */
+    ChartsPage* getChartsPage() const noexcept { return chartsPage; }
+
     /** Update company-dashboard context for company-mode users. */
     void setCompanyContext (const juce::String& companyId, const juce::String& companyRole)
     {
         if (companyAdminPage)
             companyAdminPage->setCompanyContext (companyId, companyRole);
+        if (chartsPage)
+            chartsPage->setCompanyScope (companyId);
     }
 
     /** Fired when the user saves a setting. Wire to FirebaseManager::updateVenue(). */

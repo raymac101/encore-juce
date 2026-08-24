@@ -64,6 +64,7 @@ topbar.vu=VU
 topbar.vu.mainoutput=Main Output Level
 topbar.vu.spectrumband=Spectrum Band
 topbar.menu_edit_profile=Edit Profile
+topbar.menu_my_company=My Company
 topbar.menu_sign_out=Sign Out
 topbar.menu_close_app=Close App
 
@@ -212,6 +213,7 @@ company_admin.member_user_id=Member User ID
 company_admin.member_user_id_hint=Firebase Auth UID of the user
 company_admin.member_user_id_required=Please enter a member user ID.
 company_admin.member_role=Member Role
+company_admin.member_status=Member Status
 company_admin.member_save=Add / Update Member
 company_admin.member_refresh=Refresh Members
 company_admin.member_saving=Saving member mapping...
@@ -219,6 +221,21 @@ company_admin.member_saved=Member mapping saved.
 company_admin.member_save_failed=Could not save member mapping.
 company_admin.member_none=No members found.
 company_admin.members_loading=Loading members...
+company_admin.venues_title=Venues
+company_admin.venue_none=No venues linked to this company yet.
+company_admin.venues_loading=Loading venues...
+company_admin.venue_loading_counts=Loading...
+company_admin.venue_queue=Queue
+company_admin.venue_requested=Requested
+company_admin.venue_sync_checking=Checking songbook...
+company_admin.venue_sync_ok=Songbook in sync
+company_admin.venue_sync_stale=Songbook out of date
+company_admin.venue_sync_unknown=Songbook sync unknown
+company_admin.venue_uploading=Uploading songbook to venues...
+company_admin.venue_upload_done=Uploaded to {ok}/{total} venues.
+company_admin.venue_enable=Enable
+company_admin.venue_disable=Disable
+company_admin.venue_toggle_failed=Could not update venue status.
 
 # ── Audio controls ───────────────────────────────────────────────────────────
 audio.play=Play
@@ -934,6 +951,7 @@ onboarding.company_info.next_button=Next
 onboarding.company_info.error_name_required=Please enter a company name.
 onboarding.company_info.status_creating=Creating your company...
 onboarding.company_info.error_generic=Something went wrong creating your company. Please try again.
+company.create_dialog.create_button=Create Company
 
 onboarding.venue_info.heading_single=Your Venue
 onboarding.venue_info.heading_multi=Add Your Venues

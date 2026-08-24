@@ -812,6 +812,14 @@ void ChartsPage::rebuildTimeRangeOptions()
     timeRangeBox_.setSelectedId(defaultId, juce::dontSendNotification); // thisWeek
 }
 
+void ChartsPage::setCompanyScope (const juce::String& companyId)
+{
+    if (companyId_ == companyId)
+        return;
+    companyId_ = companyId;
+    refreshVenueOptions();
+}
+
 void ChartsPage::refreshVenueOptions()
 {
     const auto currentId = VenueService::getInstance().getCurrentVenueId();
@@ -823,8 +831,7 @@ void ChartsPage::refreshVenueOptions()
     venueBox_.setEnabled(false);
 
     juce::Component::SafePointer<ChartsPage> safe(this);
-    VenueService::getInstance().getVenues(
-        [safe, currentId](bool ok, std::vector<VenueItem> venues, juce::String error)
+    auto onVenuesLoaded = [safe, currentId](bool ok, std::vector<VenueItem> venues, juce::String error)
         {
             if (safe == nullptr)
                 return;
@@ -864,7 +871,12 @@ void ChartsPage::refreshVenueOptions()
             safe->venueBox_.setSelectedId(selectedId, juce::dontSendNotification);
             safe->venueBox_.setEnabled(! safe->venueIds_.empty());
             safe->refreshAnalytics();
-        });
+        };
+
+    if (companyId_.isNotEmpty())
+        VenueService::getInstance().getVenuesForCompany(companyId_, std::move(onVenuesLoaded));
+    else
+        VenueService::getInstance().getVenues(std::move(onVenuesLoaded));
 }
 
 AnalyticsService::TimeRange ChartsPage::currentRange() const

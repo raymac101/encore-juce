@@ -513,6 +513,23 @@ juce::Array<juce::var> FirestoreClient::runQuery(const juce::String& parentPath,
                 docs.add(document);
         }
     }
+    else if (resp.isObject())
+    {
+        // A non-array response (still parsed as JSON by httpJson) is
+        // Firestore's error shape, e.g. {"error":{"code":400,"message":
+        // "The query requires an index...",...}} for a collection-group
+        // query with no supporting index. Silently returning an empty
+        // array here is indistinguishable from "genuinely zero matching
+        // documents" to every caller -- which is exactly what made a
+        // missing `members` collection-group index look like "this user
+        // has no company" instead of a broken query. Log it so a query
+        // failure is visible instead of silently masquerading as an empty
+        // result (writeToLog survives Release builds; DBG doesn't).
+        const auto message = resp.getProperty("error", juce::var())
+                                  .getProperty("message", "unknown error").toString();
+        juce::Logger::writeToLog("FirestoreClient: runQuery failed (status "
+                                  + juce::String(status) + "): " + message);
+    }
     return docs;
 }
 

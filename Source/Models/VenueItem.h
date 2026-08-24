@@ -33,6 +33,16 @@ struct VenueItem
     std::string registrationKey;            // License / registration key
     std::string companyId;                  // Owning company (empty = independent venue)
 
+    // ── Access control ──────────────────────────────────────────────────────
+    // Company-admin kill switch: blocks future sign-in to this venue when
+    // false (see LoginFlowController::queryAssociations/queryFirstCompanyVenue).
+    // Does NOT stop an already-running Encore instance on this venue's PC --
+    // there is no presence/heartbeat channel for that. Absent on every venue
+    // doc that predates this field, so every read of it must default to
+    // true (FirestoreClient::readBool(doc, "enabled", true)) or every
+    // existing venue would suddenly lock its own host out.
+    bool enabled = true;
+
     // ── Venue codes ─────────────────────────────────────────────────────────
     std::string code;                       // Primary code for Tagg app
     std::string codePlus;                   // Emergency / backup code

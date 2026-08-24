@@ -112,6 +112,7 @@ target_sources(EncoreJUCE
         Source/UI/ChartsPage.cpp
         Source/UI/SettingsPage.cpp
         Source/UI/CompanyAdminPage.cpp
+        Source/UI/CreateCompanyDialog.cpp
         Source/UI/CustomerAdminPage.cpp
         Source/UI/BulkMetadataTool.cpp
         Source/UI/ProfilePage.cpp

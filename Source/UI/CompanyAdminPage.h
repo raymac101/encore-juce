@@ -12,6 +12,8 @@
 
 #include <JuceHeader.h>
 #include "../Localization/LocalizationManager.h"
+#include <vector>
+#include <memory>
 
 class CompanyAdminPage : public juce::Component
 {
@@ -39,6 +41,7 @@ public:
 
 private:
     void loadCompanyInfo();
+    void loadCompanyVenues();
     void saveCompanyInfo();
     void clearLogo();
     void updateLogoPreviewFromFile (const juce::File& file);
@@ -81,8 +84,10 @@ private:
     juce::Label membersTitle_;
     juce::Label memberUserIdLabel_;
     juce::Label memberRoleLabel_;
+    juce::Label memberStatusLabel_;
     juce::TextEditor memberUserIdEditor_;
     juce::ComboBox memberRoleBox_;
+    juce::ComboBox memberStatusBox_;
     juce::TextButton saveMemberButton_ { "Add / Update Member" };
     juce::TextButton refreshMembersButton_ { "Refresh Members" };
     juce::Label membersListLabel_;
@@ -92,6 +97,37 @@ private:
     StatCard deviceCard_;
     StatCard packageCard_;
     StatCard campaignCard_;
+
+    // Read-only per-venue oversight list (name + live queue/requested
+    // counts), populated by loadCompanyVenues() via
+    // VenueService::getVenuesForCompany() + checkExistingSessionData().
+    // No online/offline status: the data model has no real presence signal
+    // (VenueItem's timestamps are "last code change" / "last songbook
+    // refresh", not a running-app heartbeat) -- showing one anyway would be
+    // guesswork dressed up as fact.
+    struct VenueRow
+    {
+        juce::String venueId;
+        bool         enabled = true;
+        juce::Label  name;
+        juce::Label  counts;
+        juce::Label  syncStatus;
+        juce::TextButton enableToggle;
+    };
+    void toggleVenueEnabled (const juce::String& venueId);
+    std::vector<std::unique_ptr<VenueRow>> venueRows_;
+    juce::Label venuesTitle_;
+    juce::Label venuesEmptyLabel_;
+    void layoutVenueRows (juce::Rectangle<int> area);
+
+    /** "Upload Songs" -- pushes this PC's local songbook.json out to every
+        venue in venueRows_ via SongbookStorageService::uploadLocalSongbook(),
+        then refreshes each row's sync-status label. */
+    void pushSongsToCompanyVenues();
+
+    /** Re-checks one venue's songbook sync status (this PC's local copy vs.
+        that venue's Storage copy) and updates its row's label in place. */
+    void refreshVenueSyncStatus (const juce::String& venueId);
 
     juce::String companyId_;
     juce::String companyRole_;

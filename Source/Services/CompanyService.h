@@ -38,6 +38,18 @@ public:
                           const juce::String& role,
                           WriteCallback onDone = nullptr);
 
+    using MembershipCallback = std::function<void(bool found, juce::String companyId, juce::String role)>;
+
+    /** Looks up whether `userId` already belongs to a company, via a
+        collection-group query on `members` filtered by userId (company
+        membership isn't in custom claims -- the members subcollection doc
+        is the only record). Mirrors the synchronous helper
+        LoginFlowController uses internally during the post-auth boot
+        sequence, exposed here as a proper async service call for UI code
+        (e.g. the TopBar "My Company" menu action) that isn't already
+        running on a background thread. */
+    void findMembershipForUser(const juce::String& userId, MembershipCallback onDone);
+
 private:
     CompanyService() = default;
     JUCE_DECLARE_NON_COPYABLE(CompanyService)

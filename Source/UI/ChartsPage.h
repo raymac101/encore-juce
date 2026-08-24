@@ -24,6 +24,12 @@ public:
 
     void updateAllText();
 
+    /** Scope the venue picker to a single company's venues instead of every
+        venue in Firestore. Pass an empty string to go back to the normal
+        (non-company) "every venue I can see" behaviour. Called by MainArea
+        when company context changes. */
+    void setCompanyScope (const juce::String& companyId);
+
 private:
     class BarChart;
     class PieChart;
@@ -51,6 +57,8 @@ private:
     void applySnapshot(AnalyticsService::Snapshot data);
     void rebuildReportingText();
     void exportData();
+
+    juce::String companyId_;
 
     juce::Label titleLabel_;
     juce::ComboBox venueBox_;

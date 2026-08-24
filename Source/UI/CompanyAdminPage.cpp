@@ -8,6 +8,8 @@
 #include "CompanyAdminPage.h"
 #include "MenuTheme.h"
 #include "../Services/FirestoreClient.h"
+#include "../Services/VenueService.h"
+#include "../Services/SongbookStorageService.h"
 #include "../Firebase/FirebaseConfig.h"
 
 namespace
@@ -133,10 +135,32 @@ CompanyAdminPage::CompanyAdminPage()
     memberRoleBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
     contentHolder_->addAndMakeVisible (memberRoleBox_);
 
+    memberStatusLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)).boldened());
+    memberStatusLabel_.setColour (juce::Label::textColourId, kMuted);
+    memberStatusLabel_.setText (lm.getText ("company_admin.member_status"), juce::dontSendNotification);
+    contentHolder_->addAndMakeVisible (memberStatusLabel_);
+
+    memberStatusBox_.addItem (lm.getText ("company_admin.status_active"), 1);
+    memberStatusBox_.addItem (lm.getText ("company_admin.status_suspended"), 2);
+    memberStatusBox_.setSelectedId (1, juce::dontSendNotification);
+    memberStatusBox_.setColour (juce::ComboBox::backgroundColourId, kPanel);
+    memberStatusBox_.setColour (juce::ComboBox::textColourId, kText);
+    memberStatusBox_.setColour (juce::ComboBox::outlineColourId, kBorder);
+    contentHolder_->addAndMakeVisible (memberStatusBox_);
+
     membersListLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
     membersListLabel_.setColour (juce::Label::textColourId, kText);
     membersListLabel_.setJustificationType (juce::Justification::topLeft);
     contentHolder_->addAndMakeVisible (membersListLabel_);
+
+    venuesTitle_.setFont (juce::Font (juce::FontOptions().withHeight (16.0f)).boldened());
+    venuesTitle_.setColour (juce::Label::textColourId, kText);
+    venuesTitle_.setText (lm.getText ("company_admin.venues_title"), juce::dontSendNotification);
+    contentHolder_->addAndMakeVisible (venuesTitle_);
+
+    venuesEmptyLabel_.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+    venuesEmptyLabel_.setColour (juce::Label::textColourId, kMuted);
+    contentHolder_->addAndMakeVisible (venuesEmptyLabel_);
 
     for (auto* button : { &applyCompanyIdButton_, &browseLogoButton_, &clearLogoButton_, &saveCompanyButton_,
                           &saveMemberButton_, &refreshMembersButton_,
@@ -178,6 +202,7 @@ CompanyAdminPage::CompanyAdminPage()
     clearLogoButton_.onClick = [this]() { clearLogo(); };
     saveCompanyButton_.onClick = [this]() { saveCompanyInfo(); };
     refreshMembersButton_.onClick = [this]() { loadMembers(); };
+    uploadButton_.onClick = [this]() { pushSongsToCompanyVenues(); };
 
     configureCard (venueCard_,    lm.getText ("company_admin.venues"),    "0");
     configureCard (hostCard_,     lm.getText ("company_admin.hosts"),     "0");
@@ -277,6 +302,7 @@ void CompanyAdminPage::setCompanyContext (const juce::String& companyId, const j
 
     loadCompanyInfo();
     loadMembers();
+    loadCompanyVenues();
     repaint();
 }
 
@@ -363,6 +389,223 @@ void CompanyAdminPage::loadCompanyInfo()
                                           : LocalizationManager::getInstance().getText ("company_admin.create_info"), juce::dontSendNotification);
         });
     });
+}
+
+void CompanyAdminPage::loadCompanyVenues()
+{
+    venueRows_.clear();
+
+    if (companyId_.isEmpty())
+    {
+        venuesEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.venue_none"), juce::dontSendNotification);
+        venuesEmptyLabel_.setVisible (true);
+        venueCard_.value.setText ("0", juce::dontSendNotification);
+        resized();
+        return;
+    }
+
+    venuesEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.venues_loading"), juce::dontSendNotification);
+    venuesEmptyLabel_.setVisible (true);
+    resized();
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    const auto companyId = companyId_;
+    VenueService::getInstance().getVenuesForCompany (companyId,
+        [safe, companyId] (bool ok, std::vector<VenueItem> venues, juce::String /*error*/)
+        {
+            if (safe == nullptr || companyId != safe->companyId_)
+                return;
+
+            if (! ok)
+            {
+                safe->venuesEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.venue_none"), juce::dontSendNotification);
+                return;
+            }
+
+            safe->venueRows_.clear();
+            safe->venueCard_.value.setText (juce::String ((int) venues.size()), juce::dontSendNotification);
+            safe->venuesEmptyLabel_.setVisible (venues.empty());
+            if (venues.empty())
+                safe->venuesEmptyLabel_.setText (LocalizationManager::getInstance().getText ("company_admin.venue_none"), juce::dontSendNotification);
+
+            for (auto& v : venues)
+            {
+                auto row = std::make_unique<VenueRow>();
+                row->venueId = juce::String (v.id);
+                row->enabled = v.enabled;
+                row->name.setText (juce::String (v.name), juce::dontSendNotification);
+                row->name.setFont (juce::Font (juce::FontOptions().withHeight (13.0f)).boldened());
+                row->name.setColour (juce::Label::textColourId, kText);
+                safe->contentHolder_->addAndMakeVisible (row->name);
+
+                auto& lmBtn = LocalizationManager::getInstance();
+                row->enableToggle.setButtonText (row->enabled ? lmBtn.getText ("company_admin.venue_disable")
+                                                               : lmBtn.getText ("company_admin.venue_enable"));
+                row->enableToggle.setColour (juce::TextButton::buttonColourId, kPanel);
+                row->enableToggle.setColour (juce::TextButton::textColourOffId, kText);
+                row->enableToggle.setColour (juce::TextButton::textColourOnId, kText);
+                const auto toggleVenueId = row->venueId;
+                row->enableToggle.onClick = [safe, toggleVenueId]() { if (safe != nullptr) safe->toggleVenueEnabled (toggleVenueId); };
+                safe->contentHolder_->addAndMakeVisible (row->enableToggle);
+
+                row->counts.setText (LocalizationManager::getInstance().getText ("company_admin.venue_loading_counts"), juce::dontSendNotification);
+                row->counts.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+                row->counts.setColour (juce::Label::textColourId, kMuted);
+                safe->contentHolder_->addAndMakeVisible (row->counts);
+
+                row->syncStatus.setText (LocalizationManager::getInstance().getText ("company_admin.venue_sync_checking"), juce::dontSendNotification);
+                row->syncStatus.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+                row->syncStatus.setColour (juce::Label::textColourId, kMuted);
+                safe->contentHolder_->addAndMakeVisible (row->syncStatus);
+
+                safe->venueRows_.push_back (std::move (row));
+
+                const auto venueId = juce::String (v.id);
+                VenueService::getInstance().checkExistingSessionData (venueId,
+                    [safe, venueId] (bool countsOk, VenueService::SessionCounts counts, juce::String /*err*/)
+                    {
+                        if (safe == nullptr || ! countsOk)
+                            return;
+
+                        for (auto& r : safe->venueRows_)
+                        {
+                            if (r->venueId != venueId)
+                                continue;
+
+                            auto& lm = LocalizationManager::getInstance();
+                            r->counts.setText (
+                                lm.getText ("company_admin.venue_queue") + ": " + juce::String (counts.queueCount)
+                                + "   " + lm.getText ("company_admin.venue_requested") + ": " + juce::String (counts.requestedCount),
+                                juce::dontSendNotification);
+                            break;
+                        }
+                    });
+
+                safe->refreshVenueSyncStatus (venueId);
+            }
+
+            safe->resized();
+        });
+}
+
+void CompanyAdminPage::refreshVenueSyncStatus (const juce::String& venueId)
+{
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    SongbookStorageService::getInstance().checkSongbookInSync (venueId,
+        [safe, venueId] (bool inSync, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            for (auto& r : safe->venueRows_)
+            {
+                if (r->venueId != venueId)
+                    continue;
+
+                auto& lm = LocalizationManager::getInstance();
+                r->syncStatus.setText (
+                    error.isNotEmpty() ? lm.getText ("company_admin.venue_sync_unknown")
+                    : inSync           ? lm.getText ("company_admin.venue_sync_ok")
+                                        : lm.getText ("company_admin.venue_sync_stale"),
+                    juce::dontSendNotification);
+                r->syncStatus.setColour (juce::Label::textColourId,
+                    (! error.isNotEmpty() && ! inSync) ? juce::Colour (0xffe0a030) : kMuted);
+                break;
+            }
+        });
+}
+
+void CompanyAdminPage::pushSongsToCompanyVenues()
+{
+    if (venueRows_.empty())
+    {
+        setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.venue_none"));
+        return;
+    }
+
+    // Snapshot the venue ids up front -- venueRows_ can be rebuilt from
+    // under us by a concurrent loadCompanyVenues() (e.g. Refresh clicked
+    // mid-upload), so each per-venue callback below looks itself up by id
+    // rather than trusting a captured row pointer.
+    std::vector<juce::String> venueIds;
+    venueIds.reserve (venueRows_.size());
+    for (auto& r : venueRows_)
+        venueIds.push_back (r->venueId);
+
+    auto total = std::make_shared<int> ((int) venueIds.size());
+    auto done  = std::make_shared<int> (0);
+    auto ok    = std::make_shared<int> (0);
+
+    uploadButton_.setEnabled (false);
+    setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.venue_uploading"));
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    for (auto& venueId : venueIds)
+    {
+        SongbookStorageService::getInstance().uploadLocalSongbook (venueId,
+            [safe, venueId, total, done, ok] (bool uploadOk, juce::String /*error*/)
+            {
+                ++(*done);
+                if (uploadOk) ++(*ok);
+
+                if (safe != nullptr)
+                {
+                    safe->refreshVenueSyncStatus (venueId);
+
+                    auto& lm = LocalizationManager::getInstance();
+                    safe->setStatusMessage (lm.getText ("company_admin.venue_uploading")
+                        + " (" + juce::String (*done) + "/" + juce::String (*total) + ")");
+
+                    if (*done >= *total)
+                    {
+                        safe->uploadButton_.setEnabled (true);
+                        safe->setStatusMessage (lm.getText ("company_admin.venue_upload_done")
+                            .replace ("{ok}", juce::String (*ok)).replace ("{total}", juce::String (*total)));
+                    }
+                }
+            });
+    }
+}
+
+void CompanyAdminPage::toggleVenueEnabled (const juce::String& venueId)
+{
+    VenueRow* target = nullptr;
+    for (auto& r : venueRows_)
+        if (r->venueId == venueId) { target = r.get(); break; }
+    if (target == nullptr)
+        return;
+
+    const bool nextEnabled = ! target->enabled;
+    target->enableToggle.setEnabled (false);
+
+    juce::Component::SafePointer<CompanyAdminPage> safe (this);
+    VenueService::getInstance().setVenueEnabled (venueId, nextEnabled,
+        [safe, venueId, nextEnabled] (bool ok, juce::String error)
+        {
+            if (safe == nullptr)
+                return;
+
+            for (auto& r : safe->venueRows_)
+            {
+                if (r->venueId != venueId)
+                    continue;
+
+                r->enableToggle.setEnabled (true);
+                if (ok)
+                {
+                    r->enabled = nextEnabled;
+                    auto& lm = LocalizationManager::getInstance();
+                    r->enableToggle.setButtonText (r->enabled ? lm.getText ("company_admin.venue_disable")
+                                                               : lm.getText ("company_admin.venue_enable"));
+                }
+                else
+                {
+                    safe->setStatusMessage (error.isNotEmpty() ? error
+                        : LocalizationManager::getInstance().getText ("company_admin.venue_toggle_failed"));
+                }
+                break;
+            }
+        });
 }
 
 void CompanyAdminPage::clearLogo()
@@ -579,16 +822,17 @@ void CompanyAdminPage::saveMemberMapping()
     }
 
     const auto role = memberRoleBox_.getText().trim();
+    const auto status = memberStatusBox_.getSelectedId() == 2 ? juce::String ("suspended") : juce::String ("active");
     juce::Component::SafePointer<CompanyAdminPage> safe (this);
     const auto companyId = companyId_;
     setStatusMessage (LocalizationManager::getInstance().getText ("company_admin.member_saving"));
 
-    juce::Thread::launch ([safe, companyId, memberUserId, role]()
+    juce::Thread::launch ([safe, companyId, memberUserId, role, status]()
     {
         auto fields = FirestoreClient::makeFields ({
             { "userId",      FirestoreClient::stringValue (memberUserId) },
             { "role",        FirestoreClient::stringValue (role) },
-            { "status",      FirestoreClient::stringValue ("active") },
+            { "status",      FirestoreClient::stringValue (status) },
             { "updatedAt",   FirestoreClient::timestampValue (juce::Time::getCurrentTime()) },
             { "updatedBy",   FirestoreClient::stringValue (FirestoreClient::getInstance().getUserId()) }
         });
@@ -655,9 +899,13 @@ void CompanyAdminPage::updateAllText()
     membersTitle_.setText (lm.getText ("company_admin.members_title"), juce::dontSendNotification);
     memberUserIdLabel_.setText (lm.getText ("company_admin.member_user_id"), juce::dontSendNotification);
     memberRoleLabel_.setText (lm.getText ("company_admin.member_role"), juce::dontSendNotification);
+    memberStatusLabel_.setText (lm.getText ("company_admin.member_status"), juce::dontSendNotification);
     memberUserIdEditor_.setTextToShowWhenEmpty (lm.getText ("company_admin.member_user_id_hint"), kMuted);
     saveMemberButton_.setButtonText (lm.getText ("company_admin.member_save"));
     refreshMembersButton_.setButtonText (lm.getText ("company_admin.member_refresh"));
+    venuesTitle_.setText (lm.getText ("company_admin.venues_title"), juce::dontSendNotification);
+    if (venueRows_.empty())
+        venuesEmptyLabel_.setText (lm.getText ("company_admin.venue_none"), juce::dontSendNotification);
     refreshButton_.setButtonText (lm.getText ("company_admin.refresh"));
     inviteButton_.setButtonText (lm.getText ("company_admin.invite_host"));
     registerButton_.setButtonText (lm.getText ("company_admin.register_device"));
@@ -667,6 +915,29 @@ void CompanyAdminPage::updateAllText()
 void CompanyAdminPage::paint (juce::Graphics& g)
 {
     MenuTheme::drawPageBackground (g, getLocalBounds());
+}
+
+void CompanyAdminPage::layoutVenueRows (juce::Rectangle<int> area)
+{
+    if (venueRows_.empty())
+    {
+        venuesEmptyLabel_.setVisible (true);
+        venuesEmptyLabel_.setBounds (area.removeFromTop (24));
+        return;
+    }
+
+    venuesEmptyLabel_.setVisible (false);
+    for (auto& row : venueRows_)
+    {
+        auto rowArea = area.removeFromTop (56);
+        auto nameRow = rowArea.removeFromTop (20);
+        row->enableToggle.setBounds (nameRow.removeFromRight (110));
+        nameRow.removeFromRight (8);
+        row->name.setBounds (nameRow);
+        auto detailRow = rowArea.removeFromTop (18);
+        row->counts.setBounds (detailRow.removeFromLeft (detailRow.getWidth() * 2 / 3));
+        row->syncStatus.setBounds (detailRow);
+    }
 }
 
 void CompanyAdminPage::layoutCard (StatCard& card, juce::Rectangle<int> area)
@@ -749,8 +1020,17 @@ void CompanyAdminPage::layoutContent()
     memberUserIdLabel_.setBounds (membersArea.removeFromTop (18));
     memberUserIdEditor_.setBounds (membersArea.removeFromTop (26));
     membersArea.removeFromTop (4);
-    memberRoleLabel_.setBounds (membersArea.removeFromTop (18));
-    memberRoleBox_.setBounds (membersArea.removeFromTop (24).withWidth (160));
+    {
+        auto row = membersArea.removeFromTop (18);
+        memberRoleLabel_.setBounds (row.removeFromLeft (160));
+        row.removeFromLeft (8);
+        memberStatusLabel_.setBounds (row.removeFromLeft (160));
+
+        auto boxRow = membersArea.removeFromTop (24);
+        memberRoleBox_.setBounds (boxRow.removeFromLeft (160));
+        boxRow.removeFromLeft (8);
+        memberStatusBox_.setBounds (boxRow.removeFromLeft (160));
+    }
     membersArea.removeFromTop (6);
     auto memberButtons = membersArea.removeFromTop (28);
     saveMemberButton_.setBounds (memberButtons.removeFromLeft (170));
@@ -758,6 +1038,13 @@ void CompanyAdminPage::layoutContent()
     refreshMembersButton_.setBounds (memberButtons.removeFromLeft (140));
     membersArea.removeFromTop (8);
     membersListLabel_.setBounds (membersArea);
+
+    bounds.removeFromTop (12);
+    const int venuesAreaHeight = 30 + (! venueRows_.empty() ? (int) venueRows_.size() * 56 : 24);
+    auto venuesArea = bounds.removeFromTop (venuesAreaHeight).reduced (12, 0);
+    venuesTitle_.setBounds (venuesArea.removeFromTop (22));
+    venuesArea.removeFromTop (4);
+    layoutVenueRows (venuesArea);
 
     bounds.removeFromTop (12);
     // Fixed height, not "whatever's left" -- the content now grows to fit

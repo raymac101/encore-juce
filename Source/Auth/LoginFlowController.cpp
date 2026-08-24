@@ -114,6 +114,16 @@ namespace
             return result;
 
         const auto& d = docs.getReference(0);
+        // A company admin suspended this member -- treat it exactly like
+        // having no company membership at all (found = false) rather than
+        // a separate "blocked" state, so it falls straight through to
+        // whatever the user's personal venue associations already allow.
+        // This only strips company access; queryAssociations() below is
+        // untouched, so a suspended company member keeps signing into any
+        // venue they own independently of the company.
+        if (FC::readString(d, "status").equalsIgnoreCase("suspended"))
+            return result;
+
         const auto name = d.getProperty("name", "").toString();
         // .../companies/{companyId}/members/{uid} -- companyId is the
         // third-from-last path segment.
@@ -137,6 +147,14 @@ namespace
         juce::String venueName;
     };
 
+    // A venue doc predating the `enabled` field (every venue created before
+    // this feature) has no such field at all -- must default to true, or
+    // every existing venue would suddenly lock its own host out.
+    bool venueDocIsEnabled(const juce::var& venueDoc)
+    {
+        return FC::readBool(venueDoc, "enabled", true);
+    }
+
     CompanyVenue queryFirstCompanyVenue(const juce::String& companyId)
     {
         CompanyVenue result;
@@ -148,13 +166,16 @@ namespace
         auto query = buildQuery("venues", compositeAnd(filters));
 
         auto docs = FC::getInstance().runQuery({}, query);
-        if (docs.isEmpty())
-            return result;
+        for (auto& d : docs)
+        {
+            if (! venueDocIsEnabled(d))
+                continue;
 
-        const auto& d = docs.getReference(0);
-        const auto name = d.getProperty("name", "").toString();
-        result.venueId   = name.fromLastOccurrenceOf("/", false, false);
-        result.venueName = FC::readString(d, "name");
+            const auto name = d.getProperty("name", "").toString();
+            result.venueId   = name.fromLastOccurrenceOf("/", false, false);
+            result.venueName = FC::readString(d, "name");
+            return result;
+        }
         return result;
     }
 
@@ -279,6 +300,21 @@ namespace
             a.isActive  = (FC::readString(d, "status") == "active");
             a.acceptedDate   = FC::readTime(d, "joinedDate");
             a.lastAccessDate = FC::readTime(d, "lastActive");
+
+            // A company admin can disable a venue as a sign-in kill switch
+            // (see VenueService::setVenueEnabled) -- drop any association
+            // pointing at one. venueDocIsEnabled() defaults missing venues
+            // to enabled, so this is a no-op for every venue that predates
+            // the feature. Small per-user N (a handful of venues at most),
+            // so N+1 direct getDocument calls match this file's existing
+            // fully-synchronous style rather than needing a batch query.
+            if (a.venueId.isNotEmpty())
+            {
+                auto venueDoc = FC::getInstance().getDocument("venues/" + a.venueId);
+                if (! venueDocIsEnabled(venueDoc))
+                    continue;
+            }
+
             out.push_back(std::move(a));
         }
         return out;
