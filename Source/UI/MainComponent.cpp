@@ -5963,12 +5963,24 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
     rs.onApprovedRequest = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingApprovedRequest(item); };
     rs.onRejectedRequest = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingRejectedRequest(item); };
     rs.onDeleteRequest   = [safe](const QueueItem& item) { if (safe != nullptr) safe->onIncomingDeleteRequest(item); };
+    rs.onConnectionHealthChanged = [safe](bool healthy)
+    {
+        if (safe == nullptr) return;
+        safe->requestServiceHealthy_ = healthy;
+        safe->updateNetworkHealthUI();
+    };
     rs.start (venueId);
 
     // Watch /queue itself for changes pushed by other clients (e.g. TAGG
     // mobile app reordering songs, marking a song as playing, etc.). The
     // watcher uses a fingerprint to repaint only when something actually
     // changed.
+    QueueService::getInstance().onConnectionHealthChanged = [safe](bool healthy)
+    {
+        if (safe == nullptr) return;
+        safe->queueServiceHealthy_ = healthy;
+        safe->updateNetworkHealthUI();
+    };
     QueueService::getInstance().startWatching (venueId,
         [safe] (QueueService::Snapshot snap)
         {
@@ -6006,6 +6018,58 @@ void MainComponent::startRequestPipelineFor (const juce::String& venueId)
             safe->lyricWindow_->addEmoji (e);
     };
     es.start (venueId);
+}
+
+void MainComponent::updateNetworkHealthUI()
+{
+    const bool healthy = requestServiceHealthy_ && queueServiceHealthy_;
+    if (healthy == isConnectedToFirebase)
+        return;
+
+    isConnectedToFirebase = healthy;
+    if (topBar != nullptr)
+        topBar->setOnlineStatus (healthy);
+
+    if (healthy)
+    {
+        juce::Logger::writeToLog ("[Network] connection recovered");
+        reconnectPromptShown_ = false;
+        return;
+    }
+
+    juce::Logger::writeToLog ("[Network] connection appears lost/hung -- queue sync and "
+                               "incoming requests may be stalled");
+
+    // Only prompt once per outage -- updateNetworkHealthUI() can be re-entered
+    // by either service's health callback while we're still unhealthy.
+    if (reconnectPromptShown_)
+        return;
+    reconnectPromptShown_ = true;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    juce::AlertWindow::showOkCancelBox (
+        juce::AlertWindow::WarningIcon,
+        "Connection Issue",
+        "Encore seems to have lost touch with the server -- the queue may not be "
+        "syncing and new song requests may not come through. This usually clears up "
+        "on its own within a few seconds, but you can force an immediate reconnect "
+        "instead of restarting the app.",
+        "Reconnect Now",
+        "Dismiss",
+        nullptr,
+        juce::ModalCallbackFunction::create ([safe] (int result)
+        {
+            // result == 1 -> "Reconnect Now", 0 -> "Dismiss".
+            if (result == 1 && safe != nullptr)
+                safe->reconnectNetworkServices();
+        }));
+}
+
+void MainComponent::reconnectNetworkServices()
+{
+    juce::Logger::writeToLog ("[Network] manual reconnect requested");
+    RequestService::getInstance().forceReconnect();
+    QueueService::getInstance().forceReconnect();
 }
 
 void MainComponent::reloadQueueFromFirestore (const juce::String& venueId)

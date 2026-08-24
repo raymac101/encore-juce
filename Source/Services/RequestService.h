@@ -70,6 +70,20 @@ public:
     /** Configure the polling cadence. Default = 3000 ms. */
     void setPollIntervalMs(int ms) noexcept { pollIntervalMs_ = juce::jmax(500, ms); }
 
+    /** Fired on the message thread when polling transitions between healthy
+        (poll succeeding) and unhealthy (kUnhealthyFailureThreshold
+        consecutive failed polls -- a real outage, not a single blip). Set
+        once at startup; replaced rather than added. */
+    std::function<void(bool healthy)> onConnectionHealthChanged;
+
+    /** Immediately clear in-flight/failure state and restart polling for
+        the current venue, even though start() would otherwise no-op
+        because we're already "running" for it. Used by the UI's manual
+        "Reconnect Now" action so the user isn't stuck waiting out the
+        request watchdog in FirestoreClient. Safe to call from the message
+        thread; no-ops if no venue has been started yet. */
+    void forceReconnect();
+
 private:
     RequestService();
     ~RequestService() override;
@@ -82,6 +96,10 @@ private:
     bool running_ = false;
     bool pollInFlight_ = false;
     int  pollIntervalMs_ = 3000;
+
+    static constexpr int kUnhealthyFailureThreshold = 3;
+    int  consecutiveFailures_ = 0;
+    bool reportedUnhealthy_   = false;
 
     // Tracks the last-seen status for each /requested doc id so we only
     // dispatch on actual transitions.

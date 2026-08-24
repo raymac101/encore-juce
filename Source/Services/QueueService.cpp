@@ -981,6 +981,28 @@ void QueueService::stopWatching()
     DBG ("[Queue] watcher stop");
 }
 
+void QueueService::forceReconnect()
+{
+    const auto venueId = watchVenueId_;
+    const auto onChange = onChange_;
+    juce::Timer::stopTimer();
+    watching_ = false;
+    watchInFlight_ = false;
+    consecutiveFailures_ = 0;
+    reportedUnhealthy_ = false;
+    lastFingerprint_.clear();
+
+    if (venueId.isEmpty())
+        return;
+
+    watchVenueId_ = venueId;
+    onChange_     = onChange;
+    watching_     = true;
+    DBG ("[Queue] forced reconnect for venues/" << watchVenueId_ << "/queue");
+    juce::Timer::startTimer(watchIntervalMs_);
+    pollWatcher();
+}
+
 void QueueService::timerCallback()
 {
     pollWatcher();
@@ -1041,8 +1063,22 @@ void QueueService::pollWatcher()
             if (! ok)
             {
                 DBG ("[Queue] watcher poll failed -- keeping last known queue");
+                if (++consecutiveFailures_ == kUnhealthyFailureThreshold && ! reportedUnhealthy_)
+                {
+                    reportedUnhealthy_ = true;
+                    if (onConnectionHealthChanged)
+                        onConnectionHealthChanged(false);
+                }
                 return;
             }
+
+            if (reportedUnhealthy_)
+            {
+                reportedUnhealthy_ = false;
+                if (onConnectionHealthChanged)
+                    onConnectionHealthChanged(true);
+            }
+            consecutiveFailures_ = 0;
 
             // A write started after this particular poll was issued but
             // before its response came back -- the response may already

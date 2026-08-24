@@ -224,6 +224,13 @@ private:
     // in queue-bar.component.ts.
     void startRequestPipelineFor (const juce::String& venueId);
 
+    /** Manual "Reconnect Now" action -- forces RequestService and
+        QueueService to drop any stuck in-flight/failure state and restart
+        polling immediately for the active venue, without waiting out
+        FirestoreClient's request watchdog. Wired to the reconnect prompt
+        shown from onNetworkHealthChanged(). */
+    void reconnectNetworkServices();
+
     /** Called for every incoming TAGG request (regardless of auto-approve
         outcome) so a song missing metadata gets enriched the moment someone
         actually requests it, not only during a library scan. Looks up the
@@ -255,8 +262,23 @@ private:
     // Application State
     bool highContrastMode = false;
     bool largeTextMode = false;
-    bool isConnectedToFirebase = false;
+    bool isConnectedToFirebase = true;
     int startupLoadToken_ = 0;
+
+    // Per-service health, merged into isConnectedToFirebase and TopBar's
+    // status indicator by onNetworkHealthChanged(). Both start healthy;
+    // only a real outage (several consecutive failed polls, see
+    // RequestService/QueueService::kUnhealthyFailureThreshold) flips them.
+    bool requestServiceHealthy_ = true;
+    bool queueServiceHealthy_   = true;
+    // Guards against re-showing the reconnect prompt every poll tick while
+    // still unhealthy -- reset the next time we go fully healthy again.
+    bool reconnectPromptShown_  = false;
+    /** Re-derives isConnectedToFirebase from requestServiceHealthy_ &&
+        queueServiceHealthy_, updates TopBar's indicator, and shows/resets
+        the manual reconnect prompt on a transition. Call after updating
+        either health flag. */
+    void updateNetworkHealthUI();
     bool audioStartupInProgress_ = false;
     bool audioStartupComplete_ = false;
 

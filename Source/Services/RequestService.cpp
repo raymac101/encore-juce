@@ -164,6 +164,26 @@ void RequestService::stop()
     DBG ("[Request] stop");
 }
 
+void RequestService::forceReconnect()
+{
+    const auto venueId = venueId_;
+    juce::Timer::stopTimer();
+    running_ = false;
+    pollInFlight_ = false;
+    consecutiveFailures_ = 0;
+    reportedUnhealthy_ = false;
+    seenStatus_.clear();
+
+    if (venueId.isEmpty())
+        return;
+
+    venueId_ = venueId;
+    running_ = true;
+    DBG ("[Request] forced reconnect for venues/" << venueId_ << "/requested");
+    juce::Timer::startTimer(pollIntervalMs_);
+    poll();
+}
+
 void RequestService::timerCallback()
 {
     poll();
@@ -176,20 +196,49 @@ void RequestService::poll()
 
     pollInFlight_ = true;
     const auto venueId = venueId_;
-    juce::WeakReference<juce::Timer> wr; // no-op; we capture by raw
 
     juce::Thread::launch([this, venueId]
     {
         const auto path = "venues/" + venueId + "/requested";
-        auto docs = FC::getInstance().listCollection(path, 200);
+        bool ok = false;
+        auto docs = FC::getInstance().listCollection(path, 200, &ok);
 
-        juce::MessageManager::callAsync([this, venueId, docs = std::move(docs)]() mutable
+        juce::MessageManager::callAsync([this, venueId, ok, docs = std::move(docs)]() mutable
         {
+            pollInFlight_ = false;
+
             // Drop late results if user switched venue or stopped while we
             // were in flight.
-            if (running_ && venueId == venueId_)
-                dispatch(docs);
-            pollInFlight_ = false;
+            if (! running_ || venueId != venueId_)
+                return;
+
+            if (! ok)
+            {
+                // A failed poll (dropped connection, timeout, watchdog trip)
+                // comes back with an empty doc list indistinguishable from a
+                // genuinely empty /requested collection -- dispatching it
+                // would prune every doc out of seenStatus_ and re-fire
+                // already-processed requests once the connection recovers.
+                // Just skip this tick.
+                DBG ("[Request] poll failed -- skipping this tick");
+                if (++consecutiveFailures_ == kUnhealthyFailureThreshold && ! reportedUnhealthy_)
+                {
+                    reportedUnhealthy_ = true;
+                    if (onConnectionHealthChanged)
+                        onConnectionHealthChanged(false);
+                }
+                return;
+            }
+
+            if (reportedUnhealthy_)
+            {
+                reportedUnhealthy_ = false;
+                if (onConnectionHealthChanged)
+                    onConnectionHealthChanged(true);
+            }
+            consecutiveFailures_ = 0;
+
+            dispatch(docs);
         });
     });
 }

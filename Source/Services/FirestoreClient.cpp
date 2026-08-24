@@ -8,6 +8,7 @@
 
 #include "FirestoreClient.h"
 #include "../Firebase/FirebaseConfig.h"
+#include <memory>
 
 namespace
 {
@@ -151,37 +152,70 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
 
     auto headersStr = headers.joinIntoString("\r\n");
 
-    int status = 0;
-    juce::StringPairArray responseHeaders;
-
-    auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
-                    .withConnectionTimeoutMs(15000)
-                    .withExtraHeaders(headersStr)
-                    .withHttpRequestCmd(httpMethod)
-                    .withResponseHeaders(&responseHeaders)
-                    .withStatusCode(&status);
-
-    std::unique_ptr<juce::InputStream> stream(u.createInputStream(opts));
-    if (httpStatus != nullptr) *httpStatus = status;
-
-    if (stream == nullptr)
+    // withConnectionTimeoutMs() only bounds establishing the connection --
+    // once a flaky venue wifi link accepts the socket and then stalls
+    // mid-response (dropped packets, no clean FIN/RST), readEntireStreamAsString()
+    // below has no timeout of its own and can block forever. That hang used
+    // to wedge RequestService's/QueueService's in-flight flags permanently
+    // (every subsequent 3s timer tick became a silent no-op) and, because
+    // QueueService::writeLock_ is held across the call, also blocked every
+    // later manual "add to queue" on the desktop UI -- the only fix was
+    // restarting the app. Race the request against a hard deadline instead:
+    // if it doesn't finish in time, report failure immediately so callers
+    // can recover, and let the helper thread finish (or not) on its own.
+    struct RawResult
     {
-        DBG("FirestoreClient: connection failed for " << u.toString(false));
+        juce::var parsed;
+        int       status = 0;
+    };
+    auto result = std::make_shared<RawResult>();
+    auto done   = std::make_shared<juce::WaitableEvent>();
+
+    juce::Thread::launch([u, httpMethod, headersStr, result, done]
+    {
+        int status = 0;
+        juce::StringPairArray responseHeaders;
+
+        auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                        .withConnectionTimeoutMs(15000)
+                        .withExtraHeaders(headersStr)
+                        .withHttpRequestCmd(httpMethod)
+                        .withResponseHeaders(&responseHeaders)
+                        .withStatusCode(&status);
+
+        std::unique_ptr<juce::InputStream> stream(u.createInputStream(opts));
+        result->status = status;
+
+        if (stream == nullptr)
+        {
+            DBG("FirestoreClient: connection failed for " << u.toString(false));
+            done->signal();
+            return;
+        }
+
+        auto responseBody = stream->readEntireStreamAsString();
+        if (responseBody.isNotEmpty())
+        {
+            juce::var parsed;
+            if (juce::JSON::parse(responseBody, parsed).wasOk())
+                result->parsed = parsed;
+            else
+                DBG("FirestoreClient: JSON parse failed (" << status << "): " << responseBody.substring(0, 400));
+        }
+        done->signal();
+    });
+
+    constexpr int kRequestWatchdogMs = 20000;
+    if (! done->wait(kRequestWatchdogMs))
+    {
+        juce::Logger::writeToLog("FirestoreClient: request timed out after "
+                                  + juce::String(kRequestWatchdogMs) + "ms for " + u.toString(false));
+        if (httpStatus != nullptr) *httpStatus = 0;
         return juce::var();
     }
 
-    auto responseBody = stream->readEntireStreamAsString();
-    if (responseBody.isEmpty())
-        return juce::var();
-
-    juce::var parsed;
-    auto result = juce::JSON::parse(responseBody, parsed);
-    if (result.failed())
-    {
-        DBG("FirestoreClient: JSON parse failed (" << status << "): " << responseBody.substring(0, 400));
-        return juce::var();
-    }
-    return parsed;
+    if (httpStatus != nullptr) *httpStatus = result->status;
+    return result->parsed;
 }
 
 //==============================================================================

@@ -124,7 +124,16 @@
       "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -H \"Authorization: Bearer KaraokeWorld\" \"https://us-central1-tagg-9ee2b.cloudfunctions.net/app/searchArtistName/Brandon%20Garth\")",
       "WebFetch(domain:rapidapi.com)",
       "Bash(awk '/void MainComponent::loadAndPlaySong/,0' Source/UI/MainComponent.cpp)",
-      "Bash(grep -n \"^.\\\\{0,4\\\\}juce::File audioFile\\\\|audioFile =\")"
+      "Bash(grep -n \"^.\\\\{0,4\\\\}juce::File audioFile\\\\|audioFile =\")",
+      "Bash([ -d \"$JUCE_DIR\" ])",
+      "Bash(find / -maxdepth 4 -iname \"JUCE*\" -type d)",
+      "Bash(which cmake *)",
+      "Read(//Applications/**)",
+      "Bash(xcodebuild -project EncoreJUCE.xcodeproj -list)",
+      "Bash(xcodebuild -project EncoreJUCE.xcodeproj -target EncoreJUCE -configuration Debug build)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-ray-Projects-Code-Projects-encore-juce/09c6bf86-0abb-47d1-95a5-023f280495dd/scratchpad)",
+      "Bash(git checkout *)"
     ]
   }
 }

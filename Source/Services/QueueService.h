@@ -118,6 +118,20 @@ public:
     /** Configure the watcher cadence (default 3000 ms). */
     void setWatchIntervalMs(int ms) noexcept { watchIntervalMs_ = juce::jmax(500, ms); }
 
+    /** Fired on the message thread when the watcher transitions between
+        healthy (poll succeeding) and unhealthy (kUnhealthyFailureThreshold
+        consecutive failed polls -- a real outage, not a single blip). Set
+        once at startup; replaced rather than added. */
+    std::function<void(bool healthy)> onConnectionHealthChanged;
+
+    /** Immediately clear in-flight/failure state and restart the watcher
+        for the current venue, even though startWatching() would otherwise
+        just swap the callback because we're already "watching" it. Used by
+        the UI's manual "Reconnect Now" action so the user isn't stuck
+        waiting out the request watchdog in FirestoreClient. Safe to call
+        from the message thread; no-ops if nothing is being watched yet. */
+    void forceReconnect();
+
 private:
     QueueService() = default;
 
@@ -155,6 +169,10 @@ private:
     int               watchIntervalMs_ = 3000;
     juce::String      lastFingerprint_;
     ChangeCallback    onChange_;
+
+    static constexpr int kUnhealthyFailureThreshold = 3;
+    int               consecutiveFailures_ = 0;
+    bool              reportedUnhealthy_   = false;
 
     // Serializes read-modify-write sequences (list -> mutate -> PATCH/POST)
     // across appendSong/removeSong/patchSingerSongs/persistSingerOrder/
