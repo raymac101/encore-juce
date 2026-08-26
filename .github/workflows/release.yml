@@ -76,7 +76,7 @@ jobs:
       - name: Build installer (Inno Setup)
         shell: cmd
         run: |
-          iscc packaging\windows\installer.iss /DMyAppVersion=%VERSION% /DSourceExe="build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
+          iscc packaging\windows\installer.iss /DMyAppVersion=%VERSION% /DSourceExe="%CD%\build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
 
       - name: Compute sha256
         shell: bash
