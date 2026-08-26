@@ -343,6 +343,13 @@ public:
     bool getRoomEqEnabled() const;
     void setRoomEqEnabled(bool enabled);
 
+    //--- Background audio analysis (tempo/key/duration) -----------------------
+    // Persists across restarts: if the KJ paused it because it was eating too
+    // many resources during a show, it should stay paused until they
+    // explicitly resume it, not silently restart on next launch.
+    bool getAudioAnalysisPaused() const;
+    void setAudioAnalysisPaused(bool paused);
+
     //--- Search column widths --------------------------------------------------
     // Stored as a JSON array of 7 numbers (fractions that sum to ~1.0):
     // art, song, artist, version, year, genre, edit. Empty vector if not set.

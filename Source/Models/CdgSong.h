@@ -26,6 +26,10 @@ struct CdgSong
     std::string id;
     std::string imageUrl;
     int durationMS = 0;
+    bool durationVerified = false;          // true once durationMS was read from the
+                                             // actual local audio file rather than
+                                             // Spotify/the shared catalog -- see
+                                             // LibraryPage::runLocalAudioAnalysis.
     std::string keySignature;
     double tempo = 0.0;
     std::string songName;

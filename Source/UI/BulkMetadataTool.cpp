@@ -12,8 +12,10 @@
 #include "../Services/AiSongNameCleanupService.h"
 #include "../Services/MetadataQuotaService.h"
 #include "../Services/LibraryScanner.h"
+#include "../Services/SongDatabase.h"
 #include "../Services/UserPreferences.h"
 #include "../Localization/LocalizationManager.h"
+#include <set>
 
 namespace
 {
@@ -461,7 +463,7 @@ bool BulkMetadataTool::saveCatalog()
 //==============================================================================
 void BulkMetadataTool::refreshCounts()
 {
-    setStatus ("Scanning catalog...");
+    setStatus ("Scanning your library...");
     refreshCountsButton_.setEnabled (false);
 
     juce::Component::SafePointer<BulkMetadataTool> safe (this);
@@ -484,8 +486,26 @@ void BulkMetadataTool::refreshCounts()
             return;
         }
 
+        // Scope the count/target list to THIS venue's actual scanned library,
+        // not the whole shared bootstrap catalog (~48.5k songs spanning every
+        // venue that's ever contributed to it). Without this, "songs with
+        // metadata" answers "how complete is the shared catalog" rather than
+        // "how many of my songs have metadata" -- wildly inflating the number
+        // a single venue sees, since most catalog rows belong to nobody's
+        // local library here.
+        SongDatabase db;
+        std::vector<CdgSong> localSongs;
+        if (db.open())
+            localSongs = db.getAll();
+
+        std::set<juce::String> localKeys;
+        for (auto& s : localSongs)
+            localKeys.insert (LibraryScanner::normaliseSongKey (
+                juce::String (s.artistName), juce::String (s.songName)));
+
         int withMeta = 0, withoutMeta = 0;
         std::vector<juce::String> missingDocIds;
+        std::set<juce::String> matchedKeys;
 
         auto* rootObj = safe->catalogRoot_.getDynamicObject();
         auto& props = rootObj->getProperties();
@@ -494,6 +514,15 @@ void BulkMetadataTool::refreshCounts()
             auto* entryObj = props.getValueAt (i).getDynamicObject();
             if (entryObj == nullptr) continue;
 
+            const auto key = LibraryScanner::normaliseSongKey (
+                entryObj->getProperty ("artistName").toString(),
+                entryObj->getProperty ("songName").toString());
+
+            if (localKeys.find (key) == localKeys.end())
+                continue; // catalog row not present in this venue's library -- not ours to count
+
+            matchedKeys.insert (key);
+
             if (entryHasMetadata (entryObj))
                 ++withMeta;
             else
@@ -501,6 +530,30 @@ void BulkMetadataTool::refreshCounts()
                 ++withoutMeta;
                 missingDocIds.push_back (props.getName (i).toString());
             }
+        }
+
+        // Local songs with no catalog row at all definitely have no metadata.
+        // Synthesize a bare catalog entry (artist/song only) for each so the
+        // existing docId-keyed run/save machinery can fetch and persist their
+        // metadata like any other catalog entry; only written to disk once a
+        // run against it actually succeeds (see finalizeRun -- saveCatalog()
+        // only runs when runSucceeded_ > 0).
+        for (auto& s : localSongs)
+        {
+            const auto key = LibraryScanner::normaliseSongKey (
+                juce::String (s.artistName), juce::String (s.songName));
+            if (matchedKeys.find (key) != matchedKeys.end())
+                continue;
+            matchedKeys.insert (key); // dedupe multiple local files mapping to the same key
+
+            const auto newDocId = "local-" + juce::Uuid().toString();
+            juce::DynamicObject::Ptr newEntry = new juce::DynamicObject();
+            newEntry->setProperty ("artistName", juce::String (s.artistName));
+            newEntry->setProperty ("songName",   juce::String (s.songName));
+            rootObj->setProperty (juce::Identifier (newDocId), juce::var (newEntry.get()));
+
+            ++withoutMeta;
+            missingDocIds.push_back (newDocId);
         }
 
         juce::MessageManager::callAsync ([safe, withMeta, withoutMeta, missing = std::move (missingDocIds)]() mutable
@@ -512,8 +565,8 @@ void BulkMetadataTool::refreshCounts()
             safe->missingDocIds_ = std::move (missing);
 
             safe->statsLabel_.setText (
-                juce::String (withMeta) + " songs with metadata, "
-                + juce::String (withoutMeta) + " without metadata", juce::dontSendNotification);
+                juce::String (withMeta) + " of " + juce::String (withMeta + withoutMeta)
+                + " songs in your library have metadata", juce::dontSendNotification);
 
             safe->refreshCountsButton_.setEnabled (true);
             safe->setStatus ({});

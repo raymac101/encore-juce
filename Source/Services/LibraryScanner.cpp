@@ -676,6 +676,12 @@ CdgSong LibraryScanner::buildSong(const juce::String& baseName,
     // always produces the same ID and maps to one songbook entry.
     song.id = makeSongId(artist, songTitle, "").toStdString();
 
+    // Real, locally-decoded duration is intentionally NOT measured here --
+    // opening/decoding (or zip-extracting) every file synchronously during
+    // the scan made large-library scans dramatically slower. It's measured
+    // afterward in the background instead, alongside tempo/key analysis --
+    // see LibraryPage::runLocalAudioAnalysis / needsAudioAnalysis().
+
     return song;
 }
 
@@ -856,6 +862,7 @@ bool LibraryScanner::saveSongbook(const std::vector<CdgSong>& songs)
         obj->setProperty("keySignature", juce::String(s.keySignature));
         obj->setProperty("releaseDate",  juce::String(s.releaseDate));
         obj->setProperty("durationMS",   s.durationMS);
+        obj->setProperty("durationVerified", s.durationVerified);
         obj->setProperty("tempo",        s.tempo);
         obj->setProperty("fileDate",     (juce::int64)s.fileDate);
         obj->setProperty("fileSize",     (juce::int64)s.fileSize);
@@ -1024,7 +1031,14 @@ int LibraryScanner::applyLocalMetadata(std::vector<CdgSong>& songs)
         s.imageUrl     = meta.imageUrl;
         s.keySignature = meta.keySignature;
         s.releaseDate  = meta.releaseDate;
-        s.durationMS   = meta.durationMS;
+        // durationMS from the catalog is a placeholder only, used until the
+        // background analysis pass (LibraryPage::runLocalAudioAnalysis) can
+        // read the song's real, locally-decoded duration -- once verified,
+        // never let a rescan overwrite it with Spotify's commercial-track
+        // length, which frequently differs from the karaoke edit's actual
+        // length.
+        if (! s.durationVerified)
+            s.durationMS = meta.durationMS;
         s.tempo        = meta.tempo;
         if (! meta.genres.empty())
             s.genres = meta.genres;

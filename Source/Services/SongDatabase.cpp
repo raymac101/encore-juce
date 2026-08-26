@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS songs (
     versions      TEXT    DEFAULT '[]',
     codes         TEXT    DEFAULT '[]',
     ratings       TEXT    DEFAULT '[]',
-    added_at      INTEGER DEFAULT 0
+    added_at      INTEGER DEFAULT 0,
+    duration_verified INTEGER DEFAULT 0
 );
 )SQL";
 
@@ -85,16 +86,19 @@ INSERT INTO songs
     (id, song_name, artist_name, image_url, key_signature,
      tempo, duration_ms, release_date, file_date, file_size,
      full_paths, file_names, file_paths, file_types,
-     genres, versions, codes, ratings, added_at)
+     genres, versions, codes, ratings, added_at, duration_verified)
 VALUES
-    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     song_name    = excluded.song_name,
     artist_name  = excluded.artist_name,
     image_url    = excluded.image_url,
     key_signature= excluded.key_signature,
     tempo        = excluded.tempo,
-    duration_ms  = excluded.duration_ms,
+    -- A verified, real, locally-decoded duration is never overwritten by a
+    -- rescan's catalog/Spotify-sourced value (see LibraryScanner::applyLocalMetadata).
+    duration_ms       = CASE WHEN songs.duration_verified <> 0 THEN songs.duration_ms ELSE excluded.duration_ms END,
+    duration_verified = CASE WHEN songs.duration_verified <> 0 THEN songs.duration_verified ELSE excluded.duration_verified END,
     release_date = excluded.release_date,
     file_date    = excluded.file_date,
     file_size    = excluded.file_size,
@@ -113,7 +117,7 @@ static const char* kSelectAll = R"SQL(
 SELECT id, song_name, artist_name, image_url, key_signature,
        tempo, duration_ms, release_date, file_date, file_size,
        full_paths, file_names, file_paths, file_types,
-       genres, versions, codes, ratings, added_at
+       genres, versions, codes, ratings, added_at, duration_verified
 FROM songs
 ORDER BY artist_name COLLATE NOCASE ASC,
          song_name   COLLATE NOCASE ASC;
@@ -123,7 +127,7 @@ static const char* kSelectById = R"SQL(
 SELECT id, song_name, artist_name, image_url, key_signature,
        tempo, duration_ms, release_date, file_date, file_size,
        full_paths, file_names, file_paths, file_types,
-       genres, versions, codes, ratings, added_at
+       genres, versions, codes, ratings, added_at, duration_verified
 FROM songs WHERE id = ?;
 )SQL";
 
@@ -144,7 +148,7 @@ static const char* kSelectByNameArtist = R"SQL(
 SELECT id, song_name, artist_name, image_url, key_signature,
        tempo, duration_ms, release_date, file_date, file_size,
        full_paths, file_names, file_paths, file_types,
-       genres, versions, codes, ratings, added_at
+       genres, versions, codes, ratings, added_at, duration_verified
 FROM songs WHERE song_name = ?1 COLLATE NOCASE AND artist_name = ?2 COLLATE NOCASE
 ORDER BY LENGTH(versions) DESC
 LIMIT 1;
@@ -155,7 +159,7 @@ static const char* kSearchFts = R"SQL(
 SELECT s.id, s.song_name, s.artist_name, s.image_url, s.key_signature,
        s.tempo, s.duration_ms, s.release_date, s.file_date, s.file_size,
        s.full_paths, s.file_names, s.file_paths, s.file_types,
-       s.genres, s.versions, s.codes, s.ratings, s.added_at
+       s.genres, s.versions, s.codes, s.ratings, s.added_at, s.duration_verified
 FROM songs_fts f
 JOIN songs s ON s.rowid = f.rowid
 WHERE songs_fts MATCH ?
@@ -238,6 +242,9 @@ bool SongDatabase::createSchema()
     // that's expected and safe to ignore.
     sqlite3_exec(db_,
         "ALTER TABLE songs ADD COLUMN added_at INTEGER DEFAULT 0;",
+        nullptr, nullptr, nullptr);
+    sqlite3_exec(db_,
+        "ALTER TABLE songs ADD COLUMN duration_verified INTEGER DEFAULT 0;",
         nullptr, nullptr, nullptr);
 
     return true;
@@ -339,6 +346,7 @@ void SongDatabase::bindSong(sqlite3_stmt* stmt, const CdgSong& song) const
     bindText(17, vecToJson(song.code));
     bindText(18, dblVecToJson(song.rating));
     sqlite3_bind_int64  (stmt, 19, static_cast<sqlite3_int64>(song.addedAt));
+    sqlite3_bind_int    (stmt, 20, song.durationVerified ? 1 : 0);
 }
 
 // static
@@ -369,6 +377,7 @@ CdgSong SongDatabase::rowToSong(sqlite3_stmt* stmt)
     s.code         = jsonToStrVec(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16)));
     s.rating       = jsonToDblVec(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17)));
     s.addedAt      = static_cast<int64_t>(sqlite3_column_int64(stmt, 18));
+    s.durationVerified = sqlite3_column_int(stmt, 19) != 0;
     return s;
 }
 

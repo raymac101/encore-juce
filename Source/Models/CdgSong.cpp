@@ -54,6 +54,7 @@ juce::String CdgSong::toJson() const
     obj->setProperty("id", juce::String(id));
     obj->setProperty("imageUrl", juce::String(imageUrl));
     obj->setProperty("durationMS", durationMS);
+    obj->setProperty("durationVerified", durationVerified);
     obj->setProperty("keySignature", juce::String(keySignature));
     obj->setProperty("tempo", tempo);
     obj->setProperty("songName", juce::String(songName));
@@ -91,6 +92,7 @@ CdgSong CdgSong::fromJsonObject(juce::DynamicObject* obj)
     s.id           = obj->getProperty("id").toString().toStdString();
     s.imageUrl     = obj->getProperty("imageUrl").toString().toStdString();
     s.durationMS   = (int)obj->getProperty("durationMS");
+    s.durationVerified = (bool)obj->getProperty("durationVerified");
     s.keySignature = obj->getProperty("keySignature").toString().toStdString();
     s.tempo        = (double)obj->getProperty("tempo");
     s.songName     = obj->getProperty("songName").toString().toStdString();

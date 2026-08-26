@@ -3,11 +3,17 @@
 
     BulkMetadataTool.h
 
-    Viracicom Admin > Bulk Metadata Tool. Operates on the bundled master
-    catalog (assets/data/meta_data.json, copied to the writable app-data dir
-    by LibraryScanner -- ~48,500 songs), NOT any one venue's library: shows
-    how many catalog entries have full metadata vs. are still missing it,
-    lets the admin run a batch of 100/250/500/1000 through
+    Viracicom Admin > Bulk Metadata Tool. Backed by the bundled master catalog
+    (assets/data/meta_data.json, copied to the writable app-data dir by
+    LibraryScanner -- ~48,500 songs spanning every venue that's contributed
+    to it), but scoped to THIS venue's actual scanned local library: on
+    refresh it loads the local SongDatabase, keys each catalog row and each
+    local song by LibraryScanner::normaliseSongKey(), and only counts/targets
+    catalog rows that match a song actually in this library (local songs with
+    no catalog row at all get a bare placeholder row synthesized so they can
+    still be targeted). Shows how many of the venue's own songs have full
+    metadata vs. are still missing it, lets the admin run a batch of
+    100/250/500/1000 through
     ApiService::searchArtistAndSong() (optionally AI-precleaned first via
     AiSongNameCleanupService), respects the shared daily Spotify quota
     (MetadataQuotaService), and either:

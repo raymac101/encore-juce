@@ -1122,6 +1122,19 @@ void UserPreferences::setRoomEqEnabled(bool enabled)
     save();
 }
 
+bool UserPreferences::getAudioAnalysisPaused() const
+{
+    const juce::ScopedLock sl(lock_);
+    return (bool) root_.getProperty("audioAnalysisPaused", false);
+}
+
+void UserPreferences::setAudioAnalysisPaused(bool paused)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("audioAnalysisPaused", paused);
+    save();
+}
+
 //==============================================================================
 int UserPreferences::getVuMeterStyle() const
 {

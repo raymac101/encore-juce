@@ -142,7 +142,11 @@
       "Read(//Users/ray/Library/Application Support/**)",
       "Bash(grep -i \"runQuery failed\\\\|members\" \"/Users/ray/Library/Logs/EncoreKaraoke/EncoreKaraoke.log\" 2>/dev/null | tail -20)",
       "Read(//Users/ray/Library/Logs/EncoreKaraoke/**)",
-      "Bash(cmake --preset macos-debug -DJUCE_SOURCE_DIR=\"/Users/ray/Projects/Code Projects/encore-juce/JUCE\")"
+      "Bash(cmake --preset macos-debug -DJUCE_SOURCE_DIR=\"/Users/ray/Projects/Code Projects/encore-juce/JUCE\")",
+      "Bash(find '/Users/raymac/Library/Application Support' -iname songbook* -o -iname *.sqlite)",
+      "Bash(kill %1)",
+      "Bash(jobs)",
+      "Bash(xargs -I{} sh -c 'echo {}; grep -n \"resolvePlayableAudioFile\\\\|class KeyBpmAnalyzer\\\\|^#include\\\\|static\\\\|decodeMonoAnalysisWindow\" {}')"
     ]
   }
 }

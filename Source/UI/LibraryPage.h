@@ -222,6 +222,11 @@ private:
     std::unique_ptr<juce::Label> statsUnknownLabel_;
     std::unique_ptr<juce::Label> statsGroupsLabel_;
 
+    // Background audio analysis (tempo/key/duration) -- visible only while
+    // runLocalAudioAnalysis has work pending or in flight.
+    std::unique_ptr<juce::Label>      audioAnalysisStatusLabel_;
+    std::unique_ptr<juce::TextButton> audioAnalysisPauseBtn_;
+
     //==========================================================================
     // Data
     SongDatabase                  songDb_;   // SQLite index; opened in constructor
@@ -232,6 +237,18 @@ private:
     int                           globalScanTaskId_ = 0;
     juce::String                  activeVenueId_;
     int                           statusMessageToken_ = 0;
+
+    // Background audio analysis (tempo/key/duration) state
+    bool audioAnalysisRunning_ = false;
+    bool audioAnalysisPaused_ = false;
+    int  audioAnalysisTotal_ = 0;
+    int  audioAnalysisDone_ = 0;
+    int  globalAudioAnalysisTaskId_ = 0;
+    // Re-invoking this resumes exactly where the sequential pass left off --
+    // see runLocalAudioAnalysis(). Null when no pass is in flight/paused.
+    std::shared_ptr<std::function<void()>> audioAnalysisResume_;
+
+    void updateAudioAnalysisUI();
 
     // FileChooser must outlive the callback lambda
     std::shared_ptr<juce::FileChooser> fileChooser_;
