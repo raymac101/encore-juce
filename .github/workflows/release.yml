@@ -51,6 +51,12 @@ jobs:
           git -C "$RUNNER_TEMP/JUCE" fetch --depth 1 origin "$JUCE_COMMIT"
           git -C "$RUNNER_TEMP/JUCE" checkout FETCH_HEAD
 
+      # CMakeLists.txt falls back to vcpkg's default install location
+      # (C:/vcpkg, already present on windows-latest runners) when
+      # VCPKG_ROOT isn't set, so just install into it.
+      - name: Install rubberband + sqlite3 (vcpkg)
+        run: vcpkg install rubberband sqlite3 --triplet x64-windows
+
       - name: Configure
         run: cmake --preset windows-release -DJUCE_SOURCE_DIR="$env:RUNNER_TEMP/JUCE"
 
@@ -153,6 +159,9 @@ jobs:
           git -C "$RUNNER_TEMP/JUCE" remote add origin https://github.com/juce-framework/JUCE.git
           git -C "$RUNNER_TEMP/JUCE" fetch --depth 1 origin "$JUCE_COMMIT"
           git -C "$RUNNER_TEMP/JUCE" checkout FETCH_HEAD
+
+      - name: Install rubberband (Homebrew)
+        run: brew install rubberband
 
       - name: Configure
         run: cmake --preset macos-release -DJUCE_SOURCE_DIR="$RUNNER_TEMP/JUCE"
