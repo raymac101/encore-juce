@@ -148,7 +148,13 @@
       "Bash(jobs)",
       "Bash(xargs -I{} sh -c 'echo {}; grep -n \"resolvePlayableAudioFile\\\\|class KeyBpmAnalyzer\\\\|^#include\\\\|static\\\\|decodeMonoAnalysisWindow\" {}')",
       "Bash(xargs sed -n '75,95p')",
-      "Bash(node --check firebase/functions/index.js)"
+      "Bash(node --check firebase/functions/index.js)",
+      "Bash(xargs -I{} sh -c 'echo ---{}---; cat {}')",
+      "Bash(curl -s -D - \"https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2Fmanifest.json?alt=media\" -o /private/tmp/claude-501/-Volumes-MediaDrive-CodeProjects-Encore-Encore-Juce-encore-juce/7e7497dd-822a-4701-8078-075cb05a928e/scratchpad/live_manifest_check.json)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(p['name'], '->', p.get\\('binaryDir','\\(default\\)'\\)\\) for p in d.get\\('configurePresets',[]\\)]\")",
+      "Bash(shasum -a 256 \"dist/EncoreKaraoke-3.1.293-mac.dmg\")",
+      "Bash(spctl -a -vv -t install \"dist/EncoreKaraoke-3.1.293-mac.dmg\")",
+      "Bash(echo \"\\(exit code: $?\\)\")"
     ]
   }
 }
