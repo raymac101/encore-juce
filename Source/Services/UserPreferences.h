@@ -115,6 +115,19 @@ public:
     float getMicGain(int micIndex) const;
     void  setMicGain(int micIndex, float gain);
 
+    //--- Audio volume levels (0.0-1.0) ------------------------------------------
+    // Persisted so these don't silently reset to a hardcoded default every
+    // restart -- defaults below match what AudioEngine/BackgroundMusicPlayer
+    // used to hardcode before this existed.
+    float getBackgroundMusicVolume() const;
+    void  setBackgroundMusicVolume(float volume01);
+    float getMasterVolume() const;
+    void  setMasterVolume(float volume01);
+    float getMusicVolume() const;
+    void  setMusicVolume(float volume01);
+    float getSfxVolume() const;
+    void  setSfxVolume(float volume01);
+
     //--- Setup flag ------------------------------------------------------------
     bool getSetupCompleted() const;
     void setSetupCompleted(bool completed);

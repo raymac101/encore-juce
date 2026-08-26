@@ -38,17 +38,21 @@ static bool needsRemoteMetadata(const CdgSong& song)
     return ! song.hasMetadata();
 }
 
-// tempo/keySignature are intentionally NOT part of CdgSong::hasMetadata()
-// (Spotify can no longer supply them -- see KeyBpmAnalyzer.h), so they need
-// their own separate "still missing" check to drive the local analysis pass.
-// durationVerified is included too: an unverified durationMS may just be a
-// Spotify/catalog placeholder (see LibraryScanner::applyLocalMetadata) that
-// still needs a real, locally-decoded reading -- checking durationVerified
-// rather than durationMS>0 is what lets this pass go back and correct an
-// already-populated-but-wrong catalog value instead of treating it as done.
+// Gated on durationVerified ALONE, not on tempo/keySignature being non-empty.
+// runLocalAudioAnalysis() always sets durationVerified together with (but
+// unconditionally of) the tempo/key attempt in the same completion step --
+// for a real chunk of songs, KeyBpmAnalyzer::analyze() legitimately can't
+// produce a confident tempo/key estimate (quiet intros, sparse arrangements,
+// etc.), which is a deterministic, repeatable outcome for that file, not a
+// transient failure. Gating on tempo/keySignature too meant those songs
+// could never satisfy this check no matter how many times they were
+// (successfully) reprocessed, so they got permanently re-queued on every
+// single session forever. durationVerified reflects "this song has been
+// through a real analysis attempt" regardless of whether tempo/key came
+// back with an answer, which is what should stop the re-queueing.
 static bool needsAudioAnalysis(const CdgSong& song)
 {
-    return song.tempo <= 0.0 || song.keySignature.empty() || ! song.durationVerified;
+    return ! song.durationVerified;
 }
 
 namespace
@@ -64,6 +68,7 @@ namespace
     };
 
     constexpr int kAudioAnalysisCheckpointInterval = 200;
+    constexpr int kAudioAnalysisTimeoutMs = 30000; // see the watchdog in runLocalAudioAnalysis()
 }
 
 //==============================================================================
@@ -175,13 +180,13 @@ LibraryPage::LibraryPage()
 
     makeStatLabel(statsTotalLabel_);
     makeStatLabel(statsMetaLabel_);
+    makeStatLabel(statsAnalyzedLabel_);
     makeStatLabel(statsCDGLabel_);
     makeStatLabel(statsZipLabel_);
     makeStatLabel(statsMP4Label_);
     makeStatLabel(statsM4ALabel_);
     makeStatLabel(statsXMLLabel_);
     makeStatLabel(statsUnknownLabel_);
-    makeStatLabel(statsGroupsLabel_);
 
     //--------------------------------------------------------------------------
     // Background audio analysis status row (hidden until there's work pending)
@@ -609,7 +614,7 @@ void LibraryPage::resized()
     // Grow to fit the last stats row -- lets the viewport's scrollbar reach
     // it on any window size. layoutContent() only depends on width, so a
     // second pass at the corrected height reproduces the same positions.
-    int contentBottom = statsGroupsLabel_->getBottom();
+    int contentBottom = statsUnknownLabel_->getBottom();
     int bottomMargin = 16;
     if (audioAnalysisPauseBtn_->isVisible())
     {
@@ -662,9 +667,14 @@ void LibraryPage::layoutContent()
         y += lineH + gap;
     }
 
-    // Message label
+    // Message label. The trailing gap here must match the "20" the header
+    // panel's height calc (see contentHolder_->onPaint) assumes sits below
+    // this label -- otherwise, whenever the progress bar is hidden (so this
+    // becomes the last thing above the button row), the panel is drawn too
+    // short and its border cuts across the message text instead of sitting
+    // below it.
     messageLabel_->setBounds(contentX, y, w, lineH - 4);
-    y += messageLabel_->isVisible() ? (lineH - 4 + 8) : 8;
+    y += messageLabel_->isVisible() ? (lineH - 4 + 20) : 8;
 
     // Button bar (4 buttons equally spaced)
     int btnGap  = 8;
@@ -689,16 +699,16 @@ void LibraryPage::layoutContent()
         if (col == 1) y += statsLineH + 4;
     };
 
-    placeStat(statsTotalLabel_.get(),   0);
-    placeStat(statsMetaLabel_.get(),    1);
-    placeStat(statsCDGLabel_.get(),     0);
-    placeStat(statsZipLabel_.get(),     1);
-    placeStat(statsMP4Label_.get(),     0);
-    placeStat(statsM4ALabel_.get(),     1);
-    placeStat(statsXMLLabel_.get(),     0);
-    placeStat(statsUnknownLabel_.get(), 1);
-    placeStat(statsGroupsLabel_.get(),  0);
-    y += statsLineH + 4;
+    placeStat(statsTotalLabel_.get(),    0);
+    placeStat(statsMetaLabel_.get(),     1);
+    placeStat(statsCDGLabel_.get(),      0);
+    placeStat(statsAnalyzedLabel_.get(), 1); // directly under Metadata Available
+    placeStat(statsZipLabel_.get(),      0);
+    placeStat(statsMP4Label_.get(),      1);
+    placeStat(statsM4ALabel_.get(),      0);
+    placeStat(statsXMLLabel_.get(),      1);
+    placeStat(statsUnknownLabel_.get(),  0);
+    y += statsLineH + 4; // odd number of stat rows -- last one lands alone in col 0, so placeStat's col==1 auto-advance never fires for it
 
     if (audioAnalysisStatusLabel_->isVisible())
     {
@@ -1275,11 +1285,44 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
         // from the analysis thread, so there's no data race to reason about.
         const CdgSong current = owner->songs_[songIndex];
 
+        owner->audioAnalysisCurrentSong_ = juce::String(current.artistName) + " - " + juce::String(current.songName);
+        owner->updateAudioAnalysisUI();
+
+        // Guards against double-handling one song: whichever of the timeout
+        // below or the real completion (inside the background thread) fires
+        // first wins and advances the pass; the other becomes a no-op.
+        auto handled = std::make_shared<std::atomic<bool>>(false);
+
+        // Watchdog: some libraries live on slow or unreliable network-mounted
+        // volumes where a single stuck file read can hang indefinitely with
+        // no error and no timeout of its own. Since this pass processes one
+        // song at a time, a single hang like that would otherwise block
+        // every song behind it forever -- which looks exactly like "the
+        // same N songs never finish analyzing no matter how many times I
+        // run it" (they never even get a chance to run). If the real
+        // completion hasn't fired within kAudioAnalysisTimeoutMs, give up on
+        // this song and move on; the original background thread is left to
+        // finish (or keep hanging) harmlessly on its own.
+        juce::Timer::callAfterDelay(kAudioAnalysisTimeoutMs, [state, processNext, songIndex, handled]()
+        {
+            if (handled->exchange(true))
+                return;
+
+            auto* ownerInner = state->owner.getComponent();
+            if (ownerInner != nullptr && songIndex < ownerInner->songs_.size())
+            {
+                ownerInner->songs_[songIndex].durationVerified = true;
+                ownerInner->audioAnalysisDone_ = (int) state->position;
+                ownerInner->updateAudioAnalysisUI();
+            }
+            (*processNext)();
+        });
+
         // Low priority (efficiency cores where available) -- this decodes
         // audio files for BPM/key/duration analysis, the same kind of work
         // as live playback, so it must never contend with the audio thread
         // if a venue is mid-show.
-        juce::Thread::launch(juce::Thread::Priority::low, [state, processNext, songIndex, current]()
+        juce::Thread::launch(juce::Thread::Priority::low, [state, processNext, songIndex, current, handled]()
         {
             juce::File tempFile;
             auto audioFile = KeyBpmAnalyzer::resolvePlayableAudioFile(current, 0, tempFile);
@@ -1304,8 +1347,11 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
             if (tempFile.existsAsFile())
                 tempFile.deleteFile();
 
-            juce::MessageManager::callAsync([state, processNext, songIndex, analysis, measuredDurationMS]()
+            juce::MessageManager::callAsync([state, processNext, songIndex, analysis, measuredDurationMS, handled]()
             {
+                if (handled->exchange(true))
+                    return; // the watchdog already gave up on this song and moved on
+
                 auto* ownerInner = state->owner.getComponent();
                 const bool stale = ownerInner != nullptr && state->generation != ownerInner->audioAnalysisGeneration_;
                 if (ownerInner != nullptr && ! stale && songIndex < ownerInner->songs_.size())
@@ -1635,13 +1681,13 @@ void LibraryPage::refreshStats()
     auto& lm = LocalizationManager::getInstance();
     statsTotalLabel_  ->setText(fmt(lm.getText("library.stats_total")  .toRawUTF8(), stats_.numSongs),   juce::dontSendNotification);
     statsMetaLabel_   ->setText(fmt(lm.getText("library.stats_meta")   .toRawUTF8(), stats_.numMeta),    juce::dontSendNotification);
+    statsAnalyzedLabel_->setText(fmt(lm.getText("library.stats_analyzed").toRawUTF8(), stats_.numAnalyzed), juce::dontSendNotification);
     statsCDGLabel_    ->setText(fmt(lm.getText("library.stats_cdg")    .toRawUTF8(), stats_.numCDG),     juce::dontSendNotification);
     statsZipLabel_    ->setText(fmt(lm.getText("library.stats_zip")    .toRawUTF8(), stats_.numZip),     juce::dontSendNotification);
     statsMP4Label_    ->setText(fmt(lm.getText("library.stats_mp4")    .toRawUTF8(), stats_.numMP4),     juce::dontSendNotification);
     statsM4ALabel_    ->setText(fmt(lm.getText("library.stats_m4a")    .toRawUTF8(), stats_.numM4A),     juce::dontSendNotification);
     statsXMLLabel_    ->setText(fmt(lm.getText("library.stats_xml")    .toRawUTF8(), stats_.numXML),     juce::dontSendNotification);
     statsUnknownLabel_->setText(fmt(lm.getText("library.stats_unknown").toRawUTF8(), stats_.numUnknown), juce::dontSendNotification);
-    statsGroupsLabel_ ->setText(fmt(lm.getText("library.stats_groups") .toRawUTF8(), stats_.numGroups),  juce::dontSendNotification);
 
     repaint();
 }
@@ -1655,6 +1701,8 @@ void LibraryPage::updateAudioAnalysisUI()
     {
         juce::String text = (audioAnalysisPaused_ ? "Paused -- audio analysis: " : "Analyzing audio (tempo/key/duration): ")
             + juce::String(audioAnalysisDone_) + " / " + juce::String(audioAnalysisTotal_);
+        if (! audioAnalysisPaused_ && audioAnalysisCurrentSong_.isNotEmpty())
+            text += "  (" + audioAnalysisCurrentSong_ + ")";
         audioAnalysisStatusLabel_->setText(text, juce::dontSendNotification);
         audioAnalysisPauseBtn_->setButtonText(audioAnalysisPaused_ ? "Resume" : "Pause");
     }

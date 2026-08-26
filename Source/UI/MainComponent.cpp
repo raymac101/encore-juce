@@ -3050,6 +3050,23 @@ void MainComponent::setupUI()
         handleSongFinished();
     };
 
+    // Karaoke files routinely have several seconds of trailing silence
+    // (credits screen) before the file's literal end -- onAudibleEndReached
+    // fires at the trimmed boundary AudioEngine already computes by scanning
+    // backward from EOF for the last non-silent sample (see
+    // estimateAudibleEndSeconds() / getTrailingSilenceThresholdDb()), well
+    // before onSongFinished/handleSongFinished() fires at the true EOF. Only
+    // start filling the dead air with background music here -- the rest of
+    // handleSongFinished()'s cascade (autoplay/next-singer, forcing the idle
+    // screen, etc.) still needs to wait for the real end, not the audio
+    // content's end. fadeIn() is idempotent, so handleSongFinished()'s own
+    // fadeIn() moments later is a harmless no-op by then.
+    audioEngine->onAudibleEndReached = [this]()
+    {
+        if (bgPlayer_ != nullptr)
+            bgPlayer_->fadeIn (2.0f);
+    };
+
     queueBar->onCountdownFinished = [this]()
     {
         if (queueBar == nullptr) return;

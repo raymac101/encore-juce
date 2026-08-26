@@ -86,6 +86,10 @@ void AudioEngine::initialize()
     if (! setupAudioDevice())
         return;
 
+    masterVolume = UserPreferences::getInstance().getMasterVolume();
+    musicVolume  = UserPreferences::getInstance().getMusicVolume();
+    sfxVolume    = UserPreferences::getInstance().getSfxVolume();
+
     // Only actually register mic capture if the feature is enabled AND the
     // device that ended up open genuinely exposes at least one input
     // channel — a mic-input request can silently succeed with fewer
@@ -472,11 +476,23 @@ void AudioEngine::setKeyChange(int semitones)
 // Volume
 //==============================================================================
 
-void AudioEngine::setMasterVolume(float v) { masterVolume = juce::jlimit(0.0f, 1.0f, v); }
-void AudioEngine::setMusicVolume(float v)  { musicVolume  = juce::jlimit(0.0f, 1.0f, v); }
+void AudioEngine::setMasterVolume(float v)
+{
+    masterVolume = juce::jlimit(0.0f, 1.0f, v);
+    UserPreferences::getInstance().setMasterVolume(masterVolume.load());
+}
+void AudioEngine::setMusicVolume(float v)
+{
+    musicVolume = juce::jlimit(0.0f, 1.0f, v);
+    UserPreferences::getInstance().setMusicVolume(musicVolume.load());
+}
 void AudioEngine::setVocalVolume(float v)  { vocalVolume  = juce::jlimit(0.0f, 1.0f, v); }
 void AudioEngine::setVocalEffectsLevel(float l) { vocalEffectsLevel = juce::jlimit(0.0f, 1.0f, l); }
-void AudioEngine::setSfxVolume(float v)    { sfxVolume    = juce::jlimit(0.0f, 1.0f, v); }
+void AudioEngine::setSfxVolume(float v)
+{
+    sfxVolume = juce::jlimit(0.0f, 1.0f, v);
+    UserPreferences::getInstance().setSfxVolume(sfxVolume.load());
+}
 
 void AudioEngine::setVocal1Gain(float gain)
 {

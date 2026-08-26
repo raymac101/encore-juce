@@ -588,6 +588,7 @@ library.songs_loaded={n} songs loaded.
 # alignment with the numeric values displayed next to them.
 library.stats_total=Total Songs:        
 library.stats_meta=Metadata Available: 
+library.stats_analyzed=Songs Analyzed:  
 library.stats_cdg=CDG Files:          
 library.stats_zip=ZIP Files:          
 library.stats_mp4=MP4 Files:          

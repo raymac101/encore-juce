@@ -225,13 +225,13 @@ private:
     // Stats panel
     std::unique_ptr<juce::Label> statsTotalLabel_;
     std::unique_ptr<juce::Label> statsMetaLabel_;
+    std::unique_ptr<juce::Label> statsAnalyzedLabel_; // real local BPM/key/duration analysis count
     std::unique_ptr<juce::Label> statsCDGLabel_;
     std::unique_ptr<juce::Label> statsZipLabel_;
     std::unique_ptr<juce::Label> statsMP4Label_;
     std::unique_ptr<juce::Label> statsM4ALabel_;
     std::unique_ptr<juce::Label> statsXMLLabel_;
     std::unique_ptr<juce::Label> statsUnknownLabel_;
-    std::unique_ptr<juce::Label> statsGroupsLabel_;
 
     // Background audio analysis (tempo/key/duration) -- visible only while
     // runLocalAudioAnalysis has work pending or in flight.
@@ -254,6 +254,7 @@ private:
     bool audioAnalysisPaused_ = false;
     int  audioAnalysisTotal_ = 0;
     int  audioAnalysisDone_ = 0;
+    juce::String audioAnalysisCurrentSong_; // "Artist - Song" currently being decoded, for diagnosing a stuck pass
     // Re-invoking this resumes exactly where the sequential pass left off --
     // see runLocalAudioAnalysis(). Null when no pass is in flight/paused.
     std::shared_ptr<std::function<void()>> audioAnalysisResume_;

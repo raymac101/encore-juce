@@ -408,6 +408,62 @@ void UserPreferences::setMicGain(int micIndex, float gain)
     save();
 }
 
+float UserPreferences::getBackgroundMusicVolume() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto v = (float) (double) root_.getProperty("backgroundMusicVolume", juce::var(0.5));
+    return juce::jlimit(0.0f, 1.0f, v);
+}
+
+void UserPreferences::setBackgroundMusicVolume(float volume01)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("backgroundMusicVolume", juce::jlimit(0.0f, 1.0f, volume01));
+    save();
+}
+
+float UserPreferences::getMasterVolume() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto v = (float) (double) root_.getProperty("masterVolume", juce::var(0.8));
+    return juce::jlimit(0.0f, 1.0f, v);
+}
+
+void UserPreferences::setMasterVolume(float volume01)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("masterVolume", juce::jlimit(0.0f, 1.0f, volume01));
+    save();
+}
+
+float UserPreferences::getMusicVolume() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto v = (float) (double) root_.getProperty("musicVolume", juce::var(0.7));
+    return juce::jlimit(0.0f, 1.0f, v);
+}
+
+void UserPreferences::setMusicVolume(float volume01)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("musicVolume", juce::jlimit(0.0f, 1.0f, volume01));
+    save();
+}
+
+float UserPreferences::getSfxVolume() const
+{
+    const juce::ScopedLock sl(lock_);
+    auto v = (float) (double) root_.getProperty("sfxVolume", juce::var(0.85));
+    return juce::jlimit(0.0f, 1.0f, v);
+}
+
+void UserPreferences::setSfxVolume(float volume01)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("sfxVolume", juce::jlimit(0.0f, 1.0f, volume01));
+    save();
+}
+
 //==============================================================================
 bool UserPreferences::getSetupCompleted() const
 {

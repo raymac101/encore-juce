@@ -7,6 +7,7 @@
 */
 
 #include "BackgroundMusicPlayer.h"
+#include "UserPreferences.h"
 
 namespace
 {
@@ -72,6 +73,8 @@ void BackgroundMusicPlayer::initialize()
         deviceSampleRate_ = dev->getCurrentSampleRate();
 
     initialized_ = true;
+
+    targetVolume_ = UserPreferences::getInstance().getBackgroundMusicVolume();
 
     // Build default playlist from assets/music
     auto musicDir = resolveAssetDir ("assets/music");
@@ -405,6 +408,7 @@ void BackgroundMusicPlayer::seekToPosition (double seconds)
 void BackgroundMusicPlayer::setVolume (float v)
 {
     targetVolume_ = juce::jlimit (0.0f, 1.0f, v);
+    UserPreferences::getInstance().setBackgroundMusicVolume (targetVolume_.load());
     // If we're not in a fade, snap immediately.
     if (! fadingOut_.load() && ! fadingIn_.load())
         currentGain_ = targetVolume_.load();

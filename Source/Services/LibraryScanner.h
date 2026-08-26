@@ -47,6 +47,7 @@ public:
         int numUnknown        = 0;
         int numGroups         = 0;
         int numMeta           = 0;  // Songs with metadata matched
+        int numAnalyzed       = 0;  // Songs with real local audio analysis done (CdgSong::durationVerified)
         int numNew            = 0;  // Truly new songs added (append mode)
         int numAlreadyImported = 0; // Songs already in library (append mode)
     };

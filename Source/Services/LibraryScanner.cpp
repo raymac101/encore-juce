@@ -1155,6 +1155,7 @@ LibraryScanner::ScanStats LibraryScanner::computeStats(const std::vector<CdgSong
             else if (ext != "audio")   ++stats.numUnknown;
         }
         if (s.hasMetadata()) ++stats.numMeta;
+        if (s.durationVerified) ++stats.numAnalyzed;
     }
     return stats;
 }
