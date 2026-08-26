@@ -64,9 +64,14 @@ private:
     {
     public:
         std::vector<FailureRow>* rows = nullptr;
+        std::function<void (int rowNumber)> onRowClicked;
 
         int getNumRows() override { return rows != nullptr ? (int) rows->size() : 0; }
         void paintListBoxItem (int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
+        void listBoxItemClicked (int rowNumber, const juce::MouseEvent&) override
+        {
+            if (onRowClicked) onRowClicked (rowNumber);
+        }
     };
 
     //==========================================================================
@@ -93,6 +98,8 @@ private:
     void setStatus (const juce::String& msg);
     void showRunView();
     void showReportView();
+    void showManualReviewList();
+    void openManualReviewFixDialog (int rowNumber);
 
     juce::File catalogFile() const;
     bool loadCatalogIfNeeded (juce::String& outError);
@@ -100,6 +107,11 @@ private:
     static CdgSong entryToCdgSong (const juce::String& docId, juce::DynamicObject* obj);
     static void applyResultToEntry (juce::DynamicObject* obj, const CdgSong& song);
     static bool entryHasMetadata (juce::DynamicObject* obj);
+    // Rate-limit/timeout/quota-shaped errors are worth retrying next run;
+    // anything else (bad catalog entry, genuinely no Spotify match) will
+    // fail identically every time, so it's flagged for manual review
+    // instead of being re-attempted forever.
+    static bool looksTransient (const juce::String& errorMessage);
 
     //==========================================================================
     // Header
@@ -109,6 +121,7 @@ private:
     // Stats
     juce::Label      statsLabel_;
     juce::TextButton refreshCountsButton_ { "Refresh Counts" };
+    juce::TextButton reviewButton_ { "Manual Review" };
 
     // Quota
     juce::Label      quotaLabel_;
@@ -141,8 +154,11 @@ private:
     juce::ProgressBar progressBar_ { progressValue_ };
     juce::Label      statusLabel_;
 
-    // Report view
+    // Report view -- also reused (in "review mode") to show the persisted
+    // manual-review list, since it's the same "artist/song + red error text"
+    // layout either way.
     bool showingReport_ = false;
+    bool reviewMode_ = false;
     juce::Label      reportSummaryLabel_;
     ReportListModel  reportModel_;
     juce::ListBox    reportList_ { "bulkMetaReport", &reportModel_ };
@@ -153,9 +169,12 @@ private:
     // Catalog state
     juce::var   catalogRoot_;
     bool        catalogLoaded_ = false;
+    bool        catalogDirty_ = false; // true once something needs saveCatalog(), even with 0 successes
     int         countWithMetadata_ = 0;
     int         countWithoutMetadata_ = 0;
+    int         countNeedsReview_ = 0;
     std::vector<juce::String> missingDocIds_;
+    std::vector<juce::String> reviewDocIds_;
 
     // Quota state
     bool quotaLoaded_ = false;

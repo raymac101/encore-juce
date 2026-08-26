@@ -16,6 +16,7 @@
 #include "../Services/UserPreferences.h"
 #include "../Localization/LocalizationManager.h"
 #include <set>
+#include <algorithm>
 
 namespace
 {
@@ -106,6 +107,13 @@ BulkMetadataTool::BulkMetadataTool()
     refreshCountsButton_.onClick = [this]() { refreshCounts(); };
     addAndMakeVisible (refreshCountsButton_);
 
+    reviewButton_.setColour (juce::TextButton::buttonColourId, juce::Colour (kPanelColour));
+    reviewButton_.setColour (juce::TextButton::textColourOnId,  juce::Colour (kTextColour));
+    reviewButton_.setColour (juce::TextButton::textColourOffId, juce::Colour (kTextColour));
+    reviewButton_.onClick = [this]() { showManualReviewList(); };
+    reviewButton_.setEnabled (false);
+    addAndMakeVisible (reviewButton_);
+
     //--- Quota -------------------------------------------------------------------
     quotaLabel_.setColour (juce::Label::textColourId, juce::Colour (kTextColour));
     quotaLabel_.setFont (juce::Font (juce::FontOptions().withHeight (14.0f)));
@@ -193,6 +201,11 @@ BulkMetadataTool::BulkMetadataTool()
     addChildComponent (reportSummaryLabel_);
 
     reportModel_.rows = &failures_;
+    reportModel_.onRowClicked = [this] (int rowNumber)
+    {
+        if (reviewMode_)
+            openManualReviewFixDialog (rowNumber);
+    };
     reportList_.setModel (&reportModel_);
     reportList_.setRowHeight (36);
     reportList_.setColour (juce::ListBox::backgroundColourId, juce::Colour (kPanelColour));
@@ -261,6 +274,8 @@ void BulkMetadataTool::resized()
         auto row = area.removeFromTop (30);
         refreshCountsButton_.setBounds (row.removeFromRight (140));
         row.removeFromRight (10);
+        reviewButton_.setBounds (row.removeFromRight (140));
+        row.removeFromRight (10);
         statsLabel_.setBounds (row);
     }
     area.removeFromTop (10);
@@ -326,12 +341,14 @@ void BulkMetadataTool::resized()
 void BulkMetadataTool::showRunView()
 {
     showingReport_ = false;
+    reviewMode_ = false;
     reportSummaryLabel_.setVisible (false);
     reportList_.setVisible (false);
     backToToolButton_.setVisible (false);
     runNextBatchButton_.setVisible (false);
 
     for (juce::Component* c : { (juce::Component*) &statsLabel_, (juce::Component*) &refreshCountsButton_,
+                                (juce::Component*) &reviewButton_,
                                 (juce::Component*) &quotaLabel_, (juce::Component*) &refreshQuotaButton_,
                                 (juce::Component*) &aiCleanupToggle_, (juce::Component*) &apiKeyLabel_,
                                 (juce::Component*) &apiKeyEditor_, (juce::Component*) &batchSizeLabel_,
@@ -350,8 +367,10 @@ void BulkMetadataTool::showRunView()
 void BulkMetadataTool::showReportView()
 {
     showingReport_ = true;
+    reviewMode_ = false;
 
     for (juce::Component* c : { (juce::Component*) &statsLabel_, (juce::Component*) &refreshCountsButton_,
+                                (juce::Component*) &reviewButton_,
                                 (juce::Component*) &quotaLabel_, (juce::Component*) &refreshQuotaButton_,
                                 (juce::Component*) &aiCleanupToggle_, (juce::Component*) &apiKeyLabel_,
                                 (juce::Component*) &apiKeyEditor_, (juce::Component*) &batchSizeLabel_,
@@ -374,6 +393,152 @@ void BulkMetadataTool::showReportView()
     reportList_.updateContent();
 
     resized();
+}
+
+void BulkMetadataTool::showManualReviewList()
+{
+    auto* rootObj = catalogRoot_.getDynamicObject();
+    if (rootObj == nullptr)
+        return;
+
+    failures_.clear();
+    for (auto& docId : reviewDocIds_)
+    {
+        auto* entryObj = rootObj->getProperty (docId).getDynamicObject();
+        if (entryObj == nullptr) continue;
+
+        FailureRow row;
+        row.docId      = docId;
+        row.artistName = entryObj->getProperty ("artistName").toString();
+        row.songName   = entryObj->getProperty ("songName").toString();
+        row.error      = entryObj->getProperty ("lastError").toString();
+        if (row.error.isEmpty())
+            row.error = "Needs manual review.";
+        failures_.push_back (row);
+    }
+
+    showingReport_ = true;
+    reviewMode_ = true;
+
+    for (juce::Component* c : { (juce::Component*) &statsLabel_, (juce::Component*) &refreshCountsButton_,
+                                (juce::Component*) &reviewButton_,
+                                (juce::Component*) &quotaLabel_, (juce::Component*) &refreshQuotaButton_,
+                                (juce::Component*) &aiCleanupToggle_, (juce::Component*) &apiKeyLabel_,
+                                (juce::Component*) &apiKeyEditor_, (juce::Component*) &batchSizeLabel_,
+                                (juce::Component*) &batch100Button_, (juce::Component*) &batch250Button_,
+                                (juce::Component*) &batch500Button_, (juce::Component*) &batch1000Button_,
+                                (juce::Component*) &modeLabel_, (juce::Component*) &fixBrokenButton_,
+                                (juce::Component*) &notFixButton_, (juce::Component*) &runButton_,
+                                (juce::Component*) &cancelButton_, (juce::Component*) &progressLabel_,
+                                (juce::Component*) &progressBar_, (juce::Component*) &statusLabel_ })
+        c->setVisible (false);
+
+    reportSummaryLabel_.setText (
+        juce::String ((int) failures_.size()) + " song(s) need manual review -- click a row to fix and retry.",
+        juce::dontSendNotification);
+
+    reportSummaryLabel_.setVisible (true);
+    reportList_.setVisible (true);
+    backToToolButton_.setVisible (true);
+    runNextBatchButton_.setVisible (false);
+    reportList_.updateContent();
+
+    resized();
+}
+
+void BulkMetadataTool::openManualReviewFixDialog (int rowNumber)
+{
+    if (rowNumber < 0 || rowNumber >= (int) failures_.size())
+        return;
+
+    const auto row = failures_[(size_t) rowNumber]; // copy -- failures_ may be rebuilt before the dialog closes
+
+    CdgSong song;
+    song.id = row.docId.toStdString();
+    song.artistName = row.artistName.toStdString();
+    song.songName = row.songName.toStdString();
+
+    juce::Component::SafePointer<BulkMetadataTool> safe (this);
+    const auto docId = row.docId;
+    SongEditDialog::launch (this, song, {}, nullptr,
+        [safe, docId, song] (const SongEditResult& r)
+        {
+            if (safe == nullptr) return;
+
+            if (! r.isSave())
+                return; // leave it flagged exactly as it was; back to the review list underneath
+
+            const auto correctedArtist = juce::String (r.song.artistName).trim();
+            const auto correctedSong   = juce::String (r.song.songName).trim();
+
+            // Clear the flag before retrying -- beginAttempt()/handleLookupResult()
+            // will re-flag it (with a fresh error) if this attempt fails again.
+            auto* rootObj = safe->catalogRoot_.getDynamicObject();
+            auto* entryObj = rootObj != nullptr ? rootObj->getProperty (docId).getDynamicObject() : nullptr;
+            if (entryObj != nullptr)
+            {
+                entryObj->removeProperty ("needsManualReview");
+                entryObj->removeProperty ("lastError");
+            }
+
+            // A single manual retry, outside the batch-run machinery -- reuses
+            // beginAttempt()'s lookup logic but reports through a one-off
+            // handler instead of processNext()/finalizeRun(), since there's no
+            // batch in progress here.
+            safe->setStatus ("Retrying: " + correctedArtist + " - " + correctedSong + "...");
+            ApiService::getInstance().searchArtistAndSong (song, correctedArtist, correctedSong,
+                [safe, docId, correctedArtist, correctedSong] (ApiService::Result result)
+                {
+                    if (safe == nullptr) return;
+
+                    auto* rootObj2 = safe->catalogRoot_.getDynamicObject();
+                    auto* entryObj2 = rootObj2 != nullptr ? rootObj2->getProperty (docId).getDynamicObject() : nullptr;
+
+                    // refreshCounts() is async (background thread), so rather than
+                    // wait on it to know whether this docId still belongs in the
+                    // review list, update reviewDocIds_ here directly and
+                    // redisplay immediately; refreshCounts() still runs below to
+                    // keep the top-level stats label/button count honest.
+                    auto removeFromReview = [safe, docId]()
+                    {
+                        auto& v = safe->reviewDocIds_;
+                        v.erase (std::remove (v.begin(), v.end(), docId), v.end());
+                    };
+
+                    if (result.ok && result.song.hasMetadata())
+                    {
+                        if (entryObj2 != nullptr)
+                            applyResultToEntry (entryObj2, result.song);
+                        safe->saveCatalog();
+                        safe->setStatus ("Fixed: " + correctedArtist + " - " + correctedSong);
+                        removeFromReview();
+                    }
+                    else if (entryObj2 != nullptr)
+                    {
+                        const auto errorMsg = result.errorMessage.isNotEmpty()
+                            ? result.errorMessage : juce::String ("Unknown error.");
+                        if (looksTransient (errorMsg))
+                        {
+                            // Worth a normal retry later rather than staying
+                            // parked here -- let it flow back into the regular
+                            // missing-metadata pool on the next refresh/run.
+                            removeFromReview();
+                        }
+                        else
+                        {
+                            entryObj2->setProperty ("needsManualReview", true);
+                            entryObj2->setProperty ("lastError", errorMsg);
+                        }
+                        entryObj2->setProperty ("artistName", correctedArtist);
+                        entryObj2->setProperty ("songName", correctedSong);
+                        safe->saveCatalog();
+                        safe->setStatus ("Still failing: " + errorMsg);
+                    }
+
+                    safe->showManualReviewList();
+                    safe->refreshCounts();
+                });
+        });
 }
 
 //==============================================================================
@@ -403,6 +568,17 @@ bool BulkMetadataTool::entryHasMetadata (juce::DynamicObject* obj)
     const int  durationMS  = (int) obj->getProperty ("durationMS");
 
     return imageUrl.isNotEmpty() && releaseDate.isNotEmpty() && durationMS > 0;
+}
+
+// static
+bool BulkMetadataTool::looksTransient (const juce::String& errorMessage)
+{
+    const auto msg = errorMessage.toLowerCase();
+    return msg.contains ("429") || msg.contains ("too many") || msg.contains ("rate")
+        || msg.contains ("timeout") || msg.contains ("timed out")
+        || msg.contains ("could not connect") || msg.contains ("could not reach")
+        || msg.contains ("temporarily") || msg.contains ("unavailable")
+        || msg.contains ("503") || msg.contains ("quota");
 }
 
 CdgSong BulkMetadataTool::entryToCdgSong (const juce::String& docId, juce::DynamicObject* obj)
@@ -503,8 +679,9 @@ void BulkMetadataTool::refreshCounts()
             localKeys.insert (LibraryScanner::normaliseSongKey (
                 juce::String (s.artistName), juce::String (s.songName)));
 
-        int withMeta = 0, withoutMeta = 0;
+        int withMeta = 0, withoutMeta = 0, needsReview = 0;
         std::vector<juce::String> missingDocIds;
+        std::vector<juce::String> reviewDocIds;
         std::set<juce::String> matchedKeys;
 
         auto* rootObj = safe->catalogRoot_.getDynamicObject();
@@ -525,6 +702,15 @@ void BulkMetadataTool::refreshCounts()
 
             if (entryHasMetadata (entryObj))
                 ++withMeta;
+            else if ((bool) entryObj->getProperty ("needsManualReview"))
+            {
+                // Flagged by a previous failed attempt (see recordFailure()) --
+                // excluded from the auto-retry pool so it doesn't keep getting
+                // attempted every single run; surfaced instead via the
+                // "Manual Review" list for the admin to fix or ignore.
+                ++needsReview;
+                reviewDocIds.push_back (props.getName (i).toString());
+            }
             else
             {
                 ++withoutMeta;
@@ -556,17 +742,29 @@ void BulkMetadataTool::refreshCounts()
             missingDocIds.push_back (newDocId);
         }
 
-        juce::MessageManager::callAsync ([safe, withMeta, withoutMeta, missing = std::move (missingDocIds)]() mutable
+        juce::MessageManager::callAsync ([safe, withMeta, withoutMeta, needsReview,
+                                          missing = std::move (missingDocIds),
+                                          review = std::move (reviewDocIds)]() mutable
         {
             if (safe == nullptr) return;
 
             safe->countWithMetadata_ = withMeta;
             safe->countWithoutMetadata_ = withoutMeta;
+            safe->countNeedsReview_ = needsReview;
             safe->missingDocIds_ = std::move (missing);
+            safe->reviewDocIds_ = std::move (review);
 
-            safe->statsLabel_.setText (
-                juce::String (withMeta) + " of " + juce::String (withMeta + withoutMeta)
-                + " songs in your library have metadata", juce::dontSendNotification);
+            const int total = withMeta + withoutMeta + needsReview;
+            const int percent = total > 0 ? juce::roundToInt (100.0 * withMeta / total) : 0;
+            juce::String text = juce::String (withMeta) + " of " + juce::String (total)
+                + " (" + juce::String (percent) + "%) songs in your library have metadata";
+            if (needsReview > 0)
+                text += "; " + juce::String (needsReview) + " need manual review";
+            safe->statsLabel_.setText (text, juce::dontSendNotification);
+
+            safe->reviewButton_.setButtonText (needsReview > 0
+                ? "Manual Review (" + juce::String (needsReview) + ")" : "Manual Review");
+            safe->reviewButton_.setEnabled (needsReview > 0);
 
             safe->refreshCountsButton_.setEnabled (true);
             safe->setStatus ({});
@@ -820,7 +1018,6 @@ void BulkMetadataTool::openFixDialog (const juce::String& docId, const juce::Str
 void BulkMetadataTool::recordFailure (const juce::String& docId, const juce::String& artist,
                                       const juce::String& song, const juce::String& error)
 {
-    juce::ignoreUnused (docId);
     FailureRow row;
     row.docId = docId;
     row.artistName = artist;
@@ -828,6 +1025,24 @@ void BulkMetadataTool::recordFailure (const juce::String& docId, const juce::Str
     row.error = error;
     failures_.push_back (row);
     ++runFailed_;
+
+    // A rate-limit/timeout/quota-shaped error is worth a normal retry next
+    // run (transient); anything else (bad catalog entry, genuinely no
+    // Spotify match) will fail identically forever, so flag it for manual
+    // review instead of re-attempting it every single run -- see
+    // refreshCounts()'s use of "needsManualReview" to exclude these from
+    // missingDocIds_.
+    if (! looksTransient (error))
+    {
+        auto* rootObj = catalogRoot_.getDynamicObject();
+        auto* entryObj = rootObj != nullptr ? rootObj->getProperty (docId).getDynamicObject() : nullptr;
+        if (entryObj != nullptr)
+        {
+            entryObj->setProperty ("needsManualReview", true);
+            entryObj->setProperty ("lastError", error);
+            catalogDirty_ = true;
+        }
+    }
 }
 
 void BulkMetadataTool::finalizeRun()
@@ -838,7 +1053,12 @@ void BulkMetadataTool::finalizeRun()
     updateRunButtonState();
 
     if (runSucceeded_ > 0)
+        catalogDirty_ = true;
+    if (catalogDirty_)
+    {
         saveCatalog();
+        catalogDirty_ = false;
+    }
 
     setStatus ("Done: " + juce::String (runSucceeded_) + " succeeded, "
               + juce::String (runFailed_) + " failed.");

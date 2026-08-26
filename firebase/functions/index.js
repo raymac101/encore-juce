@@ -227,8 +227,21 @@ const COLLECTION_QUOTA = "metadataQuota";
 const QUOTA_DOC_ID = "daily";
 const DAILY_QUOTA_CAP = 1000;
 
-function nextMidnightUtc(from) {
-  return new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + 1, 0, 0, 0, 0));
+// Resets at a fixed local-feeling time (8:00 AM Mountain Time) instead of
+// UTC midnight -- UTC midnight lands at 6:00 PM Mountain Time, which put the
+// reset in the middle of the workday instead of before it. This is a FIXED
+// UTC offset (14:00 UTC), not DST-aware: during Mountain Standard Time
+// (UTC-7, roughly Nov-Mar) this lands at 7:00 AM local instead of 8:00 AM,
+// an hour early. Acceptable for a quota reset; revisit with a timezone
+// library if exact year-round accuracy ever matters.
+const RESET_HOUR_UTC = 14;
+
+function nextResetTime(from) {
+  const candidate = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), RESET_HOUR_UTC, 0, 0, 0));
+  if (candidate <= from) {
+    candidate.setUTCDate(candidate.getUTCDate() + 1);
+  }
+  return candidate;
 }
 
 // Read-only view of the current quota window, resetting the reported values
@@ -250,7 +263,7 @@ async function getQuotaStatus() {
     }
   }
 
-  return { usedCalls: 0, cap: DAILY_QUOTA_CAP, resetAt: nextMidnightUtc(now) };
+  return { usedCalls: 0, cap: DAILY_QUOTA_CAP, resetAt: nextResetTime(now) };
 }
 
 // Atomically checks + increments the shared daily quota. Must be called
@@ -271,7 +284,7 @@ async function tryConsumeQuota() {
     if (!effectiveResetAt || now >= effectiveResetAt) {
       usedCalls = 0;
       cap = DAILY_QUOTA_CAP;
-      effectiveResetAt = nextMidnightUtc(now);
+      effectiveResetAt = nextResetTime(now);
     }
 
     const allowed = usedCalls < cap;
