@@ -148,7 +148,29 @@
       "Bash(jobs)",
       "Bash(xargs -I{} sh -c 'echo {}; grep -n \"resolvePlayableAudioFile\\\\|class KeyBpmAnalyzer\\\\|^#include\\\\|static\\\\|decodeMonoAnalysisWindow\" {}')",
       "Bash(xargs sed -n '75,95p')",
-      "Bash(node --check firebase/functions/index.js)"
+      "Bash(node --check firebase/functions/index.js)",
+      "Bash(git pull *)",
+      "Bash(gh auth *)",
+      "Bash(git tag *)",
+      "Bash(git push *)",
+      "Bash(gh run *)",
+      "Bash(git -C \"C:/JUCE-Full\" describe --tags)",
+      "Bash(git -C \"C:/JUCE-Full\" log -1 --format=\"%H %ci\")",
+      "Bash(git -C \"C:/JUCE-Full\" remote -v)",
+      "Bash(gh secret *)",
+      "Bash(timeout 15 firebase login --reauth --no-localhost)",
+      "Bash(firebase help *)",
+      "Bash(gcloud --version)",
+      "Bash(env)",
+      "Bash(firebase logout *)",
+      "Bash(firebase target *)",
+      "Bash(npm ls *)",
+      "PowerShell(cmake --preset windows-release)",
+      "PowerShell(cmake --build build --config Release)",
+      "Bash(iscc installer.iss /DMyAppVersion=3.1.293)",
+      "Bash(\"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" installer.iss /DMyAppVersion=3.1.293)",
+      "Bash(MSYS_NO_PATHCONV=1 \"/c/Program Files \\(x86\\)/Inno Setup 6/ISCC.exe\" installer.iss /DMyAppVersion=3.1.293)",
+      "Bash(\"build/EncoreJUCE_artefacts/Release/Encore Karaoke.exe\")"
     ]
   }
 }
