@@ -596,6 +596,18 @@ void LibraryScanner::collectFiles(const juce::File& dir,
 {
     if (threadShouldExit()) return;
 
+    // File collection walks the whole tree before any per-song progress
+    // exists (progressTotal is still 0 here), which can take a long time on
+    // a large/networked library with no feedback otherwise -- show which
+    // folder is currently being walked so it doesn't look frozen.
+    {
+        juce::String relative = dir.getRelativePathFrom(scanRoot_);
+        juce::String label = (relative.isEmpty() || relative == ".")
+                                  ? dir.getFileName() : relative;
+        juce::ScopedLock sl(currentSongLock);
+        currentSong = "Scanning folder: " + label;
+    }
+
     juce::Array<juce::File> children;
     dir.findChildFiles(children, juce::File::findFilesAndDirectories, false);
 

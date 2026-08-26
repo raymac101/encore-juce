@@ -77,6 +77,19 @@ public:
                                   const juce::String& song,
                                   Callback onDone);
 
+    /** Shares a locally-measured tempo/keySignature/durationMS for one song
+        with the shared Firebase master list (source: "localAnalysis"), so
+        other venues using the same karaoke vendor's pressing don't have to
+        redo the same local audio analysis. Fire-and-forget: runs on a
+        background thread, no callback -- a failure here just means the
+        value stays local-only for now. Pass 0/empty for any field not being
+        submitted; no-ops if all three are empty or artist/song are blank. */
+    void submitLocalAudioAnalysis(const juce::String& artist,
+                                  const juce::String& song,
+                                  double tempo,
+                                  const juce::String& keySignature,
+                                  int durationMS);
+
     //==========================================================================
     // Helpers — exposed for testing and reuse from other code paths.
 

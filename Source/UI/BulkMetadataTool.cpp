@@ -467,7 +467,7 @@ void BulkMetadataTool::refreshCounts()
     refreshCountsButton_.setEnabled (false);
 
     juce::Component::SafePointer<BulkMetadataTool> safe (this);
-    juce::Thread::launch ([safe]()
+    juce::Thread::launch (juce::Thread::Priority::low, [safe]()
     {
         if (safe == nullptr) return;
 

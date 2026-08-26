@@ -371,6 +371,49 @@ void ApiService::enqueueMetadataFetch(const juce::String& artist,
 }
 
 //==============================================================================
+void ApiService::submitLocalAudioAnalysis(const juce::String& artist,
+                                          const juce::String& song,
+                                          double tempo,
+                                          const juce::String& keySignature,
+                                          int durationMS)
+{
+    if (artist.trim().isEmpty() || song.trim().isEmpty())
+        return;
+    if (tempo <= 0.0 && keySignature.trim().isEmpty() && durationMS <= 0)
+        return;
+
+    juce::DynamicObject::Ptr bodyObj = new juce::DynamicObject();
+    bodyObj->setProperty("artistName", artist);
+    bodyObj->setProperty("songName", song);
+    if (tempo > 0.0)                      bodyObj->setProperty("tempo", tempo);
+    if (keySignature.trim().isNotEmpty()) bodyObj->setProperty("keySignature", keySignature.trim());
+    if (durationMS > 0)                   bodyObj->setProperty("durationMS", durationMS);
+
+    auto body = juce::JSON::toString(juce::var(bodyObj.get()), false);
+    juce::String url = taggApiUrl_ + "submitLocalAnalysis";
+    juce::String bearer = bearerToken_;
+    int timeout = timeoutMs_;
+
+    // Fire-and-forget on a low-priority background thread -- nothing in the
+    // app waits on this, and it must never contend with live playback.
+    juce::Thread::launch(juce::Thread::Priority::low, [url, body, bearer, timeout]()
+    {
+        int statusCode = 0;
+        auto stream = juce::URL(url).withPOSTData(body).createInputStream(
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
+                .withConnectionTimeoutMs(timeout)
+                .withHttpRequestCmd("POST")
+                .withExtraHeaders("Content-Type: application/json\r\n"
+                                  "Accept: application/json\r\n"
+                                  "Authorization: Bearer " + bearer)
+                .withStatusCode(&statusCode));
+
+        if (stream != nullptr)
+            (void) stream->readEntireStreamAsString();
+    });
+}
+
+//==============================================================================
 juce::File ApiService::getSharedMetadataFile() const
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -737,7 +780,7 @@ void ApiService::searchArtistAndSong(const CdgSong& currentSong,
         return;
     }
 
-    juce::Thread::launch([this, currentSong, artist, song, onDone]()
+    juce::Thread::launch(juce::Thread::Priority::low, [this, currentSong, artist, song, onDone]()
     {
         // 1) Cache lookup.
         Result r = tryCachedLookup(currentSong, artist, song);
@@ -792,7 +835,7 @@ void ApiService::lookupSharedMetadataOnly(const CdgSong& currentSong,
         return;
     }
 
-    juce::Thread::launch([this, currentSong, artist, song, onDone]()
+    juce::Thread::launch(juce::Thread::Priority::low, [this, currentSong, artist, song, onDone]()
     {
         Result r = tryCachedLookup(currentSong, artist, song);
         if (! r.ok)

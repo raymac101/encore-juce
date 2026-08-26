@@ -146,7 +146,9 @@
       "Bash(find '/Users/raymac/Library/Application Support' -iname songbook* -o -iname *.sqlite)",
       "Bash(kill %1)",
       "Bash(jobs)",
-      "Bash(xargs -I{} sh -c 'echo {}; grep -n \"resolvePlayableAudioFile\\\\|class KeyBpmAnalyzer\\\\|^#include\\\\|static\\\\|decodeMonoAnalysisWindow\" {}')"
+      "Bash(xargs -I{} sh -c 'echo {}; grep -n \"resolvePlayableAudioFile\\\\|class KeyBpmAnalyzer\\\\|^#include\\\\|static\\\\|decodeMonoAnalysisWindow\" {}')",
+      "Bash(xargs sed -n '75,95p')",
+      "Bash(node --check firebase/functions/index.js)"
     ]
   }
 }

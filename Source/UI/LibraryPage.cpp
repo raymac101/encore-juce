@@ -59,7 +59,11 @@ namespace
         std::vector<size_t> targets;
         size_t position = 0;
         int updatedCount = 0;
+        int generation = 0; // captured at start; see audioAnalysisGeneration_
+        std::vector<CdgSong> catalogBuffer; // flushed periodically -- see kCatalogFlushInterval
     };
+
+    constexpr int kAudioAnalysisCheckpointInterval = 200;
 }
 
 //==============================================================================
@@ -406,7 +410,7 @@ void LibraryPage::loadSongbook()
 void LibraryPage::loadSongbookAsync()
 {
     juce::Component::SafePointer<LibraryPage> safeThis(this);
-    juce::Thread::launch([safeThis]()
+    juce::Thread::launch(juce::Thread::Priority::low, [safeThis]()
     {
         if (safeThis == nullptr)
             return;
@@ -606,9 +610,13 @@ void LibraryPage::resized()
     // it on any window size. layoutContent() only depends on width, so a
     // second pass at the corrected height reproduces the same positions.
     int contentBottom = statsGroupsLabel_->getBottom();
+    int bottomMargin = 16;
     if (audioAnalysisPauseBtn_->isVisible())
+    {
         contentBottom = juce::jmax(contentBottom, audioAnalysisPauseBtn_->getBottom());
-    const int neededHeight = contentBottom + 16;
+        bottomMargin = 28; // extra breathing room below the Pause row specifically
+    }
+    const int neededHeight = contentBottom + bottomMargin;
     if (neededHeight != contentHolder_->getHeight())
     {
         contentHolder_->setSize(startingWidth, neededHeight);
@@ -1182,20 +1190,22 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
     if (targets.empty())
         return;
 
-    reportStatus("Analyzing tempo/key/duration for " + juce::String((int) targets.size()) + " song(s)...");
-
+    // Deliberately NOT reportStatus()/GlobalProgressService here -- this
+    // pass can run for hours over a large library, and both of those drive
+    // app-wide "busy" UI (BottomBar's status text and its spinner) that
+    // would otherwise get stuck showing "analyzing" indefinitely instead of
+    // the normal "Audio Ready" state. The dedicated status row + Pause
+    // button on this page (see updateAudioAnalysisUI()) is where this
+    // pass's progress belongs.
     audioAnalysisRunning_ = true;
     audioAnalysisTotal_ = (int) targets.size();
     audioAnalysisDone_ = 0;
     updateAudioAnalysisUI();
 
-    if (globalAudioAnalysisTaskId_ == 0)
-        globalAudioAnalysisTaskId_ = GlobalProgressService::getInstance()
-            .beginTask("Analyzing library audio (tempo/key/duration) in the background...");
-
     auto state = std::make_shared<AudioAnalysisState>();
     state->owner = juce::Component::SafePointer<LibraryPage>(this);
     state->targets = std::move(targets);
+    state->generation = audioAnalysisGeneration_;
 
     auto processNext = std::make_shared<std::function<void()>>();
     audioAnalysisResume_ = processNext; // lets the Pause/Resume button continue this exact pass
@@ -1204,6 +1214,20 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
         auto* owner = state->owner.getComponent();
         if (owner == nullptr)
             return;
+
+        // A scan/add/get-metadata operation started since this pass began --
+        // songs_ may have been wholly replaced (Initial Load) or is being
+        // concurrently written elsewhere, so this pass's captured indices
+        // can no longer be trusted. Stop cleanly without touching songs_ or
+        // persisting; the operation that bumped the generation will trigger
+        // a fresh, correctly-indexed pass when it finishes.
+        if (state->generation != owner->audioAnalysisGeneration_)
+        {
+            owner->audioAnalysisRunning_ = false;
+            owner->audioAnalysisResume_.reset();
+            owner->updateAudioAnalysisUI();
+            return;
+        }
 
         if (owner->audioAnalysisPaused_)
         {
@@ -1225,13 +1249,14 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
                     owner->onSongbookChanged(owner->songs_);
             }
 
+            if (! state->catalogBuffer.empty())
+            {
+                owner->scanner_.updateLocalCatalogEntries(state->catalogBuffer);
+                state->catalogBuffer.clear();
+            }
+
             owner->audioAnalysisRunning_ = false;
             owner->audioAnalysisResume_.reset();
-            if (owner->globalAudioAnalysisTaskId_ != 0)
-            {
-                GlobalProgressService::getInstance().endTask(owner->globalAudioAnalysisTaskId_);
-                owner->globalAudioAnalysisTaskId_ = 0;
-            }
             owner->updateAudioAnalysisUI();
 
             owner->showMessage("Analyzed tempo/key/duration for " + juce::String(state->updatedCount) + " song(s).", false);
@@ -1250,7 +1275,11 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
         // from the analysis thread, so there's no data race to reason about.
         const CdgSong current = owner->songs_[songIndex];
 
-        juce::Thread::launch([state, processNext, songIndex, current]()
+        // Low priority (efficiency cores where available) -- this decodes
+        // audio files for BPM/key/duration analysis, the same kind of work
+        // as live playback, so it must never contend with the audio thread
+        // if a venue is mid-show.
+        juce::Thread::launch(juce::Thread::Priority::low, [state, processNext, songIndex, current]()
         {
             juce::File tempFile;
             auto audioFile = KeyBpmAnalyzer::resolvePlayableAudioFile(current, 0, tempFile);
@@ -1278,7 +1307,8 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
             juce::MessageManager::callAsync([state, processNext, songIndex, analysis, measuredDurationMS]()
             {
                 auto* ownerInner = state->owner.getComponent();
-                if (ownerInner != nullptr && songIndex < ownerInner->songs_.size())
+                const bool stale = ownerInner != nullptr && state->generation != ownerInner->audioAnalysisGeneration_;
+                if (ownerInner != nullptr && ! stale && songIndex < ownerInner->songs_.size())
                 {
                     bool updated = false;
 
@@ -1299,7 +1329,20 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
                     updated = true;
 
                     if (updated)
+                    {
                         ++state->updatedCount;
+
+                        const auto& song = ownerInner->songs_[songIndex];
+                        state->catalogBuffer.push_back(song);
+
+                        // Share with the Firebase master list too -- most
+                        // venues use the same handful of karaoke vendors, so
+                        // one venue's real analysis saves every other one
+                        // from redoing the same work. Fire-and-forget.
+                        ApiService::getInstance().submitLocalAudioAnalysis(
+                            juce::String(song.artistName), juce::String(song.songName),
+                            song.tempo, juce::String(song.keySignature), song.durationMS);
+                    }
 
                     // Checkpoint locally every so often -- this pass can run
                     // for a very long time over a large library (each song
@@ -1309,8 +1352,16 @@ void LibraryPage::runLocalAudioAnalysis(std::vector<size_t> songIndices)
                     // persistSongbook()) since a full save is cheap (single
                     // SQLite transaction) but the network round-trip isn't
                     // something we want firing every 200 songs.
-                    if (state->position % 200 == 0)
+                    if (state->position % kAudioAnalysisCheckpointInterval == 0)
+                    {
                         ownerInner->scanner_.saveSongbook(ownerInner->songs_);
+
+                        if (! state->catalogBuffer.empty())
+                        {
+                            ownerInner->scanner_.updateLocalCatalogEntries(state->catalogBuffer);
+                            state->catalogBuffer.clear();
+                        }
+                    }
 
                     ownerInner->audioAnalysisDone_ = (int) state->position;
                     ownerInner->updateAudioAnalysisUI();
@@ -1341,6 +1392,7 @@ namespace
         int updatedCount = 0;
         bool updateLocalCatalog = false;
         std::vector<CdgSong> updatedSongs; // only collected when updateLocalCatalog is true
+        int generation = 0; // captured at start; see audioAnalysisGeneration_
     };
 }
 
@@ -1380,12 +1432,21 @@ void LibraryPage::syncSharedMetadataForSongs(std::vector<size_t> songIndices, bo
     state->owner = juce::Component::SafePointer<LibraryPage>(this);
     state->targets = std::move(songIndices);
     state->updateLocalCatalog = updateLocalCatalog;
+    state->generation = audioAnalysisGeneration_;
 
     auto checkNext = std::make_shared<std::function<void()>>();
     *checkNext = [state, checkNext]()
     {
         auto* owner = state->owner.getComponent();
         if (owner == nullptr)
+            return;
+
+        // See runLocalAudioAnalysis()'s identical check -- a scan/add/get-
+        // metadata operation started since this sweep began, so songs_ may
+        // have moved on from under it. Stop without persisting; whichever
+        // operation bumped the generation will recompute and resync once
+        // it's done.
+        if (state->generation != owner->audioAnalysisGeneration_)
             return;
 
         if (state->position >= state->targets.size())
@@ -1429,7 +1490,8 @@ void LibraryPage::syncSharedMetadataForSongs(std::vector<size_t> songIndices, bo
                 if (ownerInner == nullptr)
                     return;
 
-                if (result.ok && songIndex < ownerInner->songs_.size())
+                const bool stale = state->generation != ownerInner->audioAnalysisGeneration_;
+                if (! stale && result.ok && songIndex < ownerInner->songs_.size())
                 {
                     ownerInner->songs_[songIndex] = result.song;
                     ++state->updatedCount;
@@ -1475,6 +1537,12 @@ void LibraryPage::startFolderChooser(bool appendMode)
             progressValue_ = -1.0; // indeterminate while collecting files
             reportStatus("Scanning Folders...");
 
+            // Invalidate any in-flight background analysis/sync pass --
+            // Initial Load replaces songs_ outright, and even Add Songs
+            // shouldn't race a concurrent writer. A fresh, correctly-indexed
+            // pass gets kicked off once this scan's onComplete runs.
+            ++audioAnalysisGeneration_;
+
             if (appendMode)
                 scanner_.startAppendScan(result, songs_);
             else
@@ -1499,8 +1567,16 @@ void LibraryPage::onGetMetaData()
     progressLabel_->setText(LocalizationManager::getInstance().getText("library.applying_metadata"), juce::dontSendNotification);
     reportStatus("Adding Meta Data...");
 
-    // Run on a background thread to avoid blocking the UI
-    juce::Thread::launch([this]() {
+    // Invalidate any in-flight background analysis/sync pass -- this is
+    // about to mutate songs_ from a background thread (applyLocalMetadata)
+    // and then from the message thread (syncSharedMetadataForSongs below),
+    // and an analysis pass writing to the same songs_ concurrently would
+    // race it. A fresh pass gets kicked off once this finishes.
+    ++audioAnalysisGeneration_;
+
+    // Run on a background thread to avoid blocking the UI, low priority so
+    // it never competes with live playback if a show is in progress.
+    juce::Thread::launch(juce::Thread::Priority::low, [this]() {
         int matched = scanner_.applyLocalMetadata(songs_);
         stats_ = LibraryScanner::computeStats(songs_);
         persistSongbook();

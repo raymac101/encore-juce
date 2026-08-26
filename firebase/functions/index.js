@@ -641,3 +641,54 @@ app.get('/searchArtistAndSong/:artistName/:songName', isAuthorized, async (req, 
       });
   });
 });
+
+// A client's own local, offline audio analysis (KeyBpmAnalyzer for
+// tempo/key, real per-file duration measurement) is at least as trustworthy
+// as anything Spotify could supply for these three fields going forward --
+// Spotify deprecated Audio Features entirely (Nov 2024), so tempo/key can
+// never come from a live Spotify lookup again, and a locally-measured
+// duration reflects the actual karaoke file being played rather than the
+// commercial track length. Lets one venue's real, already-done analysis
+// save every other venue using the same karaoke vendor's pressing from
+// redoing it. No Spotify call, no quota consumption.
+app.post('/submitLocalAnalysis', isAuthorized, async (req, res) => {
+  const artistName = String((req.body && req.body.artistName) || "").trim();
+  const songName = String((req.body && req.body.songName) || "").trim();
+  const tempo = Number((req.body && req.body.tempo) || 0);
+  const keySignature = String((req.body && req.body.keySignature) || "").trim();
+  const durationMS = Number((req.body && req.body.durationMS) || 0);
+
+  if (!artistName || !songName) {
+    res.status(400).json({ error: "artistName and songName are required." });
+    return;
+  }
+  if (tempo <= 0 && !keySignature && durationMS <= 0) {
+    res.status(400).json({ error: "At least one of tempo, keySignature, durationMS is required." });
+    return;
+  }
+
+  const normalizedKey = normalizeKey(artistName, songName);
+  if (!normalizedKey || normalizedKey === "|") {
+    res.status(400).json({ error: "Could not normalize artist/song." });
+    return;
+  }
+
+  const update = {
+    artistName,
+    songName,
+    normalizedKey,
+    source: "localAnalysis",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  };
+  if (tempo > 0) update.tempo = tempo;
+  if (keySignature) update.keySignature = keySignature;
+  if (durationMS > 0) update.durationMS = durationMS;
+
+  try {
+    await db.collection(COLLECTION_METADATA).doc(normalizedKey).set(update, { merge: true });
+    res.json({ ok: true, normalizedKey });
+  } catch (err) {
+    logger.error("submitLocalAnalysis upsert failed", { normalizedKey, error: err.message });
+    res.status(500).json({ error: "Failed to save." });
+  }
+});

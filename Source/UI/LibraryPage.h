@@ -254,10 +254,20 @@ private:
     bool audioAnalysisPaused_ = false;
     int  audioAnalysisTotal_ = 0;
     int  audioAnalysisDone_ = 0;
-    int  globalAudioAnalysisTaskId_ = 0;
     // Re-invoking this resumes exactly where the sequential pass left off --
     // see runLocalAudioAnalysis(). Null when no pass is in flight/paused.
     std::shared_ptr<std::function<void()>> audioAnalysisResume_;
+
+    // Bumped whenever an operation that replaces or bulk-mutates songs_
+    // starts (Initial Load, Add Songs, Get Meta Data) -- any in-flight
+    // runLocalAudioAnalysis()/syncSharedMetadataForSongs() pass captures the
+    // generation it started with and silently stops (without touching
+    // songs_ or rescheduling itself) the moment it notices the number has
+    // moved on, since its captured song indices may no longer point at the
+    // same songs (Initial Load replaces songs_ outright) or may just be
+    // racing a concurrent writer. A fresh pass with correct indices gets
+    // kicked off once the operation that bumped it finishes.
+    int audioAnalysisGeneration_ = 0;
 
     void updateAudioAnalysisUI();
 
