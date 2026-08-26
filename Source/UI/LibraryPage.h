@@ -155,6 +155,17 @@ private:
     // onSongbookChanged so Search/Home refresh immediately.
     void maybeSyncSharedMetadata();
 
+    // Shared worker behind maybeSyncSharedMetadata(), the post-scan gap-fill
+    // in fetchMetadataForImportedSongs() (Initial Load's local-only branch),
+    // and onGetMetaData() -- checks the given songs against the shared local
+    // cache + Firestore metadataSongs only (never Spotify, no quota cost),
+    // applies any hits to songs_, and if updateLocalCatalog is true also
+    // merges them back into the local catalog file (meta_data.json) via
+    // LibraryScanner::updateLocalCatalogEntries() so the offline snapshot
+    // keeps pace with the shared master list. Persists + refreshes on any
+    // update; shows a summary message when done.
+    void syncSharedMetadataForSongs(std::vector<size_t> songIndices, bool updateLocalCatalog);
+
     //==========================================================================
     // Helpers
     void startFolderChooser(bool appendMode);

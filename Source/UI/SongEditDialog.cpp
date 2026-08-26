@@ -9,6 +9,7 @@
 #include "SongEditDialog.h"
 #include "BorderlessModalWindow.h"
 #include "../Services/ImageCache.h"
+#include "../Services/LibraryScanner.h"
 #include "../Localization/LocalizationManager.h"
 
 namespace
@@ -324,6 +325,8 @@ void SongEditDialog::doGetMetadata()
                     return;
                 }
 
+                self->freshMetadataFetched_ = true;
+
                 // Merge non-empty fields from `updated` into the form.
                 int changed = 0;
                 auto setIf = [&](juce::TextEditor& ed, const juce::String& v) {
@@ -449,6 +452,12 @@ void SongEditDialog::closeWith(SongEditResult::Action action)
         };
         r.song.genres  = split(genresEditor_.getText());
         r.song.version = split(versionEditor_.getText());
+
+        // A fresh Get Metadata hit this session is real, current data from
+        // the shared master list -- worth keeping in the local catalog file
+        // too, same as the Library page's own metadata-sync paths.
+        if (freshMetadataFetched_)
+            LibraryScanner::updateLocalCatalogEntries({ r.song });
     }
     else
     {

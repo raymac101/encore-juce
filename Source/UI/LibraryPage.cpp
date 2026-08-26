@@ -806,9 +806,15 @@ void LibraryPage::onAddSongs()
 
         showMessage("Initial load is local-only: matched "
                     + juce::String(localPrePassMatched)
-                    + " songs from meta_data.json; "
+                    + " songs from meta_data.json; checking "
                     + juce::String((int) targets.size())
-                    + " songs remain without local metadata.", false);
+                    + " remaining song(s) against Firebase (no Spotify calls)...", false);
+
+        // Still skip Spotify for a full initial scan (could be tens of
+        // thousands of songs), but a Firestore/shared-cache-only check is
+        // cheap and quota-free -- cheaper than waiting for the next
+        // 6-hour maybeSyncSharedMetadata() sweep to pick up the same gap.
+        syncSharedMetadataForSongs(targets, true);
         return;
     }
 
@@ -1323,7 +1329,7 @@ namespace
 {
     constexpr juce::int64 kMetadataSyncCooldownMs = (juce::int64) 6 * 60 * 60 * 1000; // 6 hours
 
-    // Local state for maybeSyncSharedMetadata()'s sequential shared-cache
+    // Local state for syncSharedMetadataForSongs()'s sequential shared-cache
     // sweep -- deliberately separate from fetchMetadataForImportedSongs'
     // State struct above, since this pass never touches Spotify/the queue
     // and never shows scan-progress UI.
@@ -1333,6 +1339,8 @@ namespace
         std::vector<size_t> targets;
         size_t position = 0;
         int updatedCount = 0;
+        bool updateLocalCatalog = false;
+        std::vector<CdgSong> updatedSongs; // only collected when updateLocalCatalog is true
     };
 }
 
@@ -1360,9 +1368,18 @@ void LibraryPage::maybeSyncSharedMetadata()
     DBG ("[Metadata] startup sync: checking " << (int) targets.size()
          << " song(s) missing metadata against the shared cache");
 
+    syncSharedMetadataForSongs(std::move(targets), true);
+}
+
+void LibraryPage::syncSharedMetadataForSongs(std::vector<size_t> songIndices, bool updateLocalCatalog)
+{
+    if (songIndices.empty())
+        return;
+
     auto state = std::make_shared<SharedSyncState>();
     state->owner = juce::Component::SafePointer<LibraryPage>(this);
-    state->targets = std::move(targets);
+    state->targets = std::move(songIndices);
+    state->updateLocalCatalog = updateLocalCatalog;
 
     auto checkNext = std::make_shared<std::function<void()>>();
     *checkNext = [state, checkNext]()
@@ -1380,8 +1397,18 @@ void LibraryPage::maybeSyncSharedMetadata()
                 owner->refreshStats();
                 if (owner->onSongbookChanged)
                     owner->onSongbookChanged(owner->songs_);
-                owner->showMessage("Synced " + juce::String(state->updatedCount)
-                                   + " song(s) with shared metadata.", false);
+
+                juce::String msg = "Synced " + juce::String(state->updatedCount)
+                                   + " song(s) with shared metadata from Firebase.";
+
+                if (state->updateLocalCatalog && ! state->updatedSongs.empty())
+                {
+                    const bool catalogOk = owner->scanner_.updateLocalCatalogEntries(state->updatedSongs);
+                    msg += catalogOk ? " Local catalog file updated."
+                                      : " (Local catalog file could not be updated.)";
+                }
+
+                owner->showMessage(msg, false);
             }
             return;
         }
@@ -1406,6 +1433,8 @@ void LibraryPage::maybeSyncSharedMetadata()
                 {
                     ownerInner->songs_[songIndex] = result.song;
                     ++state->updatedCount;
+                    if (state->updateLocalCatalog)
+                        state->updatedSongs.push_back(result.song);
                 }
 
                 (*checkNext)();
@@ -1480,8 +1509,29 @@ void LibraryPage::onGetMetaData()
             stats_.numMeta = matched;
             refreshStats();
             setScanningState(false);
-            showMessage(juce::String(matched) + " songs matched with metadata.", false);
             if (onSongbookChanged) onSongbookChanged(songs_);
+
+            std::vector<size_t> targets;
+            targets.reserve(songs_.size());
+            for (size_t i = 0; i < songs_.size(); ++i)
+                if (needsRemoteMetadata(songs_[i]))
+                    targets.push_back(i);
+
+            if (targets.empty())
+            {
+                showMessage(juce::String(matched) + " songs matched with metadata.", false);
+                return;
+            }
+
+            // Local catalog file is current for everything it has -- for
+            // whatever's still missing, check the shared Firebase master
+            // list too (cache + Firestore only, never Spotify) and, on any
+            // hit, write it back into the local catalog file so it's there
+            // for next time even if this venue is offline.
+            showMessage(juce::String(matched) + " songs matched locally. Checking "
+                        + juce::String((int) targets.size())
+                        + " remaining song(s) against Firebase...", false);
+            syncSharedMetadataForSongs(std::move(targets), true);
         });
     });
 }

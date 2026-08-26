@@ -734,14 +734,26 @@ bool LibraryScanner::parseFilename(const juce::String& fileNameNoExt,
                 // Require a trailing space to avoid "ABBADancing" misparse
                 if (j < len && name[j] == ' ')
                 {
-                    outCode = name.substring(0, lettersEnd) + name.substring(digitsStart, digitsEnd);
-                    remaining = name.substring(j + 1).trim();   // skip the trailing space
+                    juce::String candidateCode = name.substring(0, lettersEnd) + name.substring(digitsStart, digitsEnd);
 
-                    // A catalog code is always followed by " - " before the artist.
-                    // Strip that separator so "remaining" starts directly with the artist.
-                    // e.g. "SC1234 - Artist - Song" → code="SC1234", remaining="Artist - Song"
-                    if (remaining.startsWith("- "))
-                        remaining = remaining.substring(2).trim();
+                    // Only actually strip this as a vendor disc-code if its
+                    // letter prefix is a KNOWN vendor (see
+                    // vendorVersionFromCode()'s table) -- otherwise an artist
+                    // name that just happens to be letters-then-digits shaped
+                    // (e.g. "U2", "M83") gets eaten as a bogus code, leaving
+                    // the artist field blank and the song name still carrying
+                    // its trailing vendor tag unstripped.
+                    if (! vendorVersionFromCode(candidateCode).isEmpty())
+                    {
+                        outCode = candidateCode;
+                        remaining = name.substring(j + 1).trim();   // skip the trailing space
+
+                        // A catalog code is always followed by " - " before the artist.
+                        // Strip that separator so "remaining" starts directly with the artist.
+                        // e.g. "SC1234 - Artist - Song" → code="SC1234", remaining="Artist - Song"
+                        if (remaining.startsWith("- "))
+                            remaining = remaining.substring(2).trim();
+                    }
                 }
             }
         }
@@ -1046,6 +1058,69 @@ int LibraryScanner::applyLocalMetadata(std::vector<CdgSong>& songs)
         ++matchCount;
     }
     return matchCount;
+}
+
+//==============================================================================
+// static
+bool LibraryScanner::updateLocalCatalogEntries(const std::vector<CdgSong>& songsWithMetadata)
+{
+    if (songsWithMetadata.empty())
+        return true;
+
+    juce::File metaFile = getDefaultSongbookFile().getSiblingFile("meta_data.json");
+    if (! metaFile.existsAsFile())
+        return false;
+
+    juce::var parsed = juce::JSON::parse(metaFile.loadFileAsString());
+    auto* rootObj = parsed.getDynamicObject();
+    if (rootObj == nullptr)
+        return false;
+
+    // Index existing rows by normalised key so a match updates in place
+    // instead of creating a duplicate.
+    std::map<juce::String, juce::String> keyToDocId;
+    auto& props = rootObj->getProperties();
+    for (int i = 0; i < props.size(); ++i)
+    {
+        auto* entryObj = props.getValueAt(i).getDynamicObject();
+        if (entryObj == nullptr) continue;
+        auto key = normaliseSongKey(entryObj->getProperty("artistName").toString(),
+                                     entryObj->getProperty("songName").toString());
+        keyToDocId[key] = props.getName(i).toString();
+    }
+
+    for (auto& s : songsWithMetadata)
+    {
+        const auto key = normaliseSongKey(juce::String(s.artistName), juce::String(s.songName));
+
+        juce::DynamicObject::Ptr entry;
+        auto it = keyToDocId.find(key);
+        if (it != keyToDocId.end())
+            entry = rootObj->getProperty(juce::Identifier(it->second)).getDynamicObject();
+
+        if (entry == nullptr)
+        {
+            entry = new juce::DynamicObject();
+            const auto newId = "synced-" + juce::Uuid().toString();
+            rootObj->setProperty(juce::Identifier(newId), juce::var(entry.get()));
+            keyToDocId[key] = newId;
+        }
+
+        entry->setProperty("artistName",   juce::String(s.artistName));
+        entry->setProperty("songName",     juce::String(s.songName));
+        entry->setProperty("imageUrl",     juce::String(s.imageUrl));
+        entry->setProperty("keySignature", juce::String(s.keySignature));
+        entry->setProperty("releaseDate",  juce::String(s.releaseDate));
+        entry->setProperty("durationMS",   s.durationMS);
+        entry->setProperty("tempo",        s.tempo);
+
+        juce::Array<juce::var> genresArr;
+        for (auto& g : s.genres)
+            genresArr.add(juce::String(g));
+        entry->setProperty("genres", juce::var(genresArr));
+    }
+
+    return metaFile.replaceWithText(juce::JSON::toString(parsed, true));
 }
 
 //==============================================================================

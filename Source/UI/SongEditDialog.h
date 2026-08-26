@@ -169,5 +169,11 @@ private:
 
     bool busy_ = false;
 
+    // True once doGetMetadata() has successfully pulled a fresh hit into the
+    // form this session -- on Save, that's when we also merge the result
+    // into the local catalog file (meta_data.json), not on every save (most
+    // saves are just manual field edits with nothing new to record there).
+    bool freshMetadataFetched_ = false;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SongEditDialog)
 };

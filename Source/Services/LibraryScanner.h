@@ -104,6 +104,18 @@ public:
     //  returns the number of matches found.
     int applyLocalMetadata(std::vector<CdgSong>& songs);
 
+    /** Merges newly-discovered metadata (e.g. from a Firestore/shared-cache
+        lookup) back into the local catalog file (meta_data.json) so future
+        offline scans/applyLocalMetadata() passes -- and other tools reading
+        the same file, like the Bulk Metadata Tool -- see it too, without
+        needing a fresh app release to refresh the bundled snapshot. Matches
+        existing rows by normalised artist|song key, updating in place if
+        found or appending a new row otherwise; does one read-modify-write of
+        the whole file, so call it once with a batch rather than per-song in
+        a loop. Returns false if the catalog file doesn't exist yet or
+        can't be parsed/written. */
+    static bool updateLocalCatalogEntries(const std::vector<CdgSong>& songsWithMetadata);
+
     //==========================================================================
     // Stats
 
