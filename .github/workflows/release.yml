@@ -37,8 +37,22 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      # Runners don't have JUCE preinstalled at the path CMakePresets.json
+      # expects (that path is a local dev machine convention). Pin to the
+      # same commit the release was built/tested against locally so CI
+      # output matches: JUCE 8.0.12 + 4 commits.
+      - name: Fetch JUCE
+        shell: bash
+        run: |
+          set -euo pipefail
+          JUCE_COMMIT=501c07674e1ad693085a7e7c398f205c2677f5da
+          git init "$RUNNER_TEMP/JUCE"
+          git -C "$RUNNER_TEMP/JUCE" remote add origin https://github.com/juce-framework/JUCE.git
+          git -C "$RUNNER_TEMP/JUCE" fetch --depth 1 origin "$JUCE_COMMIT"
+          git -C "$RUNNER_TEMP/JUCE" checkout FETCH_HEAD
+
       - name: Configure
-        run: cmake --preset windows-release
+        run: cmake --preset windows-release -DJUCE_SOURCE_DIR="$env:RUNNER_TEMP/JUCE"
 
       - name: Build
         run: cmake --build build --config Release
@@ -128,8 +142,20 @@ jobs:
           echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple_api_key.p8"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple_api_key.p8" >> "$GITHUB_ENV"
 
+      # See the matching step in build-windows: runners don't have JUCE
+      # preinstalled at the local-dev-machine path CMakePresets.json
+      # expects, so pin and fetch the exact commit here.
+      - name: Fetch JUCE
+        run: |
+          set -euo pipefail
+          JUCE_COMMIT=501c07674e1ad693085a7e7c398f205c2677f5da
+          git init "$RUNNER_TEMP/JUCE"
+          git -C "$RUNNER_TEMP/JUCE" remote add origin https://github.com/juce-framework/JUCE.git
+          git -C "$RUNNER_TEMP/JUCE" fetch --depth 1 origin "$JUCE_COMMIT"
+          git -C "$RUNNER_TEMP/JUCE" checkout FETCH_HEAD
+
       - name: Configure
-        run: cmake --preset macos-release
+        run: cmake --preset macos-release -DJUCE_SOURCE_DIR="$RUNNER_TEMP/JUCE"
 
       - name: Build
         run: cmake --build build --config Release
