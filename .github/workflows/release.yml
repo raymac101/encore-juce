@@ -63,37 +63,20 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      # Cloud HSM signing -- avoids the hardware-token requirement modern
-      # CAs impose on traditional OV certs, and works headlessly in CI.
-      # See distribution_plan.md Prerequisites #2.
-      - name: Sign app exe (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v0.5.1
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
-          files-folder: build\EncoreJUCE_artefacts\Release
-          files-folder-filter: exe
+      # Azure Trusted Signing is temporarily disabled: AZURE_TENANT_ID,
+      # AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TRUSTED_SIGNING_ENDPOINT,
+      # AZURE_TRUSTED_SIGNING_ACCOUNT, and AZURE_TRUSTED_SIGNING_CERT_PROFILE
+      # are not yet configured as repo secrets, so the signing action fails
+      # with "input is required". Until those are added, this produces an
+      # UNSIGNED Windows exe/installer -- expect SmartScreen "Unknown
+      # Publisher" warnings on install. Restore the two
+      # azure/trusted-signing-action@v0.5.1 steps here (before "Build
+      # installer" and before "Compute sha256") once the secrets exist.
 
       - name: Build installer (Inno Setup)
         shell: cmd
         run: |
           iscc packaging\windows\installer.iss /DMyAppVersion=%VERSION% /DSourceExe="build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
-
-      - name: Sign installer exe (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v0.5.1
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
-          files-folder: dist
-          files-folder-filter: exe
 
       - name: Compute sha256
         shell: bash
