@@ -47,3 +47,6 @@ dist/
 
 # Firebase CLI regenerates this on every command run
 firebase-debug.log
+
+# Claude Code machine-local settings (permission grants, etc.)
+.claude/settings.local.json
