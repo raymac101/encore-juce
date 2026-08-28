@@ -4183,12 +4183,23 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
 
     if (! audioEngine->isInitialized())
     {
-        DBG("loadAndPlaySong: audio engine not ready, attempting immediate init");
-        audioEngine->initialize();
+        auto& lm = LocalizationManager::getInstance();
+
+        // Do NOT re-enter initialize() here while startDeferredAudioServices()
+        // is already running it on its background thread. That path calls
+        // AudioEngine::prepareToPlay -> VST3 plugin prepareToPlay, which takes a
+        // MessageManagerLock; re-entering initialize() on the message thread
+        // then blocks on lifecycleMutex, the message thread can't yield, the
+        // MessageManagerLock never resolves, and both deadlock ("Starting audio
+        // engine..." hangs forever). Just tell the user to wait a beat.
+        if (! audioStartupInProgress_)
+        {
+            DBG("loadAndPlaySong: audio engine not ready, attempting immediate init");
+            audioEngine->initialize();
+        }
 
         if (! audioEngine->isInitialized())
         {
-            auto& lm = LocalizationManager::getInstance();
             if (bottomBar != nullptr)
             {
                 bottomBar->setWaveformSamples({});
@@ -4197,7 +4208,9 @@ void MainComponent::loadAndPlaySong(const CdgSong& song,
                     : lm.getText("audio.feedback.engine_unavailable"));
             }
             showSongLoadFailedMessage(song.songName,
-                                      "Audio engine is unavailable.");
+                                      audioStartupInProgress_
+                                          ? "The audio engine is still starting up. Try again in a moment."
+                                          : "Audio engine is unavailable.");
             if (onDone)
                 onDone(false);
             return;

@@ -7,8 +7,10 @@
 */
 
 #include "LyricDisplayComponent.h"
+#include "WebVideoView.h"
 #include "../Audio/AudioEngine.h"
 #include "../Firebase/FirebaseConfig.h"
+#include "../Services/AdMediaCache.h"
 #include "../Services/AdsService.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/ImageCache.h"
@@ -468,6 +470,14 @@ void LyricDisplayComponent::timerCallback()
 
             if (current.isVideo())
             {
+               #if JUCE_WINDOWS
+                // WebView2 exposes no playback position; the <video> element
+                // loops on its own, so advance on the ad's configured duration
+                // -- the same clock image ads use.
+                adRemainingMs_ -= 33;
+                if (adRemainingMs_ <= 0)
+                    advanceIdleAd();
+               #else
                 if (idleAdVideoComponent_ != nullptr && idleAdVideoComponent_->isVideoOpen())
                 {
                     // Some backends can reset volume when media state changes,
@@ -479,6 +489,7 @@ void LyricDisplayComponent::timerCallback()
                     if (dur > 0.2 && pos >= dur - 0.1)
                         advanceIdleAd();
                 }
+               #endif
             }
             else
             {
@@ -1332,13 +1343,26 @@ void LyricDisplayComponent::paintEmojis (juce::Graphics& g, juce::Rectangle<int>
 
 void LyricDisplayComponent::layoutIdleAdVideoBounds (juce::Rectangle<int> area)
 {
-    if (idleAdVideoComponent_ == nullptr)
+    if (idleAdVideoComponent_ == nullptr && idleAdWebVideo_ == nullptr)
         return;
 
     const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
     auto right = getContentRenderArea (getAdRenderArea (area, idleMode)).reduced (28);
-    idleAdVideoComponent_->setBounds (right);
-    idleAdVideoComponent_->setVisible (right.getWidth() > 60 && right.getHeight() > 60);
+    const bool bigEnough = right.getWidth() > 60 && right.getHeight() > 60;
+
+    if (idleAdVideoComponent_ != nullptr)
+    {
+        idleAdVideoComponent_->setBounds (right);
+        idleAdVideoComponent_->setVisible (bigEnough);
+    }
+
+    if (idleAdWebVideo_ != nullptr)
+    {
+        idleAdWebVideo_->setBounds (right);
+        // Only show it once a clip is actually loaded, otherwise a black
+        // rectangle covers the "Ads will appear here" placeholder.
+        idleAdWebVideo_->setVisible (bigEnough && idleAdWebVideo_->getCurrentFile() != juce::File{});
+    }
 }
 
 void LyricDisplayComponent::updateAdPanelAnimation (bool idleMode)
@@ -1572,10 +1596,59 @@ void LyricDisplayComponent::stopIdleAdVideo()
         idleAdVideoComponent_->closeVideo();
         idleAdVideoComponent_->setVisible (false);
     }
+
+    if (idleAdWebVideo_ != nullptr)
+    {
+        idleAdWebVideo_->stop();
+        idleAdWebVideo_->setVisible (false);
+    }
 }
 
 void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
 {
+   #if JUCE_WINDOWS
+    // DirectShow (juce::VideoComponent's Windows backend) can't decode the
+    // MP4/H.264 ad clips, so play them through WebView2 from the local
+    // AdMediaCache copy instead. The download is async; guard the completion
+    // against the ad having rotated on and against component teardown.
+    if (idleAdWebVideo_ == nullptr)
+    {
+        idleAdWebVideo_ = std::make_unique<WebVideoView>();
+        addChildComponent (*idleAdWebVideo_);
+    }
+
+    if (! idleAdWebVideo_->isAvailable())
+        return; // No WebView2 runtime -- fall back to the static ad placeholder.
+
+    juce::Component::SafePointer<LyricDisplayComponent> safe (this);
+    const auto wantedUrl = ad.url;
+
+    AdMediaCache::getOrFetch (ad.url, ad.name,
+        [safe, wantedUrl] (bool ok, juce::File file, juce::String error)
+        {
+            if (safe == nullptr || safe->idleAdWebVideo_ == nullptr)
+                return;
+
+            if (safe->currentAdIndex_ < 0 || safe->currentAdIndex_ >= (int) safe->ads_.size())
+                return;
+
+            const auto& current = safe->ads_[(size_t) safe->currentAdIndex_];
+            if (! current.isVideo() || current.url != wantedUrl)
+                return; // Rotation moved on while we were downloading.
+
+            if (! ok)
+            {
+                DBG ("LyricDisplay: idle ad video download failed: " + error);
+                safe->stopIdleAdVideo();
+                return;
+            }
+
+            safe->idleAdWebVideo_->play (file);
+            safe->layoutIdleAdVideoBounds (safe->getLocalBounds());
+            safe->idleAdWebVideo_->setVisible (true);
+            safe->idleAdWebVideo_->toFront (false);
+        });
+   #else
     if (idleAdVideoComponent_ == nullptr)
     {
         idleAdVideoComponent_ = std::make_unique<juce::VideoComponent> (false);
@@ -1599,4 +1672,5 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
     layoutIdleAdVideoBounds (getLocalBounds());
     idleAdVideoComponent_->setVisible (true);
     idleAdVideoComponent_->play();
+   #endif
 }

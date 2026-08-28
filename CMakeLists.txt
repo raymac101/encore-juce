@@ -69,12 +69,31 @@ else()
     set(ENCORE_AD_VIDEO_PREVIEW_SOURCE Source/UI/AdVideoPreviewComponent_fallback.cpp)
 endif()
 
+# WebView2 (Windows only) -- backs Source/UI/WebVideoView for lyric-screen ad
+# playback, because juce::VideoComponent's DirectShow backend can't decode the
+# MP4/H.264 ad videos that play fine via AVFoundation on macOS. The
+# Microsoft.Web.WebView2 NuGet package (headers + WebView2LoaderStatic.lib) is
+# vendored under third_party/nuget so no NuGet/network step is needed; JUCE's
+# FindWebView2.cmake globs this directory for a *Microsoft.Web.WebView2* folder.
+# Re-fetch with:
+#   curl -L -o wv2.zip https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.3485.44
+#   (unzip into third_party/nuget/Microsoft.Web.WebView2.1.0.3485.44/)
+if(WIN32)
+    # JUCE (in add_subdirectory above) pre-declares JUCE_WEBVIEW2_PACKAGE_LOCATION
+    # as a cache BOOL=OFF, so a plain set() here shadows it for FindWebView2.
+    # Skip only if the caller pointed it at a real directory on the command line.
+    if(NOT EXISTS "${JUCE_WEBVIEW2_PACKAGE_LOCATION}")
+        set(JUCE_WEBVIEW2_PACKAGE_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nuget")
+    endif()
+endif()
+
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
     PRODUCT_NAME "Encore Karaoke"
     BUNDLE_ID "com.viracicom.encore"
     ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png")
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
+    NEEDS_WEBVIEW2 TRUE)
 
 # Generate JuceHeader.h
 juce_generate_juce_header(EncoreJUCE)
@@ -126,6 +145,7 @@ target_sources(EncoreJUCE
         Source/UI/AddSongsDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
+        Source/UI/WebVideoView.cpp
         Source/UI/LoginWindow.cpp
         Source/UI/Onboarding/OnboardingWizard.cpp
         Source/CDG/CDGDecoder.cpp
@@ -191,7 +211,22 @@ target_compile_definitions(EncoreJUCE
     PRIVATE
         JUCE_STRICT_REFCOUNTEDPOINTER=1
         JUCE_USE_CURL=1
-        JUCE_WEB_BROWSER=0
+        # WebBrowserComponent is enabled solely for Source/UI/WebVideoView on
+        # Windows (see the WebView2 note above). On macOS this just activates a
+        # class that links the already-present WebKit framework.
+        JUCE_WEB_BROWSER=1
+        JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
+        # Karaoke audio is .mp3 (beside .cdg, or inside the .zip bundles). JUCE's
+        # own MP3 decoder is OFF by default, so on Windows every .mp3 was being
+        # decoded by WindowsMediaAudioFormat -> WMVCORE, whose readSamples()
+        # access-violates (it crashed mid-song, and again during LibraryPage's
+        # batch key/BPM analysis). Enable JUCE's built-in MP3 decoder and drop
+        # the Windows Media path entirely. (MP3 decoding patents expired in 2017,
+        # so JUCE_USE_MP3AUDIOFORMAT's historical licensing note no longer bites.)
+        # .mp4 video goes through VideoComponent/WebView2, not AudioFormatManager;
+        # .wma/.m4a now just return a null reader and callers degrade gracefully.
+        JUCE_USE_MP3AUDIOFORMAT=1
+        JUCE_USE_WINDOWS_MEDIA_FORMAT=0
         JUCE_USE_CAMERA=0
         JUCE_DISPLAY_SPLASH_SCREEN=1
         # VST3 plugin hosting (Source/Audio/ChannelPluginChain, PluginHostService).
