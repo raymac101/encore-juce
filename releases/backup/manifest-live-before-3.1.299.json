@@ -1,0 +1,14 @@
+{
+  "latestVersion": "3.1.255",
+  "releaseNotesUrl": "",
+  "platforms": {
+    "windows": {
+      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.255-win64.exe?alt=media",
+      "sha256": "830b40f45f4aad014c1adac347e40d71c05031062862328f1f6b6fc5918c00c5"
+    },
+    "macos": {
+      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.249-mac.dmg?alt=media",
+      "sha256": "1687e639993ae261d149149a74a9fa82f587980a3a5f8a01a74aaf6950d4536b"
+    }
+  }
+}
