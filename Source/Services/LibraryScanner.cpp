@@ -381,10 +381,13 @@ void LibraryScanner::run()
         // e.g. "Acdc - Back In Black (Leg).cdg" → version="Leg", code=""
         juce::String rawTag = code.isEmpty() ? version : code;
 
-        // Resolve the human-readable vendor version string
+        // Resolve the human-readable vendor version string.
+        // An unrecognised *front* code (e.g. "FTXC400-08") is a serial, not a
+        // vendor name -- fall back to "Unknown" rather than showing the serial.
+        // An unrecognised *parenthetical* tag is still shown verbatim.
         juce::String versionStr = vendorVersionFromCode(rawTag);
         if (versionStr.isEmpty())
-            versionStr = rawTag.isEmpty() ? "Unknown" : rawTag;
+            versionStr = (! code.isEmpty() || rawTag.isEmpty()) ? "Unknown" : rawTag;
 
         juce::String normKey = normaliseSongKey(artist, songTitle);
 
@@ -675,7 +678,9 @@ CdgSong LibraryScanner::buildSong(const juce::String& baseName,
     juce::String rawTag = code.isEmpty() ? version : code;
     juce::String versionStr = vendorVersionFromCode(rawTag);
     if (versionStr.isEmpty())
-        versionStr = rawTag.isEmpty() ? "Unknown" : rawTag;
+        // An unrecognised front code is a serial, not a vendor name — show
+        // "Unknown" rather than the serial; a parenthetical tag is kept verbatim.
+        versionStr = (! code.isEmpty() || rawTag.isEmpty()) ? "Unknown" : rawTag;
     song.version.push_back(versionStr.toStdString());
     song.code.push_back(rawTag.toStdString());
     song.rating.push_back(ratingForCode(rawTag));
@@ -767,6 +772,94 @@ bool LibraryScanner::parseFilename(const juce::String& fileNameNoExt,
                             remaining = remaining.substring(2).trim();
                     }
                 }
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Step 1b — strip a leading numeric track / sequence number.
+    //
+    //  Newer catalogs prefix files with a plain running number instead
+    //  of a lettered vendor disc-code, e.g.
+    //      "104 - Taylor Swift - Elizabeth Taylor (Instrumental)"
+    //  Without this, Step 2 takes "104" as the artist and the real
+    //  "Artist - Song" collapses into the song field.
+    //
+    //  Guard: only strip it when what remains still contains its own
+    //  " - " separator, so single-dash names whose artist or song simply
+    //  starts with digits -- "1999 - Prince", "911 - Party People" --
+    //  are left untouched.  The number is discarded (not a catalog code),
+    //  so the vendor tag still comes from the trailing "(...)".
+    // ----------------------------------------------------------------
+    if (outCode.isEmpty())
+    {
+        int k = 0;
+        const int rlen = remaining.length();
+        while (k < rlen && remaining[k] >= '0' && remaining[k] <= '9') ++k;
+
+        if (k > 0 && k < rlen)
+        {
+            juce::String rest = remaining.substring(k).trim();
+            if (rest.startsWith("- "))
+            {
+                rest = rest.substring(2).trim();
+                if (rest.contains(" - "))
+                    remaining = rest;
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Step 1c — strip a leading catalog code from a 3+ segment name.
+    //
+    //  "<Code> - <Artist> - <Song> (<Tag>)" is now common for vendors
+    //  whose code isn't in vendorVersionFromCode()'s table and isn't
+    //  space-separated from its serial, e.g.
+    //      "FTXC400-08 - Taylor Swift - Mine"
+    //      "MCH21SP-112 - Haim ft Taylor Swift - Gasoline"
+    //  Step 1 only fires for known, space-delimited vendor codes, so
+    //  without this the code lands in the artist field and
+    //  "Artist - Song" collapses into the song field.
+    //
+    //  Only fires when outCode isn't already set, the name still has at
+    //  least two " - " separators (so a genuine "Artist - Song - Suffix"
+    //  isn't misread), and the first segment is code-shaped: 5-16 chars
+    //  of [A-Za-z0-9-] only, at least two UPPERCASE letters before any
+    //  digit, and at least one digit.  The uppercase / digit rules keep
+    //  real names out -- "blink-182", "U2", "MC5", "Panic! ...".
+    // ----------------------------------------------------------------
+    if (outCode.isEmpty())
+    {
+        const int firstSep  = remaining.indexOf(" - ");
+        const int secondSep = firstSep >= 0 ? remaining.indexOf(firstSep + 3, " - ") : -1;
+
+        if (secondSep > firstSep)
+        {
+            const juce::String seg = remaining.substring(0, firstSep);
+
+            auto looksLikeCode = [](const juce::String& s) -> bool
+            {
+                if (s.length() < 5 || s.length() > 16) return false;
+                int  leadingCaps = 0;
+                bool seenDigit    = false;
+                for (int i = 0; i < s.length(); ++i)
+                {
+                    const juce::juce_wchar c = s[i];
+                    const bool isUpper = (c >= 'A' && c <= 'Z');
+                    const bool isLower = (c >= 'a' && c <= 'z');
+                    const bool isDigit = (c >= '0' && c <= '9');
+                    if (! isUpper && ! isLower && ! isDigit && c != '-') return false;
+                    if (isDigit)                      seenDigit = true;
+                    else if (isLower && ! seenDigit)  return false;   // a word, not a code
+                    else if (isUpper && ! seenDigit)  ++leadingCaps;
+                }
+                return seenDigit && leadingCaps >= 2;
+            };
+
+            if (looksLikeCode(seg))
+            {
+                outCode   = seg;
+                remaining = remaining.substring(firstSep + 3).trim();
             }
         }
     }
