@@ -126,11 +126,8 @@ namespace
 }
 
 //==============================================================================
-juce::File KeyBpmAnalyzer::resolvePlayableAudioFile (const CdgSong& song, int versionIndex,
-                                                     juce::File& outTempFileToDelete)
+juce::String KeyBpmAnalyzer::versionSourcePath (const CdgSong& song, int versionIndex)
 {
-    outTempFileToDelete = juce::File();
-
     auto buildVersionPath = [&song] (int index) -> juce::String
     {
         if (index >= 0 && index < (int) song.fullPath.size())
@@ -152,10 +149,29 @@ juce::File KeyBpmAnalyzer::resolvePlayableAudioFile (const CdgSong& song, int ve
     juce::String path = buildVersionPath (versionIndex);
     if (path.isEmpty())
         path = buildVersionPath (0);
+    return path;
+}
+
+juce::File KeyBpmAnalyzer::resolvePlayableAudioFile (const CdgSong& song, int versionIndex,
+                                                     juce::File& outTempFileToDelete)
+{
+    outTempFileToDelete = juce::File();
+
+    const auto path = versionSourcePath (song, versionIndex);
     if (path.isEmpty())
         return {};
 
-    const juce::File sourceFile (path);
+    return resolvePlayableAudioFile (juce::File (path), outTempFileToDelete);
+}
+
+juce::File KeyBpmAnalyzer::resolvePlayableAudioFile (const juce::File& sourceFile,
+                                                     juce::File& outTempFileToDelete)
+{
+    outTempFileToDelete = juce::File();
+
+    if (sourceFile == juce::File())
+        return {};
+
     const auto ext = sourceFile.getFileExtension().toLowerCase();
 
     if (ext == ".cdg" || ext == ".xml")

@@ -57,6 +57,16 @@ public:
     static juce::File resolvePlayableAudioFile (const CdgSong& song, int versionIndex,
                                                 juce::File& outTempFileToDelete);
 
+    /** The on-disk path recorded for one version of a song -- pure string
+        work, no file IO, so a caller can build a job list off a CdgSong
+        without having to carry the whole record to a worker thread. */
+    static juce::String versionSourcePath (const CdgSong& song, int versionIndex);
+
+    /** The resolution half of resolvePlayableAudioFile, for callers that
+        already hold the source path (see versionSourcePath). */
+    static juce::File resolvePlayableAudioFile (const juce::File& sourceFile,
+                                                juce::File& outTempFileToDelete);
+
 private:
     KeyBpmAnalyzer() = delete;
 };

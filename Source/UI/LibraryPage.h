@@ -26,6 +26,7 @@
 #include <JuceHeader.h>
 #include "../Services/LibraryScanner.h"
 #include "../Services/SongDatabase.h"
+#include "../Services/AudioAnalysisWorker.h"
 #include <vector>
 #include <functional>
 
@@ -140,11 +141,16 @@ private:
                        bool allowOnlineLookup = true);
 
     // Local, offline BPM/key detection (KeyBpmAnalyzer) for songs still
-    // missing tempo/keySignature -- run automatically after every scan/import
-    // since Spotify can no longer supply these two fields (Audio Features
-    // deprecated Nov 2024). One song at a time, off the message thread;
-    // songs_ itself is only ever touched from the message thread.
+    // missing tempo/keySignature -- since Spotify can no longer supply these
+    // two fields (Audio Features deprecated Nov 2024). One song at a time,
+    // off the message thread; songs_ itself is only ever touched from the
+    // message thread.
     void runLocalAudioAnalysis(std::vector<size_t> songIndices);
+
+    // Records songs needing analysis and surfaces the Start button instead of
+    // kicking the pass off automatically -- a full-library sweep is expensive
+    // enough that the user decides when it runs.
+    void queueLocalAudioAnalysis(std::vector<size_t> songIndices);
 
     // Silent, low-cost catch-up pass: checks this PC's still-missing-metadata
     // songs against the shared local cache + Firestore metadataSongs only
@@ -237,6 +243,7 @@ private:
     // runLocalAudioAnalysis has work pending or in flight.
     std::unique_ptr<juce::Label>      audioAnalysisStatusLabel_;
     std::unique_ptr<juce::TextButton> audioAnalysisPauseBtn_;
+    std::unique_ptr<juce::TextButton> audioAnalysisStartBtn_;
 
     //==========================================================================
     // Data
@@ -255,9 +262,15 @@ private:
     int  audioAnalysisTotal_ = 0;
     int  audioAnalysisDone_ = 0;
     juce::String audioAnalysisCurrentSong_; // "Artist - Song" currently being decoded, for diagnosing a stuck pass
-    // Re-invoking this resumes exactly where the sequential pass left off --
-    // see runLocalAudioAnalysis(). Null when no pass is in flight/paused.
-    std::shared_ptr<std::function<void()>> audioAnalysisResume_;
+    std::vector<size_t> audioAnalysisPending_; // queued by queueLocalAudioAnalysis, consumed by the Start button
+
+    // One persistent thread for the whole pass; delivers results to the
+    // message thread in coalesced batches. See AudioAnalysisWorker.h.
+    AudioAnalysisWorker  audioAnalysisWorker_;
+    std::vector<CdgSong> audioAnalysisCatalogBuffer_; // flushed every kAudioAnalysisCheckpointInterval songs
+    int                  audioAnalysisUpdatedCount_ = 0;
+    int                  audioAnalysisLastCheckpoint_ = 0;
+    int                  audioAnalysisPassGeneration_ = 0; // audioAnalysisGeneration_ as of the running pass
 
     // Bumped whenever an operation that replaces or bulk-mutates songs_
     // starts (Initial Load, Add Songs, Get Meta Data) -- any in-flight
@@ -269,6 +282,10 @@ private:
     // racing a concurrent writer. A fresh pass with correct indices gets
     // kicked off once the operation that bumped it finishes.
     int audioAnalysisGeneration_ = 0;
+
+    // Applies one batch of worker results to songs_ (message thread).
+    void applyAudioAnalysisResults(const std::vector<AudioAnalysisWorker::Result>& results);
+    void finishAudioAnalysisPass();
 
     void updateAudioAnalysisUI();
 

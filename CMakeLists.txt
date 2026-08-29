@@ -150,6 +150,7 @@ target_sources(EncoreJUCE
         Source/UI/Onboarding/OnboardingWizard.cpp
         Source/CDG/CDGDecoder.cpp
         Source/Services/LibraryScanner.cpp
+        Source/Services/AudioAnalysisWorker.cpp
         Source/Services/SongDatabase.cpp
         Source/Services/ImageCache.cpp
         Source/Services/AdMediaCache.cpp

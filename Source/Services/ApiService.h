@@ -90,6 +90,16 @@ public:
                                   const juce::String& keySignature,
                                   int durationMS);
 
+    /** Blocking version of the above, for callers that already own a
+        background thread (see AudioAnalysisWorker) -- a full-library sweep
+        would otherwise spawn one short-lived thread and TLS handshake per
+        song. Must not be called from the message or audio thread. */
+    void submitLocalAudioAnalysisSync(const juce::String& artist,
+                                      const juce::String& song,
+                                      double tempo,
+                                      const juce::String& keySignature,
+                                      int durationMS);
+
     //==========================================================================
     // Helpers — exposed for testing and reuse from other code paths.
 
