@@ -83,6 +83,11 @@ private:
     static constexpr int kMinPostIntervalMs = 400;
     static constexpr int kPauseWaitMs       = 200;
 
+    // Sharing results upstream is a nice-to-have, not part of the pass. On a
+    // bad venue link every attempt costs a full connect timeout, which would
+    // otherwise dominate the sweep, so stop trying after this many in a row.
+    static constexpr int kMaxShareFailures  = 3;
+
     std::vector<Job> jobs_;   // worker-thread only once the thread is running
 
     std::atomic<bool> paused_ { false };

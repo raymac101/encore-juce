@@ -170,6 +170,7 @@ target_sources(EncoreJUCE
         Source/Services/VenueSessionService.cpp
         Source/Services/VenueService.cpp
         Source/Services/QueueService.cpp
+        Source/Services/QueueWriteOutbox.cpp
         Source/Services/QueueRotation.cpp
         Source/Services/RequestService.cpp
         Source/Services/EmojiService.cpp

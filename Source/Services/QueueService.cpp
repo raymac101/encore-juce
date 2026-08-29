@@ -15,6 +15,7 @@
 
 #include "QueueService.h"
 #include "FirestoreClient.h"
+#include "QueueWriteOutbox.h"
 #include <algorithm>
 #include <unordered_map>
 
@@ -517,109 +518,154 @@ void QueueService::appendSong(const juce::String& venueId,
     juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
         const WriteGuard writeGuard (this);
-        const juce::ScopedLock lock(writeLock_);
 
-        const auto collPath = "venues/" + venueId + "/queue";
-        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+        juce::String error;
+        bool ok = appendSongSync (venueId, item, false, error);
 
-        // For auth singers (profileId == auth UID), look up by doc ID first
-        // so we can find a host slot that exists in Firestore even when its
-        // display name hasn't been resolved yet.
-        const juce::String profileId = juce::String(item.profileId).trim();
-        auto found = profileId.isNotEmpty()
-                   ? findSingerByDocId(docs, profileId)
-                   : FoundSinger{};
-        if (found.docName.isEmpty() && profileId.isNotEmpty())
-            found = findSingerByProfileId(docs, profileId);
-        if (found.docName.isEmpty())
-            found = findSingerByName(docs, juce::String(item.singerName));
-
-        if (found.docName.isNotEmpty())
+        // Couldn't reach Firestore -- park the write on disk rather than
+        // dropping it, and report success so the singer stays in the local
+        // rotation. The next poll after the link returns reconciles it.
+        if (! ok && QueueWriteOutbox::getInstance().enqueue (
+                        QueueWriteOutbox::Op::appendSong, venueId, item))
         {
-            // Existing singer — append the song and PATCH the songs field.
-            auto songs = found.singer.songs;
-            QueueItem copy = item;
-            copy.songOrder = (int) songs.size();
-            copy.status = copy.status.empty() ? "queued" : copy.status;
-            songs.push_back(copy);
-
-            const auto rel = relPathFromDocName(found.docName);
-            const auto maskedPath = rel + "?updateMask.fieldPaths=songs&updateMask.fieldPaths=strikes";
-
-            juce::DynamicObject::Ptr fields = new juce::DynamicObject();
-            fields->setProperty("songs", songsArrayValue(songs));
-            // Singer added a song again — clear accumulated skip strikes.
-            fields->setProperty("strikes", FirestoreClient::integerValue(0));
-
-            const bool ok = FirestoreClient::getInstance()
-                                .patchDocument(maskedPath, juce::var(fields.get()));
-
-            DBG ("[Queue] appendSong existing singer '" << juce::String(item.singerName)
-                 << "' songs=" << (int) songs.size() << " ok=" << (ok ? 1 : 0));
-
-            if (onDone)
-                juce::MessageManager::callAsync([onDone, ok]
-                    { onDone(ok, ok ? juce::String() : juce::String("PATCH failed")); });
-            return;
+            ok = true;
+            error.clear();
         }
-
-        // New singer — create a fresh /queue doc with this song.
-        // Order placement: end of current queue.
-        int maxOrder = -1;
-        for (auto& d : docs)
-        {
-            auto f = d.getProperty("fields", juce::var());
-            maxOrder = juce::jmax(maxOrder, valueAsInt(fieldByName(f, "order")));
-        }
-
-        QueueItem first = item;
-        first.songOrder = 0;
-        first.order     = 0;
-        first.status    = first.status.empty() ? "queued" : first.status;
-
-        std::vector<QueueItem> initialSongs { first };
-
-        // Queue singer docs use one canonical ID policy:
-        // - Auth singers: their Firebase auth UID (`profileId`)
-        // - Manual singers: deterministic namespaced ID (`manual-*`)
-        const bool hasProfileId = profileId.isNotEmpty()
-                       && profileId.compareIgnoreCase("unknown") != 0;
-
-        const juce::String docId = hasProfileId
-                                 ? profileId
-                                 : makeManualSingerDocId(item);
-        const juce::String storedProfileId = hasProfileId ? profileId : docId;
-
-        juce::DynamicObject::Ptr fields = new juce::DynamicObject();
-        fields->setProperty("id",             FirestoreClient::stringValue(docId));
-        fields->setProperty("name",           FirestoreClient::stringValue(juce::String(item.singerName)));
-        fields->setProperty("avatar",         FirestoreClient::stringValue(juce::String(item.singerAvatar)));
-        fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String(item.deviceId)));
-        fields->setProperty("profileId",      FirestoreClient::stringValue(storedProfileId));
-        fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
-        fields->setProperty("status",         FirestoreClient::stringValue("queued"));
-        // `order` is the stable RR position -- appended to the bottom.
-        // `rotationOrder` is a derived display-rank cache (restamped by
-        // QueueRotation::stampDerivedRanks() the next time anything
-        // reloads/reorders); it must NOT be hardcoded to the new RR
-        // position here, or a new singer would appear to BE the anchor.
-        fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
-        fields->setProperty("strikes",        FirestoreClient::integerValue(0));
-        fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
-        fields->setProperty("songs",          songsArrayValue(initialSongs));
-
-        bool ok = false;
-        FirestoreClient::getInstance()
-            .createDocument(collPath, juce::var(fields.get()), docId, &ok);
-
-        DBG ("[Queue] appendSong new singer '" << juce::String(item.singerName)
-               << "' docId='" << docId << "'"
-             << "' ok=" << (ok ? 1 : 0));
 
         if (onDone)
-            juce::MessageManager::callAsync([onDone, ok]
-                { onDone(ok, ok ? juce::String() : juce::String("createDocument failed")); });
+            juce::MessageManager::callAsync([onDone, ok, error]
+                { onDone(ok, error); });
     });
+}
+
+bool QueueService::appendSongSync(const juce::String& venueId,
+                                  const QueueItem& item,
+                                  bool skipIfAlreadyPresent,
+                                  juce::String& outError)
+{
+    const juce::ScopedLock lock(writeLock_);
+
+    const auto collPath = "venues/" + venueId + "/queue";
+    bool listOk = false;
+    auto docs = FirestoreClient::getInstance().listCollection(collPath, 200, &listOk);
+
+    if (! listOk)
+    {
+        outError = "Could not read the queue (network)";
+        return false;
+    }
+
+    // For auth singers (profileId == auth UID), look up by doc ID first
+    // so we can find a host slot that exists in Firestore even when its
+    // display name hasn't been resolved yet.
+    const juce::String profileId = juce::String(item.profileId).trim();
+    auto found = profileId.isNotEmpty()
+               ? findSingerByDocId(docs, profileId)
+               : FoundSinger{};
+    if (found.docName.isEmpty() && profileId.isNotEmpty())
+        found = findSingerByProfileId(docs, profileId);
+    if (found.docName.isEmpty())
+        found = findSingerByName(docs, juce::String(item.singerName));
+
+    if (found.docName.isNotEmpty())
+    {
+        // Existing singer — append the song and PATCH the songs field.
+        auto songs = found.singer.songs;
+
+        const auto wantId = juce::String(item.id).trim();
+        if (skipIfAlreadyPresent && wantId.isNotEmpty())
+        {
+            for (const auto& s : songs)
+            {
+                if (juce::String(s.id).trim() == wantId)
+                {
+                    DBG ("[Queue] appendSong replay: '" << juce::String(item.songName)
+                         << "' already present, skipping");
+                    return true;
+                }
+            }
+        }
+
+        QueueItem copy = item;
+        copy.songOrder = (int) songs.size();
+        copy.status = copy.status.empty() ? "queued" : copy.status;
+        songs.push_back(copy);
+
+        const auto rel = relPathFromDocName(found.docName);
+        const auto maskedPath = rel + "?updateMask.fieldPaths=songs&updateMask.fieldPaths=strikes";
+
+        juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+        fields->setProperty("songs", songsArrayValue(songs));
+        // Singer added a song again — clear accumulated skip strikes.
+        fields->setProperty("strikes", FirestoreClient::integerValue(0));
+
+        const bool ok = FirestoreClient::getInstance()
+                            .patchDocument(maskedPath, juce::var(fields.get()));
+
+        DBG ("[Queue] appendSong existing singer '" << juce::String(item.singerName)
+             << "' songs=" << (int) songs.size() << " ok=" << (ok ? 1 : 0));
+
+        if (! ok)
+            outError = "PATCH failed";
+        return ok;
+    }
+
+    // New singer — create a fresh /queue doc with this song.
+    // Order placement: end of current queue.
+    int maxOrder = -1;
+    for (auto& d : docs)
+    {
+        auto f = d.getProperty("fields", juce::var());
+        maxOrder = juce::jmax(maxOrder, valueAsInt(fieldByName(f, "order")));
+    }
+
+    QueueItem first = item;
+    first.songOrder = 0;
+    first.order     = 0;
+    first.status    = first.status.empty() ? "queued" : first.status;
+
+    std::vector<QueueItem> initialSongs { first };
+
+    // Queue singer docs use one canonical ID policy:
+    // - Auth singers: their Firebase auth UID (`profileId`)
+    // - Manual singers: deterministic namespaced ID (`manual-*`)
+    const bool hasProfileId = profileId.isNotEmpty()
+                   && profileId.compareIgnoreCase("unknown") != 0;
+
+    const juce::String docId = hasProfileId
+                             ? profileId
+                             : makeManualSingerDocId(item);
+    const juce::String storedProfileId = hasProfileId ? profileId : docId;
+
+    juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+    fields->setProperty("id",             FirestoreClient::stringValue(docId));
+    fields->setProperty("name",           FirestoreClient::stringValue(juce::String(item.singerName)));
+    fields->setProperty("avatar",         FirestoreClient::stringValue(juce::String(item.singerAvatar)));
+    fields->setProperty("deviceId",       FirestoreClient::stringValue(juce::String(item.deviceId)));
+    fields->setProperty("profileId",      FirestoreClient::stringValue(storedProfileId));
+    fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
+    fields->setProperty("status",         FirestoreClient::stringValue("queued"));
+    // `order` is the stable RR position -- appended to the bottom.
+    // `rotationOrder` is a derived display-rank cache (restamped by
+    // QueueRotation::stampDerivedRanks() the next time anything
+    // reloads/reorders); it must NOT be hardcoded to the new RR
+    // position here, or a new singer would appear to BE the anchor.
+    fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
+    fields->setProperty("strikes",        FirestoreClient::integerValue(0));
+    fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
+    fields->setProperty("songs",          songsArrayValue(initialSongs));
+
+    bool ok = false;
+    FirestoreClient::getInstance()
+        .createDocument(collPath, juce::var(fields.get()), docId, &ok);
+
+    DBG ("[Queue] appendSong new singer '" << juce::String(item.singerName)
+           << "' docId='" << docId << "'"
+         << "' ok=" << (ok ? 1 : 0));
+
+    if (! ok)
+        outError = "createDocument failed";
+    return ok;
 }
 
 void QueueService::removeSong(const juce::String& venueId,
@@ -636,66 +682,96 @@ void QueueService::removeSong(const juce::String& venueId,
     juce::Thread::launch([this, venueId, item, onDone = std::move(onDone)]()
     {
         const WriteGuard writeGuard (this);
-        const juce::ScopedLock lock(writeLock_);
 
-        const auto collPath = "venues/" + venueId + "/queue";
-        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+        juce::String error;
+        bool ok = removeSongSync (venueId, item, error);
 
-        auto found = findSingerByName(docs, juce::String(item.singerName));
-        if (found.docName.isEmpty())
+        if (! ok && error.contains("network")
+            && QueueWriteOutbox::getInstance().enqueue (
+                   QueueWriteOutbox::Op::removeSong, venueId, item))
         {
-            DBG ("[Queue] removeSong: singer '" << juce::String(item.singerName)
-                 << "' not found");
-            if (onDone)
-                juce::MessageManager::callAsync([onDone] { onDone(false, "singer not found"); });
-            return;
+            ok = true;
+            error.clear();
         }
-
-        std::vector<QueueItem> kept;
-        kept.reserve(found.singer.songs.size());
-
-        const auto wantId     = juce::String(item.songId);
-        const auto wantSong   = juce::String(item.songName).toLowerCase();
-        const auto wantArtist = juce::String(item.songArtist).toLowerCase();
-
-        bool removed = false;
-        for (auto& s : found.singer.songs)
-        {
-            const bool matchById   = wantId.isNotEmpty() && juce::String(s.songId) == wantId;
-            const bool matchByText = ! matchById
-                                  && juce::String(s.songName).toLowerCase()   == wantSong
-                                  && juce::String(s.songArtist).toLowerCase() == wantArtist;
-            if (! removed && (matchById || matchByText))
-            {
-                removed = true;
-                continue;
-            }
-            kept.push_back(s);
-        }
-
-        // Re-number songOrder so positions stay sequential.
-        for (size_t i = 0; i < kept.size(); ++i)
-            kept[i].songOrder = (int) i;
-
-        const auto rel = relPathFromDocName(found.docName);
-        const auto maskedPath = rel + "?updateMask.fieldPaths=songs";
-
-        juce::DynamicObject::Ptr fields = new juce::DynamicObject();
-        fields->setProperty("songs", songsArrayValue(kept));
-
-        const bool ok = FirestoreClient::getInstance()
-                            .patchDocument(maskedPath, juce::var(fields.get()));
-
-        DBG ("[Queue] removeSong singer='" << juce::String(item.singerName)
-             << "' song='" << juce::String(item.songName)
-             << "' removed=" << (removed ? 1 : 0)
-             << " songsLeft=" << (int) kept.size()
-             << " ok=" << (ok ? 1 : 0));
 
         if (onDone)
-            juce::MessageManager::callAsync([onDone, ok]
-                { onDone(ok, ok ? juce::String() : juce::String("PATCH failed")); });
+            juce::MessageManager::callAsync([onDone, ok, error]
+                { onDone(ok, error); });
     });
+}
+
+bool QueueService::removeSongSync(const juce::String& venueId,
+                                  const QueueItem& item,
+                                  juce::String& outError)
+{
+    const juce::ScopedLock lock(writeLock_);
+
+    const auto collPath = "venues/" + venueId + "/queue";
+    bool listOk = false;
+    auto docs = FirestoreClient::getInstance().listCollection(collPath, 200, &listOk);
+
+    if (! listOk)
+    {
+        outError = "Could not read the queue (network)";
+        return false;
+    }
+
+    auto found = findSingerByName(docs, juce::String(item.singerName));
+    if (found.docName.isEmpty())
+    {
+        // The queue really was readable and this singer isn't in it -- the
+        // song is already gone, so the removal has effectively happened.
+        DBG ("[Queue] removeSong: singer '" << juce::String(item.singerName)
+             << "' not found -- treating as already removed");
+        return true;
+    }
+
+    std::vector<QueueItem> kept;
+    kept.reserve(found.singer.songs.size());
+
+    const auto wantId     = juce::String(item.songId);
+    const auto wantSong   = juce::String(item.songName).toLowerCase();
+    const auto wantArtist = juce::String(item.songArtist).toLowerCase();
+
+    bool removed = false;
+    for (auto& s : found.singer.songs)
+    {
+        const bool matchById   = wantId.isNotEmpty() && juce::String(s.songId) == wantId;
+        const bool matchByText = ! matchById
+                              && juce::String(s.songName).toLowerCase()   == wantSong
+                              && juce::String(s.songArtist).toLowerCase() == wantArtist;
+        if (! removed && (matchById || matchByText))
+        {
+            removed = true;
+            continue;
+        }
+        kept.push_back(s);
+    }
+
+    if (! removed)
+        return true; // nothing matched -- already removed by someone else
+
+    // Re-number songOrder so positions stay sequential.
+    for (size_t i = 0; i < kept.size(); ++i)
+        kept[i].songOrder = (int) i;
+
+    const auto rel = relPathFromDocName(found.docName);
+    const auto maskedPath = rel + "?updateMask.fieldPaths=songs";
+
+    juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+    fields->setProperty("songs", songsArrayValue(kept));
+
+    const bool ok = FirestoreClient::getInstance()
+                        .patchDocument(maskedPath, juce::var(fields.get()));
+
+    DBG ("[Queue] removeSong singer='" << juce::String(item.singerName)
+         << "' song='" << juce::String(item.songName)
+         << "' songsLeft=" << (int) kept.size()
+         << " ok=" << (ok ? 1 : 0));
+
+    if (! ok)
+        outError = "PATCH failed (network)";
+    return ok;
 }
 
 void QueueService::deleteSinger(const juce::String& venueId,

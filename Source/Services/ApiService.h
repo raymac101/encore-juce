@@ -93,8 +93,12 @@ public:
     /** Blocking version of the above, for callers that already own a
         background thread (see AudioAnalysisWorker) -- a full-library sweep
         would otherwise spawn one short-lived thread and TLS handshake per
-        song. Must not be called from the message or audio thread. */
-    void submitLocalAudioAnalysisSync(const juce::String& artist,
+        song. Must not be called from the message or audio thread.
+        Returns true on a 2xx. Deliberately never reads the response body:
+        withConnectionTimeoutMs only bounds the connect, so a read on a
+        stalled venue link has no timeout of its own (see the same problem
+        documented in FirestoreClient::httpJsonRaw). */
+    bool submitLocalAudioAnalysisSync(const juce::String& artist,
                                       const juce::String& song,
                                       double tempo,
                                       const juce::String& keySignature,

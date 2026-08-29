@@ -61,6 +61,22 @@ public:
                     const QueueItem& item,
                     WriteCallback onDone = nullptr);
 
+    /** Synchronous bodies behind appendSong/removeSong, also used by
+        QueueWriteOutbox to replay a write that failed while the venue link
+        was down. Background thread only -- these block on the network and
+        take writeLock_. `skipIfAlreadyPresent` makes the append a no-op when
+        a song with the same QueueItem::id is already in the singer's array,
+        so a replay can't double-add one that actually did land before the
+        failure was reported. */
+    bool appendSongSync(const juce::String& venueId,
+                        const QueueItem& item,
+                        bool skipIfAlreadyPresent,
+                        juce::String& outError);
+
+    bool removeSongSync(const juce::String& venueId,
+                        const QueueItem& item,
+                        juce::String& outError);
+
     /** Delete the singer document under `venues/<venueId>/queue` matching
         `singerNameOrDocId` -- tries an exact Firestore doc ID match first
         (auth singers, e.g. `MainComponent::onRemoveSinger`), then falls

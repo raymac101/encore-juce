@@ -382,20 +382,20 @@ void ApiService::submitLocalAudioAnalysis(const juce::String& artist,
     juce::Thread::launch(juce::Thread::Priority::low,
         [this, artist, song, tempo, keySignature, durationMS]()
         {
-            submitLocalAudioAnalysisSync(artist, song, tempo, keySignature, durationMS);
+            (void) submitLocalAudioAnalysisSync(artist, song, tempo, keySignature, durationMS);
         });
 }
 
-void ApiService::submitLocalAudioAnalysisSync(const juce::String& artist,
+bool ApiService::submitLocalAudioAnalysisSync(const juce::String& artist,
                                               const juce::String& song,
                                               double tempo,
                                               const juce::String& keySignature,
                                               int durationMS)
 {
     if (artist.trim().isEmpty() || song.trim().isEmpty())
-        return;
+        return false;
     if (tempo <= 0.0 && keySignature.trim().isEmpty() && durationMS <= 0)
-        return;
+        return false;
 
     juce::DynamicObject::Ptr bodyObj = new juce::DynamicObject();
     bodyObj->setProperty("artistName", artist);
@@ -417,8 +417,7 @@ void ApiService::submitLocalAudioAnalysisSync(const juce::String& artist,
                               "Authorization: Bearer " + bearerToken_)
             .withStatusCode(&statusCode));
 
-    if (stream != nullptr)
-        (void) stream->readEntireStreamAsString();
+    return stream != nullptr && statusCode >= 200 && statusCode < 300;
 }
 
 //==============================================================================

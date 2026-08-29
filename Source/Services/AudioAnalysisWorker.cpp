@@ -71,6 +71,7 @@ void AudioAnalysisWorker::run()
     formatManager.registerBasicFormats();
 
     juce::uint32 lastPostMs = juce::Time::getMillisecondCounter();
+    int shareFailures = 0;
 
     for (size_t i = 0; i < jobs_.size(); ++i)
     {
@@ -119,11 +120,19 @@ void AudioAnalysisWorker::run()
         // handful of karaoke vendors, so one venue's real analysis saves
         // every other one from redoing the same work. Synchronous on this
         // thread on purpose (see ApiService::submitLocalAudioAnalysisSync).
-        if (result.analysisOk || result.durationMS > 0)
-            ApiService::getInstance().submitLocalAudioAnalysisSync (
+        if (shareFailures < kMaxShareFailures && (result.analysisOk || result.durationMS > 0))
+        {
+            const bool shared = ApiService::getInstance().submitLocalAudioAnalysisSync (
                 job.artistName, job.songName,
                 result.analysisOk ? (double) result.bpm : 0.0,
                 result.keySignature, result.durationMS);
+
+            shareFailures = shared ? 0 : shareFailures + 1;
+
+            if (shareFailures == kMaxShareFailures)
+                juce::Logger::writeToLog ("AudioAnalysisWorker: giving up on sharing results upstream "
+                                          "after " + juce::String (kMaxShareFailures) + " consecutive failures");
+        }
 
         size_t pendingCount = 0;
         {

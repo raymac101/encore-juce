@@ -26,6 +26,7 @@
 #include "../Services/ArchiveService.h"
 #include "../Services/AuditService.h"
 #include "../Services/PerformanceEventOutbox.h"
+#include "../Services/QueueWriteOutbox.h"
 #include "../Services/VenueSessionService.h"
 #include "../Services/ApiService.h"
 #include "../Services/UpdateService.h"
@@ -449,6 +450,10 @@ MainComponent::MainComponent()
         // Retry any V2 audit events left pending by a previous shutdown or
         // network outage. The worker waits for an authenticated token.
         PerformanceEventOutbox::getInstance().start();
+
+        // Same for queue adds/removes that couldn't reach Firestore -- these
+        // replay into whatever the rotation looks like when the link returns.
+        QueueWriteOutbox::getInstance().start();
         
         // Start timer for periodic updates - disabled until safer implementation
         // startTimer(2000);
@@ -475,6 +480,7 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     PerformanceEventOutbox::getInstance().stop();
+    QueueWriteOutbox::getInstance().stop();
     // Close the secondary display before the audio engine goes away — its
     // timer may be trying to poll the engine's position.
     lyricWindow_.reset();
