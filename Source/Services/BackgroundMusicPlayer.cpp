@@ -409,8 +409,12 @@ void BackgroundMusicPlayer::setVolume (float v)
 {
     targetVolume_ = juce::jlimit (0.0f, 1.0f, v);
     UserPreferences::getInstance().setBackgroundMusicVolume (targetVolume_.load());
-    // If we're not in a fade, snap immediately.
-    if (! fadingOut_.load() && ! fadingIn_.load())
+    // If we're not in a fade AND not resting silent after a fade-out (e.g.
+    // ducked for a live karaoke performance -- see silencedUntilFadeIn_),
+    // snap immediately. Otherwise just remember the new target: the next
+    // fadeIn() ramps up to it naturally once it's actually time to be
+    // heard again, instead of this jumping straight to audible right now.
+    if (! fadingOut_.load() && ! fadingIn_.load() && ! silencedUntilFadeIn_.load())
         currentGain_ = targetVolume_.load();
 }
 
@@ -422,6 +426,7 @@ void BackgroundMusicPlayer::fadeOut (float durationSeconds)
     fadeRatePerSample_ = currentGain_.load() / juce::jmax (1.0f, samplesForFade);
     fadingIn_  = false;
     fadingOut_ = true;
+    silencedUntilFadeIn_ = true;
 }
 
 void BackgroundMusicPlayer::fadeIn (float durationSeconds)
@@ -449,6 +454,7 @@ void BackgroundMusicPlayer::fadeIn (float durationSeconds)
     fadeRatePerSample_ = (target - currentGain_.load()) / juce::jmax (1.0f, samplesForFade);
     fadingOut_ = false;
     fadingIn_  = true;
+    silencedUntilFadeIn_ = false;
 }
 
 void BackgroundMusicPlayer::setEnabled (bool enabled)

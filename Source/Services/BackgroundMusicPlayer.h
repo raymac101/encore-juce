@@ -168,6 +168,19 @@ private:
     std::atomic<bool> fadingOut_ { false };
     std::atomic<bool> fadingIn_  { false };
 
+    // True from the moment fadeOut() is called until the next fadeIn() --
+    // covers the "fade-out finished, gain is resting at 0" steady state,
+    // which fadingOut_/fadingIn_ alone can't tell apart from "never faded
+    // at all" (both are false once a fade completes -- see the gain<=0
+    // branch in getNextAudioBlock). setVolume() checks this so that a
+    // volume change from somewhere that isn't the deliberate karaoke
+    // duck/undock -- e.g. the Mixer page's Fx/Music/etc. faders all funnel
+    // every change through this function via MixerPage::pushStateToEngine(),
+    // even though they have nothing to do with background music -- can't
+    // un-mute background music over a live performance. Set true in
+    // fadeOut(), cleared in fadeIn(); see both.
+    std::atomic<bool> silencedUntilFadeIn_ { false };
+
     std::atomic<int> currentIndex_ { 0 };
     std::atomic<bool> trackChangedFlag_ { false };
     std::atomic<bool> playStateChangedFlag_ { false };
