@@ -189,6 +189,11 @@ void RequestService::timerCallback()
     poll();
 }
 
+void RequestService::forgetSeenStatus(const juce::String& docId)
+{
+    seenStatus_.erase(docId.toStdString());
+}
+
 void RequestService::poll()
 {
     if (! running_ || pollInFlight_ || venueId_.isEmpty())

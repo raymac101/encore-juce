@@ -50,6 +50,15 @@ public:
 
     void signOut();
 
+    /** "Reconnect Now"-style escape hatch: forgets about any requests
+        currently counted against httpJsonRaw()'s in-flight cap (see its
+        comment), so a fresh manual reconnect attempt gets a real, immediate
+        chance instead of being silently refused because earlier stalled
+        requests -- which may take the OS's own TCP stack several minutes to
+        actually give up on -- are still counted as "in flight". Safe to
+        call from the message thread. */
+    static void resetStalledRequestBudget();
+
     //==============================================================================
     // Auth: email + password
     struct AuthResult

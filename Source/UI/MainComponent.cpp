@@ -6172,6 +6172,13 @@ void MainComponent::updateNetworkHealthUI()
 void MainComponent::reconnectNetworkServices()
 {
     juce::Logger::writeToLog ("[Network] manual reconnect requested");
+    // Drop any requests still counted against FirestoreClient's stalled-
+    // request circuit breaker -- otherwise, if enough requests stalled
+    // during the outage to trip it, this manual reconnect would silently
+    // fail fast just like everything else has been, since the OS's own TCP
+    // stack can take several minutes to give up on each one. The user
+    // pressed a button expecting an immediate real attempt, not a wait.
+    FirestoreClient::resetStalledRequestBudget();
     RequestService::getInstance().forceReconnect();
     QueueService::getInstance().forceReconnect();
 }
@@ -6292,9 +6299,21 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
         QueueService::getInstance().appendSong (venueId, approved,
             [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
             {
-                RequestService::getInstance().deleteRequested (venueId, id);
-                if (safe != nullptr && ok)
-                    safe->reloadQueueFromFirestore (venueId);
+                if (ok)
+                {
+                    RequestService::getInstance().deleteRequested (venueId, id);
+                    if (safe != nullptr)
+                        safe->reloadQueueFromFirestore (venueId);
+                }
+                else
+                {
+                    // Same reasoning as onIncomingApprovedRequest's failure
+                    // branch: a network hiccup shouldn't silently drop a
+                    // local desktop request, so retry on the next poll
+                    // instead of deleting it.
+                    DBG ("[Pipeline] new(local) -> enqueue FAILED, will retry: " << id);
+                    RequestService::getInstance().forgetSeenStatus (id);
+                }
             });
         return;
     }
@@ -6397,9 +6416,25 @@ void MainComponent::onIncomingApprovedRequest (const QueueItem& item)
     QueueService::getInstance().appendSong (venueId, item,
         [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
         {
-            RequestService::getInstance().deleteRequested (venueId, id);
-            if (safe != nullptr && ok)
-                safe->reloadQueueFromFirestore (venueId);
+            if (ok)
+            {
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            }
+            else
+            {
+                // A network hiccup, not a real rejection -- leave the
+                // /requested doc in place (deleting it here would make the
+                // singer's approved song vanish with no record it ever
+                // existed) and make it dispatch onApprovedRequest again on
+                // the next poll so this whole enqueue attempt retries
+                // automatically, rather than being silently forgotten
+                // because its status/action hasn't changed since we already
+                // saw it once.
+                DBG ("[Pipeline] approved -> enqueue FAILED, will retry: " << id);
+                RequestService::getInstance().forgetSeenStatus (id);
+            }
         });
 }
 
@@ -6423,11 +6458,23 @@ void MainComponent::onIncomingDeleteRequest (const QueueItem& item)
 
     juce::Component::SafePointer<MainComponent> safe (this);
     QueueService::getInstance().removeSong (venueId, item,
-        [safe, id = juce::String(item.id), venueId](bool /*ok*/, juce::String /*err*/)
+        [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
         {
-            RequestService::getInstance().deleteRequested (venueId, id);
-            if (safe != nullptr)
-                safe->reloadQueueFromFirestore (venueId);
+            if (ok)
+            {
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            }
+            else
+            {
+                // If the removal itself failed on a network hiccup, deleting
+                // the /requested doc anyway would strand the song in the
+                // queue with no way for the mobile app to ask again -- retry
+                // on the next poll instead.
+                DBG ("[Pipeline] delete -> removeSong FAILED, will retry: " << id);
+                RequestService::getInstance().forgetSeenStatus (id);
+            }
         });
 }
 

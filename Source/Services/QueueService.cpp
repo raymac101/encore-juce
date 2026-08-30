@@ -992,6 +992,18 @@ void QueueService::forceReconnect()
     reportedUnhealthy_ = false;
     lastFingerprint_.clear();
 
+    // A write whose completion callback never fires (its underlying request
+    // thread stalled on bad wifi and is never coming back -- see
+    // FirestoreClient::httpJsonRaw()'s in-flight cap) would otherwise leave
+    // pendingWrites_ stuck above zero forever, and pollWatcher()'s guard
+    // below would then make every future poll -- including the one this
+    // call is about to force -- a silent no-op. "Reconnect Now" needs to
+    // actually reconnect even when a stuck write is the reason things went
+    // quiet, so drop the count here; if that write's callback does still
+    // arrive later, endWrite()'s underflow guard (pendingWrites_ > 0) makes
+    // it a harmless no-op instead of going negative.
+    pendingWrites_ = 0;
+
     if (venueId.isEmpty())
         return;
 

@@ -9,9 +9,18 @@
 #include "FirestoreClient.h"
 #include "../Firebase/FirebaseConfig.h"
 #include <memory>
+#include <atomic>
 
 namespace
 {
+// httpJsonRaw()'s in-flight circuit breaker -- see the comment where it's
+// checked, below. File-scope rather than a FirestoreClient member since
+// every caller already goes through the one singleton instance anyway, and
+// this needs to be touchable from resetStalledRequestBudget() without
+// exposing the counter itself in the header.
+constexpr int kMaxInFlightRequests = 8;
+std::atomic<int> g_inFlightRequests { 0 };
+
 juce::String decodeBase64UrlToString (juce::String value)
 {
     value = value.replaceCharacter ('-', '+').replaceCharacter ('_', '/');
@@ -163,6 +172,37 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
     // restarting the app. Race the request against a hard deadline instead:
     // if it doesn't finish in time, report failure immediately so callers
     // can recover, and let the helper thread finish (or not) on its own.
+    //
+    // "Let the helper thread finish on its own" is exactly the problem the
+    // circuit breaker below exists for: on a socket that's connected-but-
+    // stalled (the classic bad-wifi failure mode -- not a clean refusal),
+    // that helper thread can be blocked in readEntireStreamAsString()
+    // essentially forever, permanently leaking one OS thread + one open
+    // socket per stalled attempt. RequestService/QueueService/EmojiService
+    // poll every 1-3s, so a whole night of intermittent bad wifi can leak
+    // dozens to hundreds of these. Eventually the process runs out of
+    // threads/file descriptors, and at that point even a genuinely-
+    // recovered network can't be used -- new connection attempts (including
+    // whatever "Reconnect Now" triggers) fail too, because it's the app's
+    // own resources that are exhausted now, not the wifi. Only a restart
+    // (which kills every leaked thread) used to clear it. Capping how many
+    // of these can be in flight at once bounds the leak instead of letting
+    // it grow without limit: once kMaxInFlightRequests are stuck, new
+    // requests fail fast (a normal, already-handled failure to every
+    // caller) rather than piling on more leaked threads, and the count
+    // drains back down on its own as the OS's TCP stack eventually times
+    // out each stalled connection (typically within a few minutes) --
+    // recovering without a restart. resetStalledRequestBudget() gives
+    // "Reconnect Now" a way to not wait out that drain.
+    if (g_inFlightRequests.load() >= kMaxInFlightRequests)
+    {
+        juce::Logger::writeToLog("FirestoreClient: " + juce::String(kMaxInFlightRequests)
+                                  + " requests already stalled, failing fast instead of leaking another thread for "
+                                  + u.toString(false));
+        if (httpStatus != nullptr) *httpStatus = 0;
+        return juce::var();
+    }
+
     struct RawResult
     {
         juce::var parsed;
@@ -171,8 +211,15 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
     auto result = std::make_shared<RawResult>();
     auto done   = std::make_shared<juce::WaitableEvent>();
 
+    ++g_inFlightRequests;
     juce::Thread::launch([u, httpMethod, headersStr, result, done]
     {
+        // Decrements on every exit path below, including the early return --
+        // this is what lets the count drain back down once a stalled
+        // connection eventually resolves (successfully or not) rather than
+        // only ever growing.
+        struct Decrement { ~Decrement() { --g_inFlightRequests; } } decrementOnExit;
+
         int status = 0;
         juce::StringPairArray responseHeaders;
 
@@ -216,6 +263,12 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
 
     if (httpStatus != nullptr) *httpStatus = result->status;
     return result->parsed;
+}
+
+// static
+void FirestoreClient::resetStalledRequestBudget()
+{
+    g_inFlightRequests = 0;
 }
 
 //==============================================================================
