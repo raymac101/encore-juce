@@ -989,7 +989,13 @@ void QueueService::forceReconnect()
     watching_ = false;
     watchInFlight_ = false;
     consecutiveFailures_ = 0;
-    reportedUnhealthy_ = false;
+    // Deliberately DO NOT clear reportedUnhealthy_ here. MainComponent's
+    // offline banner is driven by the onConnectionHealthChanged(true)
+    // transition, which pollWatcher() only fires when a good poll lands
+    // while reportedUnhealthy_ is still true. Clearing it here made the
+    // service think it had already reported "recovered" when it hadn't --
+    // so after "Reconnect Now" the queue would resync but the red
+    // "OFFLINE" banner stayed up until the app was restarted.
     lastFingerprint_.clear();
 
     // A write whose completion callback never fires (its underlying request

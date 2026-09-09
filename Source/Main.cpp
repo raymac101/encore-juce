@@ -96,6 +96,12 @@ public:
 
     void shutdown() override
     {
+        // Stop any in-flight update check / installer download and join its
+        // worker thread BEFORE the rest of teardown. A download still
+        // streaming when JUCE frees global state segfaults on the CFNetwork
+        // work queue (freed NSURLSession delegate) -- see UpdateService.h.
+        UpdateService::getInstance().shutdown();
+
        #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (nullptr);
        #else

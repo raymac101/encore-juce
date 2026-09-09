@@ -13,6 +13,7 @@
 #include "../Services/MetadataQuotaService.h"
 #include "../Services/LibraryScanner.h"
 #include "../Services/SongDatabase.h"
+#include "../Services/SongbookStorageService.h"
 #include "../Services/UserPreferences.h"
 #include "../Localization/LocalizationManager.h"
 #include <set>
@@ -512,6 +513,7 @@ void BulkMetadataTool::openManualReviewFixDialog (int rowNumber)
                         safe->saveCatalog();
                         safe->setStatus ("Fixed: " + correctedArtist + " - " + correctedSong);
                         removeFromReview();
+                        safe->republishSongbookWithNewMetadata(); // get it into TAGG's copy too
                     }
                     else if (entryObj2 != nullptr)
                     {
@@ -636,6 +638,58 @@ bool BulkMetadataTool::saveCatalog()
     return file.replaceWithText (juce::JSON::toString (catalogRoot_, true));
 }
 
+void BulkMetadataTool::republishSongbookWithNewMetadata()
+{
+    const auto venueId = UserPreferences::getInstance().getVenueId();
+
+    setStatus ("Publishing updated songbook to TAGG...");
+
+    juce::Component::SafePointer<BulkMetadataTool> safe (this);
+    juce::Thread::launch (juce::Thread::Priority::low, [safe, venueId]()
+    {
+        // Rebuild songbook.json (and the SQLite index) from the songbook we
+        // already have, with the freshly-written meta_data.json folded in via
+        // applyLocalMetadata() -- the same enrichment LibraryPage does after a
+        // scan. SongbookStorageService then pushes songbook.json to Firebase
+        // Storage, which is the copy the TAGG mobile app downloads.
+        SongDatabase db;
+        const bool haveDb = db.open();
+
+        LibraryScanner scanner;
+        if (haveDb)
+            scanner.setSongDatabase (&db);
+
+        auto songs = scanner.loadSongbook();
+        if (! songs.empty())
+        {
+            scanner.applyLocalMetadata (songs);
+            scanner.saveSongbook (songs);
+        }
+        scanner.setSongDatabase (nullptr); // db goes out of scope below
+
+        if (venueId.isEmpty() || songs.empty())
+        {
+            juce::MessageManager::callAsync ([safe, empty = songs.empty()]()
+            {
+                if (safe == nullptr) return;
+                safe->setStatus (empty ? "No local songbook to publish."
+                                       : "Metadata saved locally (no active venue to publish to).");
+            });
+            return;
+        }
+
+        SongbookStorageService::getInstance().uploadLocalSongbook (venueId,
+            [safe] (bool ok, juce::String error)
+            {
+                // uploadLocalSongbook already marshals this callback to the
+                // message thread.
+                if (safe == nullptr) return;
+                safe->setStatus (ok ? "Updated songbook published to TAGG."
+                                    : "Songbook upload failed: " + error);
+            });
+    });
+}
+
 //==============================================================================
 void BulkMetadataTool::refreshCounts()
 {
@@ -649,6 +703,11 @@ void BulkMetadataTool::refreshCounts()
 
         juce::String error;
         const bool ok = safe->loadCatalogIfNeeded (error);
+
+        // loadCatalogIfNeeded() reads and JSON-parses the whole catalog file off
+        // disk, which is slow; the tool window can be closed while it runs, so
+        // re-check before touching `safe` again.
+        if (safe == nullptr) return;
 
         if (! ok)
         {
@@ -674,85 +733,97 @@ void BulkMetadataTool::refreshCounts()
         if (db.open())
             localSongs = db.getAll();
 
-        std::set<juce::String> localKeys;
-        for (auto& s : localSongs)
-            localKeys.insert (LibraryScanner::normaliseSongKey (
-                juce::String (s.artistName), juce::String (s.songName)));
-
-        int withMeta = 0, withoutMeta = 0, needsReview = 0;
-        std::vector<juce::String> missingDocIds;
-        std::vector<juce::String> reviewDocIds;
-        std::set<juce::String> matchedKeys;
-
-        auto* rootObj = safe->catalogRoot_.getDynamicObject();
-        auto& props = rootObj->getProperties();
-        for (int i = 0; i < props.size(); ++i)
-        {
-            auto* entryObj = props.getValueAt (i).getDynamicObject();
-            if (entryObj == nullptr) continue;
-
-            const auto key = LibraryScanner::normaliseSongKey (
-                entryObj->getProperty ("artistName").toString(),
-                entryObj->getProperty ("songName").toString());
-
-            if (localKeys.find (key) == localKeys.end())
-                continue; // catalog row not present in this venue's library -- not ours to count
-
-            matchedKeys.insert (key);
-
-            if (entryHasMetadata (entryObj))
-                ++withMeta;
-            else if ((bool) entryObj->getProperty ("needsManualReview"))
-            {
-                // Flagged by a previous failed attempt (see recordFailure()) --
-                // excluded from the auto-retry pool so it doesn't keep getting
-                // attempted every single run; surfaced instead via the
-                // "Manual Review" list for the admin to fix or ignore.
-                ++needsReview;
-                reviewDocIds.push_back (props.getName (i).toString());
-            }
-            else
-            {
-                ++withoutMeta;
-                missingDocIds.push_back (props.getName (i).toString());
-            }
-        }
-
-        // Local songs with no catalog row at all definitely have no metadata.
-        // Synthesize a bare catalog entry (artist/song only) for each so the
-        // existing docId-keyed run/save machinery can fetch and persist their
-        // metadata like any other catalog entry; only written to disk once a
-        // run against it actually succeeds (see finalizeRun -- saveCatalog()
-        // only runs when runSucceeded_ > 0).
-        for (auto& s : localSongs)
-        {
-            const auto key = LibraryScanner::normaliseSongKey (
-                juce::String (s.artistName), juce::String (s.songName));
-            if (matchedKeys.find (key) != matchedKeys.end())
-                continue;
-            matchedKeys.insert (key); // dedupe multiple local files mapping to the same key
-
-            const auto newDocId = "local-" + juce::Uuid().toString();
-            juce::DynamicObject::Ptr newEntry = new juce::DynamicObject();
-            newEntry->setProperty ("artistName", juce::String (s.artistName));
-            newEntry->setProperty ("songName",   juce::String (s.songName));
-            rootObj->setProperty (juce::Identifier (newDocId), juce::var (newEntry.get()));
-
-            ++withoutMeta;
-            missingDocIds.push_back (newDocId);
-        }
-
-        juce::MessageManager::callAsync ([safe, withMeta, withoutMeta, needsReview,
-                                          missing = std::move (missingDocIds),
-                                          review = std::move (reviewDocIds)]() mutable
+        // The catalog traversal below both reads and mutates catalogRoot_ (it
+        // synthesizes bare entries for local-only songs), and other callbacks on
+        // the message thread mutate the same var. Marshal the whole thing back
+        // to the message thread: it keeps catalogRoot_ single-threaded and means
+        // `safe` is only ever dereferenced where it's guaranteed valid.
+        juce::MessageManager::callAsync ([safe, localSongs = std::move (localSongs)]() mutable
         {
             if (safe == nullptr) return;
+
+            std::set<juce::String> localKeys;
+            for (auto& s : localSongs)
+                localKeys.insert (LibraryScanner::normaliseSongKey (
+                    juce::String (s.artistName), juce::String (s.songName)));
+
+            int withMeta = 0, withoutMeta = 0, needsReview = 0;
+            std::vector<juce::String> missingDocIds;
+            std::vector<juce::String> reviewDocIds;
+            std::set<juce::String> matchedKeys;
+
+            auto* rootObj = safe->catalogRoot_.getDynamicObject();
+            if (rootObj == nullptr)
+            {
+                safe->refreshCountsButton_.setEnabled (true);
+                safe->statsLabel_.setText ("Catalog is empty or failed to load.",
+                                           juce::dontSendNotification);
+                safe->setStatus ({});
+                return;
+            }
+
+            auto& props = rootObj->getProperties();
+            for (int i = 0; i < props.size(); ++i)
+            {
+                auto* entryObj = props.getValueAt (i).getDynamicObject();
+                if (entryObj == nullptr) continue;
+
+                const auto key = LibraryScanner::normaliseSongKey (
+                    entryObj->getProperty ("artistName").toString(),
+                    entryObj->getProperty ("songName").toString());
+
+                if (localKeys.find (key) == localKeys.end())
+                    continue; // catalog row not present in this venue's library -- not ours to count
+
+                matchedKeys.insert (key);
+
+                if (entryHasMetadata (entryObj))
+                    ++withMeta;
+                else if ((bool) entryObj->getProperty ("needsManualReview"))
+                {
+                    // Flagged by a previous failed attempt (see recordFailure()) --
+                    // excluded from the auto-retry pool so it doesn't keep getting
+                    // attempted every single run; surfaced instead via the
+                    // "Manual Review" list for the admin to fix or ignore.
+                    ++needsReview;
+                    reviewDocIds.push_back (props.getName (i).toString());
+                }
+                else
+                {
+                    ++withoutMeta;
+                    missingDocIds.push_back (props.getName (i).toString());
+                }
+            }
+
+            // Local songs with no catalog row at all definitely have no metadata.
+            // Synthesize a bare catalog entry (artist/song only) for each so the
+            // existing docId-keyed run/save machinery can fetch and persist their
+            // metadata like any other catalog entry; only written to disk once a
+            // run against it actually succeeds (see finalizeRun -- saveCatalog()
+            // only runs when runSucceeded_ > 0).
+            for (auto& s : localSongs)
+            {
+                const auto key = LibraryScanner::normaliseSongKey (
+                    juce::String (s.artistName), juce::String (s.songName));
+                if (matchedKeys.find (key) != matchedKeys.end())
+                    continue;
+                matchedKeys.insert (key); // dedupe multiple local files mapping to the same key
+
+                const auto newDocId = "local-" + juce::Uuid().toString();
+                juce::DynamicObject::Ptr newEntry = new juce::DynamicObject();
+                newEntry->setProperty ("artistName", juce::String (s.artistName));
+                newEntry->setProperty ("songName",   juce::String (s.songName));
+                rootObj->setProperty (juce::Identifier (newDocId), juce::var (newEntry.get()));
+
+                ++withoutMeta;
+                missingDocIds.push_back (newDocId);
+            }
 
             safe->countWithMetadata_ = withMeta;
             safe->countWithoutMetadata_ = withoutMeta;
             safe->countNeedsReview_ = needsReview;
-            safe->missingDocIds_ = std::move (missing);
-            safe->reviewDocIds_ = std::move (review);
+            safe->missingDocIds_ = std::move (missingDocIds);
+            safe->reviewDocIds_ = std::move (reviewDocIds);
 
             const int total = withMeta + withoutMeta + needsReview;
             const int percent = total > 0 ? juce::roundToInt (100.0 * withMeta / total) : 0;
@@ -1068,6 +1139,12 @@ void BulkMetadataTool::finalizeRun()
     refreshQuota();
 
     showReportView();
+
+    // Push the newly-enriched metadata out to Firebase Storage so the TAGG
+    // mobile app sees it too -- not just this machine's local files. Kept
+    // last so its status messages aren't immediately stomped by refreshCounts().
+    if (runSucceeded_ > 0)
+        republishSongbookWithNewMetadata();
 }
 
 //==============================================================================

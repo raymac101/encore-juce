@@ -109,7 +109,10 @@ void FirestoreClient::ensureFreshToken()
                              + juce::URL::addEscapeChars(refreshTok, true);
 
     int status = 0;
-    auto resp = httpJsonRaw(url, "POST", form, &status, {}, "application/x-www-form-urlencoded");
+    // includeAuthHeader=false: the securetoken refresh grant is keyed by the
+    // API key + the refresh_token in the body; it must not carry the stale
+    // (about-to-expire) idToken_ as a bearer. Matches signInWithRefreshToken().
+    auto resp = httpJsonRaw(url, "POST", form, &status, {}, "application/x-www-form-urlencoded", false);
 
     if (status >= 200 && status < 300 && resp.isObject())
     {
@@ -211,43 +214,49 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
     auto result = std::make_shared<RawResult>();
     auto done   = std::make_shared<juce::WaitableEvent>();
 
+    // Own the stream through a shared_ptr so the watchdog below can cancel()
+    // it from this thread while the worker is blocked mid-read. A JUCE stream
+    // from createInputStream() honours the *connection* timeout but has NO
+    // read timeout -- on a socket that connects and then black-holes (the
+    // classic dropped-venue-wifi failure), readEntireStreamAsString() can
+    // block far longer than the OS takes to give up (many minutes, and on
+    // macOS with keepalive off effectively until the process exits). Every
+    // stuck worker holds its g_inFlightRequests slot that whole time, so once
+    // kMaxInFlightRequests pile up the circuit breaker is pegged and
+    // *everything* -- token refresh, queue writes, "Reconnect Now" -- fails
+    // fast until the app is restarted. cancel() on the watchdog deadline
+    // unblocks the read so the worker unwinds and frees its slot instead.
+    auto webStream = std::make_shared<juce::WebInputStream> (u, /*addParametersToRequestBody*/ false);
+    webStream->withExtraHeaders (headersStr)
+              .withCustomRequestCommand (httpMethod)
+              .withConnectionTimeout (15000);
+
     ++g_inFlightRequests;
-    juce::Thread::launch([u, httpMethod, headersStr, result, done]
+    juce::Thread::launch([u, webStream, result, done]
     {
-        // Decrements on every exit path below, including the early return --
-        // this is what lets the count drain back down once a stalled
-        // connection eventually resolves (successfully or not) rather than
+        // Decrements on every exit path -- including a cancel()-interrupted
+        // read -- so the in-flight count always drains back down rather than
         // only ever growing.
         struct Decrement { ~Decrement() { --g_inFlightRequests; } } decrementOnExit;
 
-        int status = 0;
-        juce::StringPairArray responseHeaders;
+        const bool connected = webStream->connect (nullptr);
+        result->status = webStream->getStatusCode();
 
-        auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
-                        .withConnectionTimeoutMs(15000)
-                        .withExtraHeaders(headersStr)
-                        .withHttpRequestCmd(httpMethod)
-                        .withResponseHeaders(&responseHeaders)
-                        .withStatusCode(&status);
-
-        std::unique_ptr<juce::InputStream> stream(u.createInputStream(opts));
-        result->status = status;
-
-        if (stream == nullptr)
+        if (! connected || webStream->isError())
         {
             DBG("FirestoreClient: connection failed for " << u.toString(false));
             done->signal();
             return;
         }
 
-        auto responseBody = stream->readEntireStreamAsString();
+        const auto responseBody = webStream->readEntireStreamAsString();
         if (responseBody.isNotEmpty())
         {
             juce::var parsed;
             if (juce::JSON::parse(responseBody, parsed).wasOk())
                 result->parsed = parsed;
             else
-                DBG("FirestoreClient: JSON parse failed (" << status << "): " << responseBody.substring(0, 400));
+                DBG("FirestoreClient: JSON parse failed (" << result->status << "): " << responseBody.substring(0, 400));
         }
         done->signal();
     });
@@ -255,8 +264,12 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
     constexpr int kRequestWatchdogMs = 20000;
     if (! done->wait(kRequestWatchdogMs))
     {
+        // Interrupt the stuck read so the worker unwinds now and releases its
+        // circuit-breaker slot, instead of leaking until the OS times the
+        // socket out (if it ever does).
+        webStream->cancel();
         juce::Logger::writeToLog("FirestoreClient: request timed out after "
-                                  + juce::String(kRequestWatchdogMs) + "ms for " + u.toString(false));
+                                  + juce::String(kRequestWatchdogMs) + "ms (cancelled) for " + u.toString(false));
         if (httpStatus != nullptr) *httpStatus = 0;
         return juce::var();
     }

@@ -55,6 +55,57 @@ UpdateService& UpdateService::getInstance()
     return instance;
 }
 
+UpdateService::~UpdateService()
+{
+    // Backstop only -- the real fix is EncoreApplication::shutdown() calling
+    // this while the message loop is still alive. By the time a function-local
+    // static is destroyed (atexit) it's too late to do anything graceful, but
+    // a leftover worker here is a bug worth at least trying to join.
+    shutdown();
+}
+
+void UpdateService::startWorker (std::function<void (juce::Thread&)> job)
+{
+    const juce::ScopedLock sl (workersLock_);
+
+    // Reap finished workers so repeated manual "Check for Updates" clicks
+    // don't grow the array without bound.
+    for (int i = workers_.size(); --i >= 0;)
+        if (! workers_[i]->isThreadRunning())
+            workers_.remove (i);
+
+    if (aborting_.load())
+        return; // shutting down -- start no new network work
+
+    auto* w = workers_.add (new Worker());
+    w->job = [w, job = std::move (job)] { job (*w); };
+    w->startThread();
+}
+
+void UpdateService::shutdown()
+{
+    // Flip the flag first (atomic, no lock) so an about-to-start worker in
+    // startWorker() bails, and any running download/manifest read unwinds.
+    aborting_.store (true);
+
+    juce::OwnedArray<Worker> local;
+    {
+        const juce::ScopedLock sl (workersLock_);
+        workers_.swapWith (local);
+    }
+
+    for (auto* w : local)
+        w->signalThreadShouldExit();
+
+    // stopThread() waits, then hard-kills as a last resort so shutdown can
+    // never hang on a wedged socket. The cooperative abort checks mean the
+    // wait is normally trivial; letting each worker's WebInputStream fall out
+    // of scope on its own thread is what cancels the NSURLSession delegate
+    // cleanly, before app teardown frees it.
+    for (auto* w : local)
+        w->stopThread (4000);
+}
+
 bool UpdateService::isRemoteVersionNewer (const juce::String& remoteVersion, const juce::String& localVersion)
 {
     int remote[3];
@@ -105,6 +156,9 @@ bool UpdateService::fetchManifestUpdateInfo (ManifestUpdateInfo& out)
     if (stream == nullptr || statusCode != 200)
         return false;
 
+    if (aborting_.load())
+        return false; // app is quitting -- drop the stream now, on this thread
+
     const auto manifestText = stream->readEntireStreamAsString();
     const auto parsed = juce::JSON::parse (manifestText);
     if (! parsed.isObject())
@@ -153,19 +207,19 @@ bool UpdateService::fetchManifestUpdateInfo (ManifestUpdateInfo& out)
 
 void UpdateService::checkForUpdates (ReadyCallback onReady)
 {
-    juce::Thread::launch ([this, onReady]
+    startWorker ([this, onReady] (juce::Thread& self)
     {
         ManifestUpdateInfo info;
         if (! fetchManifestUpdateInfo (info))
             return;
 
-        downloadAndVerify (info.fileUrl, info.sha256Hex, info.version, info.releaseNotesUrl, onReady);
+        downloadAndVerify (info.fileUrl, info.sha256Hex, info.version, info.releaseNotesUrl, self, onReady);
     });
 }
 
 void UpdateService::checkForUpdatesManual (ManifestCheckCallback onResult)
 {
-    juce::Thread::launch ([this, onResult]
+    startWorker ([this, onResult] (juce::Thread&)
     {
         ManifestUpdateInfo info;
         const bool hasUpdate = fetchManifestUpdateInfo (info);
@@ -188,7 +242,7 @@ void UpdateService::checkForUpdatesManual (ManifestCheckCallback onResult)
 
 void UpdateService::downloadUpdateNow (DownloadCallback onDone)
 {
-    juce::Thread::launch ([this, onDone]
+    startWorker ([this, onDone] (juce::Thread& self)
     {
         const auto fileUrl = pendingCheckedFileUrl_;
         const auto sha256  = pendingCheckedSha256_;
@@ -203,7 +257,7 @@ void UpdateService::downloadUpdateNow (DownloadCallback onDone)
             return;
         }
 
-        const bool ok = downloadAndVerify (fileUrl, sha256, version, notes, nullptr);
+        const bool ok = downloadAndVerify (fileUrl, sha256, version, notes, self, nullptr);
         if (onDone)
             juce::MessageManager::callAsync ([onDone, ok] { onDone (ok); });
     });
@@ -213,10 +267,12 @@ bool UpdateService::downloadAndVerify (const juce::URL& fileUrl,
                                         const juce::String& expectedSha256Hex,
                                         const juce::String& version,
                                         const juce::String& releaseNotesUrl,
+                                        juce::Thread& worker,
                                         ReadyCallback onReady)
 {
-    // Runs on whichever background thread the caller launched (checkForUpdates'
-    // own thread, or downloadUpdateNow's).
+    // Runs on the owned Worker thread the caller started (checkForUpdates' or
+    // downloadUpdateNow's). `worker.threadShouldExit()` / aborting_ let a quit
+    // mid-download abandon the stream promptly, on THIS thread.
     int statusCode = 0;
     auto stream = fileUrl.createInputStream (
         juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
@@ -226,12 +282,16 @@ bool UpdateService::downloadAndVerify (const juce::URL& fileUrl,
     if (stream == nullptr || statusCode != 200)
         return false;
 
+    if (aborting_.load() || worker.threadShouldExit())
+        return false;
+
     const auto destDir = getUpdatesDirectory();
     const auto fileName = fileUrl.getFileName();
     auto destFile = destDir.getChildFile (fileName.isNotEmpty() ? fileName
                                                                  : ("EncoreKaraoke-update-" + version));
     destFile.deleteFile();
 
+    bool aborted = false;
     {
         juce::FileOutputStream out (destFile);
         if (! out.openedOk())
@@ -240,12 +300,28 @@ bool UpdateService::downloadAndVerify (const juce::URL& fileUrl,
         juce::HeapBlock<char> buffer (1 << 16);
         for (;;)
         {
+            // Abandon a partial download the instant shutdown starts. Caller
+            // treats false as "no update"; letting `stream` unwind here (on
+            // return) cancels the NSURLSession delegate on this thread, before
+            // app teardown frees it underneath CFNetwork's work queue.
+            if (aborting_.load() || worker.threadShouldExit())
+            {
+                aborted = true;
+                break;
+            }
+
             const auto bytesRead = stream->read (buffer.getData(), 1 << 16);
             if (bytesRead <= 0)
                 break;
             out.write (buffer.getData(), (size_t) bytesRead);
         }
         out.flush();
+    }
+
+    if (aborted)
+    {
+        destFile.deleteFile(); // stream (FileOutputStream) is closed now
+        return false;
     }
 
     if (! destFile.existsAsFile())

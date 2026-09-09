@@ -104,6 +104,14 @@ private:
     juce::File catalogFile() const;
     bool loadCatalogIfNeeded (juce::String& outError);
     bool saveCatalog();
+
+    /** After a run enriches meta_data.json, fold that metadata into
+        songbook.json (+ the SQLite index) and re-upload songbook.json to
+        Firebase Storage for the active venue. Without this the new metadata
+        only ever reaches the KJ's local files -- the TAGG mobile app keeps
+        downloading the stale, un-enriched songbook. Runs on a background
+        thread; no-op if there's no active venue. */
+    void republishSongbookWithNewMetadata();
     static CdgSong entryToCdgSong (const juce::String& docId, juce::DynamicObject* obj);
     static void applyResultToEntry (juce::DynamicObject* obj, const CdgSong& song);
     static bool entryHasMetadata (juce::DynamicObject* obj);

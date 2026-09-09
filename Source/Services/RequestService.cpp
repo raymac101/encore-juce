@@ -171,7 +171,11 @@ void RequestService::forceReconnect()
     running_ = false;
     pollInFlight_ = false;
     consecutiveFailures_ = 0;
-    reportedUnhealthy_ = false;
+    // Deliberately DO NOT clear reportedUnhealthy_ here -- see the matching
+    // comment in QueueService::forceReconnect(). MainComponent's offline
+    // banner clears only on the onConnectionHealthChanged(true) transition
+    // that poll() fires when a good poll lands while reportedUnhealthy_ is
+    // still true; clearing it here left the banner stuck on until restart.
     seenStatus_.clear();
 
     if (venueId.isEmpty())
