@@ -110,5 +110,19 @@
         "sha256": "e5175ea9309feec742a356f5fdd2a88bf535eb9dbec68a572cb340d451efd809"
       }
     }
+  },
+  {
+    "version": "3.1.311",
+    "releaseNotesUrl": "",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.311-win64.exe?alt=media",
+        "sha256": "62b0c0b0e763853ff2249e5db3110930331d8184967e2348fc5eeaf20a65b428"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.307-mac.dmg?alt=media",
+        "sha256": "PENDING_BUILD"
+      }
+    }
   }
 ]
