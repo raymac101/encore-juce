@@ -362,6 +362,31 @@ if(NOT SQLite3_FOUND)
 endif()
 target_link_libraries(EncoreJUCE PRIVATE SQLite3::SQLite3)
 
+# Copy Rubber Band's and SQLite3's runtime DLLs (plus rubberband's own
+# transitive deps) next to the exe. Unlike macOS (rubberband is embedded via
+# embed_rubberband.sh; sqlite3 is the system library), Windows links against
+# vcpkg's import libs above, which only get the app to link -- without this,
+# the exe is missing rubberband-3.dll/sqlite3.dll at runtime on every
+# machine that isn't the dev box that happens to have vcpkg's bin/ on PATH.
+if(WIN32)
+    get_filename_component(_encore_vcpkg_lib_dir "${RUBBERBAND_LIBRARY}" DIRECTORY)
+    get_filename_component(_encore_vcpkg_triplet_dir "${_encore_vcpkg_lib_dir}" DIRECTORY)
+    set(_encore_runtime_dlls
+        rubberband-3.dll
+        samplerate.dll
+        sleef.dll
+        sleefdft.dll
+        sleefquad.dll
+        sqlite3.dll)
+    foreach(_encore_dll IN LISTS _encore_runtime_dlls)
+        add_custom_command(TARGET EncoreJUCE POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<IF:$<CONFIG:Debug>,${_encore_vcpkg_triplet_dir}/debug/bin,${_encore_vcpkg_triplet_dir}/bin>/${_encore_dll}"
+                $<TARGET_FILE_DIR:EncoreJUCE>
+            COMMENT "Copying ${_encore_dll} runtime dependency")
+    endforeach()
+endif()
+
 # Copy assets to output directory. On macOS the real files must live under
 # Contents/Resources/ (standard bundle layout) rather than next to the
 # executable in Contents/MacOS/ -- newer codesign deep-verifies loose,
