@@ -20,7 +20,7 @@
 #include "../Models/Emoji.h"
 
 class AudioEngine;
-class WebVideoView;
+class LibVlcVideoView;
 
 // Lyric screen visual theme, configurable in Settings alongside Color/Motion
 // Intensity. Stored in UserPreferences as a plain clamped int (0-7) so the
@@ -252,10 +252,10 @@ private:
 
     // macOS renders idle-screen video ads through idleAdVideoComponent_
     // (AVFoundation). On Windows juce::VideoComponent (DirectShow) can't decode
-    // MP4/H.264, so idleAdWebVideo_ (WebView2) is used instead and the clip is
+    // MP4/H.264, so idleAdVideoView_ (libvlc) is used instead and the clip is
     // played from the local AdMediaCache copy. Exactly one is non-null.
     std::unique_ptr<juce::VideoComponent> idleAdVideoComponent_;
-    std::unique_ptr<WebVideoView> idleAdWebVideo_;
+    std::unique_ptr<LibVlcVideoView> idleAdVideoView_;
     bool forceIdleScreen_ = false;
 
     // Emoji cheer reactions (venues/<id>/emojis, via EmojiService).

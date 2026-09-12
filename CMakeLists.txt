@@ -69,31 +69,12 @@ else()
     set(ENCORE_AD_VIDEO_PREVIEW_SOURCE Source/UI/AdVideoPreviewComponent_fallback.cpp)
 endif()
 
-# WebView2 (Windows only) -- backs Source/UI/WebVideoView for lyric-screen ad
-# playback, because juce::VideoComponent's DirectShow backend can't decode the
-# MP4/H.264 ad videos that play fine via AVFoundation on macOS. The
-# Microsoft.Web.WebView2 NuGet package (headers + WebView2LoaderStatic.lib) is
-# vendored under third_party/nuget so no NuGet/network step is needed; JUCE's
-# FindWebView2.cmake globs this directory for a *Microsoft.Web.WebView2* folder.
-# Re-fetch with:
-#   curl -L -o wv2.zip https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.3485.44
-#   (unzip into third_party/nuget/Microsoft.Web.WebView2.1.0.3485.44/)
-if(WIN32)
-    # JUCE (in add_subdirectory above) pre-declares JUCE_WEBVIEW2_PACKAGE_LOCATION
-    # as a cache BOOL=OFF, so a plain set() here shadows it for FindWebView2.
-    # Skip only if the caller pointed it at a real directory on the command line.
-    if(NOT EXISTS "${JUCE_WEBVIEW2_PACKAGE_LOCATION}")
-        set(JUCE_WEBVIEW2_PACKAGE_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nuget")
-    endif()
-endif()
-
 # Create the GUI application target
 juce_add_gui_app(EncoreJUCE
     PRODUCT_NAME "Encore Karaoke"
     BUNDLE_ID "com.viracicom.encore"
     ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png"
-    NEEDS_WEBVIEW2 TRUE)
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/images/Encore-Icon.png")
 
 # Generate JuceHeader.h
 juce_generate_juce_header(EncoreJUCE)
@@ -145,7 +126,7 @@ target_sources(EncoreJUCE
         Source/UI/AddSongsDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
-        Source/UI/WebVideoView.cpp
+        Source/UI/LibVlcVideoView.cpp
         Source/UI/LoginWindow.cpp
         Source/UI/Onboarding/OnboardingWizard.cpp
         Source/CDG/CDGDecoder.cpp
@@ -212,11 +193,6 @@ target_compile_definitions(EncoreJUCE
     PRIVATE
         JUCE_STRICT_REFCOUNTEDPOINTER=1
         JUCE_USE_CURL=1
-        # WebBrowserComponent is enabled solely for Source/UI/WebVideoView on
-        # Windows (see the WebView2 note above). On macOS this just activates a
-        # class that links the already-present WebKit framework.
-        JUCE_WEB_BROWSER=1
-        JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
         # Karaoke audio is .mp3 (beside .cdg, or inside the .zip bundles). JUCE's
         # own MP3 decoder is OFF by default, so on Windows every .mp3 was being
         # decoded by WindowsMediaAudioFormat -> WMVCORE, whose readSamples()
@@ -224,7 +200,7 @@ target_compile_definitions(EncoreJUCE
         # batch key/BPM analysis). Enable JUCE's built-in MP3 decoder and drop
         # the Windows Media path entirely. (MP3 decoding patents expired in 2017,
         # so JUCE_USE_MP3AUDIOFORMAT's historical licensing note no longer bites.)
-        # .mp4 video goes through VideoComponent/WebView2, not AudioFormatManager;
+        # .mp4 video goes through VideoComponent/LibVlcVideoView, not AudioFormatManager;
         # .wma/.m4a now just return a null reader and callers degrade gracefully.
         JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_USE_WINDOWS_MEDIA_FORMAT=0
@@ -260,6 +236,40 @@ target_link_libraries(EncoreJUCE
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# libvlc (Windows only) -- backs Source/UI/LibVlcVideoView for lyric-screen ad
+# playback, because juce::VideoComponent's DirectShow backend can't decode the
+# MP4/H.264 ad videos that play fine via AVFoundation on macOS. (Windows Media
+# Foundation's IMFMediaEngine was tried first -- much lighter than the WebView2
+# approach before it, but it leaks 20-30MB of decoder resources on every clip
+# switch, scaling with switch count rather than time elapsed, so it balloons
+# unbounded over a real multi-hour show. libvlc has a genuinely supported way
+# to swap the playing source on a live player without leaking.)
+#
+# There is no vcpkg port for libvlc, so the official VideoLAN.LibVLC.Windows
+# NuGet package (headers, libvlc.dll/.lib, libvlccore.dll, and the full
+# plugins/ directory libvlc needs at runtime -- demuxers, H.264 decode via
+# libavcodec, hardware accel, and the "drawable" HWND-embedded video output)
+# is vendored under third_party/nuget, x64 only. Re-fetch with:
+#   curl -L -o libvlc.nupkg https://api.nuget.org/v3-flatcontainer/videolan.libvlc.windows/3.0.23.1/videolan.libvlc.windows.3.0.23.1.nupkg
+#   (unzip; keep only build/x64/{include,plugins,libvlc.dll,libvlc.lib,libvlccore.dll}
+#   under third_party/nuget/VideoLAN.LibVLC.Windows.3.0.23.1/build/x64/ --
+#   build/x86 and build/arm64 aren't needed)
+if(WIN32)
+    set(LIBVLC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nuget/VideoLAN.LibVLC.Windows.3.0.23.1/build/x64")
+
+    target_include_directories(EncoreJUCE PRIVATE "${LIBVLC_ROOT}/include")
+    target_link_libraries(EncoreJUCE PRIVATE "${LIBVLC_ROOT}/libvlc.lib")
+
+    add_custom_command(TARGET EncoreJUCE POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LIBVLC_ROOT}/libvlc.dll" $<TARGET_FILE_DIR:EncoreJUCE>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LIBVLC_ROOT}/libvlccore.dll" $<TARGET_FILE_DIR:EncoreJUCE>
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${LIBVLC_ROOT}/plugins" $<TARGET_FILE_DIR:EncoreJUCE>/plugins
+        COMMENT "Copying libvlc runtime + plugins")
+endif()
 
 # Rubber Band Library — required by Source/Audio/PitchShifter for real-time
 # pitch shifting. On macOS users install via `brew install rubberband`; on
