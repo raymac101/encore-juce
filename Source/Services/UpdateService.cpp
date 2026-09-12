@@ -365,9 +365,43 @@ bool UpdateService::restartAndInstall()
     // overwrite/replace a still-running exe).
    #if JUCE_WINDOWS
     const auto pid = (unsigned long) ::GetCurrentProcessId();
+
+    // The installer (especially unsigned, pending Azure Trusted Signing --
+    // see distribution_plan.md) can take 15-30s to actually show a window
+    // after Encore exits, thanks to SmartScreen's reputation check. Customers
+    // were seeing nothing on screen during that gap and re-launching Encore,
+    // hitting errors from two copies fighting over the same files. This
+    // helper -- the only thing still running once Encore quits -- puts up a
+    // small always-on-top "installing" window for that whole span: it starts
+    // showing immediately (before Encore has even quit yet, since this
+    // process launches first), stays up through Encore's shutdown and
+    // Wait-Process, and only closes once Start-Process for the installer
+    // has actually returned.
     const juce::String script =
-        "Wait-Process -Id " + juce::String (pid) + " -ErrorAction SilentlyContinue; "
-        "Start-Process -FilePath '" + installerPath.replace ("'", "''") + "'";
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        "$f = New-Object System.Windows.Forms.Form; "
+        "$f.FormBorderStyle = 'None'; "
+        "$f.StartPosition = 'CenterScreen'; "
+        "$f.Size = New-Object System.Drawing.Size(440,130); "
+        "$f.TopMost = $true; "
+        "$f.ShowInTaskbar = $false; "
+        "$f.BackColor = [System.Drawing.Color]::FromArgb(32,32,36); "
+        "$l = New-Object System.Windows.Forms.Label; "
+        "$l.Text = \"Installing update...`n`nEncore Karaoke will restart automatically.\"; "
+        "$l.ForeColor = [System.Drawing.Color]::White; "
+        "$l.Font = New-Object System.Drawing.Font('Segoe UI', 11); "
+        "$l.TextAlign = 'MiddleCenter'; "
+        "$l.Dock = 'Fill'; "
+        "$f.Controls.Add($l); "
+        "$f.Show(); "
+        "[System.Windows.Forms.Application]::DoEvents(); "
+        "while (Get-Process -Id " + juce::String (pid) + " -ErrorAction SilentlyContinue) { "
+        "Start-Sleep -Milliseconds 150; "
+        "[System.Windows.Forms.Application]::DoEvents(); } "
+        "try { Start-Process -FilePath '" + installerPath.replace ("'", "''") + "' } catch {} "
+        "Start-Sleep -Milliseconds 1500; "
+        "$f.Close()";
 
     juce::ChildProcess helper;
     helper.start (juce::StringArray { "powershell.exe", "-WindowStyle", "Hidden", "-Command", script });
