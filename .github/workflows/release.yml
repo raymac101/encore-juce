@@ -256,7 +256,11 @@ jobs:
           git config user.email "actions@github.com"
           git add releases/releases.json
           git commit -m "Record release v${VERSION} (staged, not yet promoted)"
-          git push origin HEAD:main
+          # actions/checkout leaves this in detached HEAD (checked out at the
+          # tag, not a branch) -- newer git (2.55+) refuses to infer
+          # refs/heads/main from a bare "main" destination in that state
+          # ("not a full refname"), so it must be spelled out explicitly.
+          git push origin HEAD:refs/heads/main
 
       - name: Summary
         run: |
