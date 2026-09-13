@@ -11,8 +11,20 @@
 #   scripts/promote-release.sh 1.1.0      # ship 1.1.0
 #   scripts/promote-release.sh 1.0.0      # instant rollback if 1.1.0 is bad
 #
-# Requires: jq, and the Firebase CLI logged in (`firebase login`) with
-# access to the project configured in .firebaserc.
+# Requires: jq, Node.js, the Firebase CLI logged in (`firebase login`) with
+# access to the project configured in .firebaserc, and
+# GOOGLE_APPLICATION_CREDENTIALS pointing at a Firebase/GCP service account
+# key JSON with Storage Object Admin on the project's default bucket (same
+# key used for the FIREBASE_SERVICE_ACCOUNT GitHub secret -- generate one
+# from Firebase Console -> Project Settings -> Service Accounts if you don't
+# have it handy; safe to delete the file again once this script exits).
+#
+# The running app's launch-time update check (UpdateService.cpp's
+# kManifestUrl) reads the manifest from Firebase STORAGE
+# (Installers/manifest.json), a different product/URL entirely from Firebase
+# HOSTING -- `firebase deploy --only hosting` alone never reaches it. This
+# script updates both: Hosting (kept for whatever else references it) and,
+# critically, the Storage object the app actually checks.
 
 set -eu
 
@@ -46,5 +58,16 @@ cat "${MANIFEST_FILE}"
 
 echo "==> Deploying hosting/ to Firebase Hosting"
 ( cd "${REPO_ROOT}" && firebase deploy --only hosting )
+
+if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    echo "error: GOOGLE_APPLICATION_CREDENTIALS is not set -- the app's actual" >&2
+    echo "update check (Firebase Storage's Installers/manifest.json) was NOT" >&2
+    echo "updated. Hosting alone does not reach it. Re-run with:" >&2
+    echo "  GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json $0 ${VERSION}" >&2
+    exit 1
+fi
+
+echo "==> Uploading manifest to Firebase Storage (Installers/manifest.json -- what the app actually reads)"
+node "$(dirname "$0")/upload-manifest-to-storage.cjs" "${MANIFEST_FILE}"
 
 echo "==> Done. ${VERSION} is now live. To roll back: $(basename "$0") <previous-version>"
