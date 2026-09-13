@@ -68,6 +68,6 @@ if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
 fi
 
 echo "==> Uploading manifest to Firebase Storage (Installers/manifest.json -- what the app actually reads)"
-node "$(dirname "$0")/upload-manifest-to-storage.cjs" "${MANIFEST_FILE}"
+node "$(dirname "$0")/upload-to-storage.cjs" "${MANIFEST_FILE}" "Installers/manifest.json" "application/json"
 
 echo "==> Done. ${VERSION} is now live. To roll back: $(basename "$0") <previous-version>"

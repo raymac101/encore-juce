@@ -207,15 +207,30 @@ jobs:
           test -s dist/windows.sha256
           test -s dist/macos.sha256
 
-      - name: Deploy installers to Firebase Hosting (versioned path only -- NOT the live manifest)
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: default
-          channelId: live
+      # Despite the name, FirebaseExtended/action-hosting-deploy only ever
+      # touches Firebase HOSTING (the hosting/ directory -- just
+      # encore/manifest.json, deployed separately by the manual
+      # promote-release.sh, never here). It does NOT reach Firebase STORAGE,
+      # which is where every installer/manifest URL in releases.json and
+      # UpdateService.cpp actually points. That gap meant every past release
+      # relied on manually re-uploading the installer binaries through the
+      # Firebase console -- fixed below with a real Storage upload instead.
+      - name: Upload installers to Firebase Storage (versioned path only -- NOT the live manifest)
         env:
-          FIREBASE_CLI_PREVIEWS: hostingchannels
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/firebase-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/firebase-sa.json
+          node scripts/upload-to-storage.cjs \
+            "dist/EncoreKaraoke-${VERSION}-win64.exe" \
+            "Installers/EncoreKaraoke-${VERSION}-win64.exe" \
+            application/octet-stream
+          node scripts/upload-to-storage.cjs \
+            "dist/EncoreKaraoke-${VERSION}-mac.dmg" \
+            "Installers/EncoreKaraoke-${VERSION}-mac.dmg" \
+            application/octet-stream
+          rm -f /tmp/firebase-sa.json
 
       - name: Create GitHub Release (backup download source)
         env:
