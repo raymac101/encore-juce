@@ -490,7 +490,11 @@ void TopBar::resized()
     userButton->setBounds(userArea);
     auto nameArea = userArea;
     nameArea.removeFromLeft(AVATAR_SIZE);
-    userNameLabel->setBounds(nameArea.reduced(5, 0));
+    // Extra breathing room after the avatar -- at typical bar heights the
+    // avatar circle (60% of bar height, see paint()) nearly fills the
+    // AVATAR_SIZE column, leaving the name label butted right up against it.
+    constexpr int kAvatarNameGap = 8;
+    userNameLabel->setBounds(nameArea.reduced(5, 0).withTrimmedLeft(kAvatarNameGap));
 
     if (updateButton_->isVisible())
         updateButton_->setBounds(getUpdateButtonArea());
@@ -1009,7 +1013,7 @@ juce::Rectangle<int> TopBar::getUserArea() const
 juce::Rectangle<int> TopBar::getUpdateButtonArea() const
 {
     constexpr int kWidth = 84;
-    constexpr int kGap = 10;
+    constexpr int kGap = 18;
     auto userArea = getUserArea();
     auto area = userArea.withX(userArea.getX() - kGap - kWidth).withWidth(kWidth);
     return area.withSizeKeepingCentre(kWidth, 26); // slim pill, vertically centred in the row

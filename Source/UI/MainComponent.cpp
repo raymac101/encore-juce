@@ -4880,7 +4880,7 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         LyricDisplayComponent::QueuePreviewEntry entry;
@@ -4956,7 +4956,7 @@ void MainComponent::refreshRibbonState()
     {
         for (const auto& singer : queueBar->getSingers())
         {
-            if (singer.isHost || singer.songs.empty())
+            if (singer.songs.empty())
                 continue;
 
             nextSingerName = juce::String(singer.name).trim();
@@ -5023,7 +5023,7 @@ juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<S
 {
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         const auto name = juce::String(singer.name).trim();

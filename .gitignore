@@ -62,3 +62,10 @@ firebase-debug.log
 
 # Claude Code machine-local settings (permission grants, etc.)
 .claude/settings.local.json
+
+# Claude Code skills/plugins -- auto-installed locally per machine/session,
+# not project source. skills-lock.json just records where each one came
+# from so it can be reinstalled, not something to diff/merge in git.
+.claude/skills/
+.claude/plugins/
+skills-lock.json
