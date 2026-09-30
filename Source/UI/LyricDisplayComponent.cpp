@@ -9,6 +9,7 @@
 #include "LyricDisplayComponent.h"
 #include "LibVlcVideoView.h"
 #include "../Audio/AudioEngine.h"
+#include "../Network/LyricStreamServer.h"
 #include "../Firebase/FirebaseConfig.h"
 #include "../Services/AdMediaCache.h"
 #include "../Services/AdsService.h"
@@ -190,6 +191,11 @@ LyricDisplayComponent::~LyricDisplayComponent()
 void LyricDisplayComponent::setAudioEngine (AudioEngine* engine)
 {
     audioEngine_ = engine;
+}
+
+void LyricDisplayComponent::setStreamServer (LyricStreamServer* server)
+{
+    streamServer_ = server;
 }
 
 void LyricDisplayComponent::loadCDG (const juce::File& cdgFile)
@@ -505,18 +511,56 @@ void LyricDisplayComponent::timerCallback()
     if (isVideoActive())
     {
         repaint();
+        maybeCaptureStreamFrame();
         return;
     }
 
     if (forceIdleScreen_ || ! decoder_.isLoaded() || audioEngine_ == nullptr)
     {
         repaint();
+        maybeCaptureStreamFrame();
         return;
     }
 
     const double pos = audioEngine_->getCurrentPosition();
     decoder_.renderAt (pos);
     repaint();
+    maybeCaptureStreamFrame();
+}
+
+void LyricDisplayComponent::maybeCaptureStreamFrame()
+{
+    if (streamServer_ == nullptr || ! streamServer_->isRunning())
+        return;
+
+    // The timer runs at 30 Hz; throttle to ~10 Hz so PNG-encoding a
+    // window-sized snapshot every tick doesn't add needless CPU load.
+    if ((++streamFrameCounter_ % 3) != 0)
+        return;
+
+    if (isVideoActive())
+    {
+        // juce::VideoComponent renders via a native OS view that
+        // createComponentSnapshot() can't capture (it would show as a black
+        // hole), so send a placeholder rather than a broken frame -- video
+        // songs aren't supported for phone streaming yet.
+        streamServer_->pushPlaceholder ("Lyrics are showing on the main screen");
+        return;
+    }
+
+    constexpr int kMaxStreamWidth = 960;
+    auto snapshot = createComponentSnapshot (getLocalBounds());
+    if (! snapshot.isValid())
+        return;
+
+    if (snapshot.getWidth() > kMaxStreamWidth)
+    {
+        const double scale = (double) kMaxStreamWidth / (double) snapshot.getWidth();
+        snapshot = snapshot.rescaled (kMaxStreamWidth, (int) std::round (snapshot.getHeight() * scale),
+                                       juce::Graphics::mediumResamplingQuality);
+    }
+
+    streamServer_->pushFrame (snapshot);
 }
 
 //==============================================================================

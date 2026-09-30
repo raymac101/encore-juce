@@ -126,6 +126,9 @@ target_sources(EncoreJUCE
         Source/UI/AddSongsDialog.cpp
         Source/UI/LyricDisplayComponent.cpp
         Source/UI/LyricDisplayWindow.cpp
+        Source/UI/PhoneStreamPanel.cpp
+        Source/Network/LyricStreamServer.cpp
+        Source/Network/QrCodeGenerator.cpp
         Source/UI/LibVlcVideoView.cpp
         Source/UI/LoginWindow.cpp
         Source/UI/Onboarding/OnboardingWizard.cpp

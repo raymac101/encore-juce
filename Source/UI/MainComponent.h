@@ -32,6 +32,7 @@
 #include "../Services/BackgroundMusicPlayer.h"
 
 class BottomBar;
+class LyricStreamServer;
 
 //==============================================================================
 /**
@@ -188,6 +189,11 @@ private:
     std::unique_ptr<LyricDisplayWindow> lyricWindow_;
     juce::String pendingVenueCode_;
     juce::Image pendingVenueLogo_;
+
+    // Phone/tablet lyric streaming (see LyricStreamServer, BottomBar's
+    // "Phone Lyrics" button). Created lazily on first use; only actually
+    // listens on the network once started.
+    std::unique_ptr<LyricStreamServer> phoneStreamServer_;
 
     //==============================================================================
     // Embedded menu bar (Windows/Linux only — macOS uses the system bar).

@@ -12,6 +12,8 @@
 
 #include "MainComponent.h"
 #include "BottomBar.h"
+#include "PhoneStreamPanel.h"
+#include "../Network/LyricStreamServer.h"
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
@@ -1029,6 +1031,27 @@ void MainComponent::setupUI()
             lyricWindow_->toggleFullScreen();
 
         refreshRibbonState();
+    };
+
+    bottomBar->onPhoneLyricsClicked = [this]() {
+        if (lyricWindow_ == nullptr)
+            lyricWindow_ = std::make_unique<LyricDisplayWindow>(audioEngine.get());
+
+        if (phoneStreamServer_ == nullptr)
+            phoneStreamServer_ = std::make_unique<LyricStreamServer>();
+
+        if (lyricWindow_ != nullptr && lyricWindow_->getDisplay() != nullptr)
+            lyricWindow_->getDisplay()->setStreamServer(phoneStreamServer_.get());
+
+        if (! phoneStreamServer_->isRunning() && ! phoneStreamServer_->start())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Phone Lyrics",
+                "Could not start the phone lyric stream (no free port found on this machine).");
+            return;
+        }
+
+        PhoneStreamPanel::launch(this, *phoneStreamServer_);
     };
 
     // The BottomBar's own 30Hz timer will no longer auto-advance progress —

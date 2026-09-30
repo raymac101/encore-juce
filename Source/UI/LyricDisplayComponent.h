@@ -21,6 +21,7 @@
 
 class AudioEngine;
 class LibVlcVideoView;
+class LyricStreamServer;
 
 // Lyric screen visual theme, configurable in Settings alongside Color/Motion
 // Intensity. Stored in UserPreferences as a plain clamped int (0-7) so the
@@ -97,6 +98,12 @@ public:
 
     /** The display polls this engine for the current playback position. */
     void setAudioEngine (AudioEngine* engine);
+
+    /** Attach the phone-streaming server (see LyricStreamServer). While set
+        and running, this component periodically hands it a snapshot of what
+        it's currently painting so phones on the venue WiFi can follow along.
+        Pass nullptr to detach (e.g. when streaming is stopped). */
+    void setStreamServer (LyricStreamServer* server);
 
     /** Load a .cdg file for synchronised rendering. Pass an invalid juce::File
         to clear back to the idle screen. */
@@ -192,6 +199,7 @@ private:
     void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
     void updateAdPanelAnimation (bool idleMode);
     juce::Image getQueuePreviewAvatar (const juce::String& avatarPath);
+    void maybeCaptureStreamFrame();
 
     // Resolves avatarPath via ArtworkCache::resolveAvatar(), caching the
     // result in queueAvatarCache_ by the raw path/preset/URL string. If the
@@ -215,6 +223,8 @@ private:
     void showIdleAdVideo (const AdEntry& ad);
 
     AudioEngine* audioEngine_ = nullptr;
+    LyricStreamServer* streamServer_ = nullptr;
+    int streamFrameCounter_ = 0;
 
     CDGDecoder   decoder_;
     juce::File   loadedFile_;

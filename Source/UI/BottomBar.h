@@ -88,6 +88,11 @@ public:
     /** Fired when the "expand lyric screen" button is clicked. */
     std::function<void()> onExpandLyricScreenClicked;
 
+    /** Fired when the "Phone Lyrics" button is clicked -- start/reopen the
+        local web stream of the lyric screen for phones/tablets on the venue
+        WiFi (see LyricStreamServer). */
+    std::function<void()> onPhoneLyricsClicked;
+
     /** Update the main-screen button's icon to reflect the window's actual
         fullscreen state. Called after any change, whether triggered by this
         button or elsewhere (e.g. the Window menu). Also called on every
@@ -133,6 +138,7 @@ private:
     // Stacked "expand to fullscreen" buttons, to the right of volumeSlider.
     juce::ImageButton expandMainScreenButton  { "expandMainScreenButton" };
     juce::ImageButton expandLyricScreenButton { "expandLyricScreenButton" };
+    juce::TextButton  phoneLyricsButton_;
     juce::Image screen1ExpandImage, screen1CollapseImage;
     juce::Image screen2ExpandImage, screen2CollapseImage;
     bool mainScreenExpanded_ = false;
