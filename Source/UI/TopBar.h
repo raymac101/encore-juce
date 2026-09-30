@@ -79,6 +79,13 @@ public:
     //==============================================================================
     // Connection status
     void setOnlineStatus(bool isOnline);
+
+    //==============================================================================
+    // Performance stats overlay (CPU% / memory / network latency) -- opt-in
+    // troubleshooting aid for a sluggish or venue-wifi-limited machine, see
+    // UserPreferences::getShowPerformanceStats() / Window menu. Off by
+    // default so it doesn't clutter the bar for KJs who don't need it.
+    void setShowSystemStats(bool show);
     
     //==============================================================================
     // User information
@@ -164,6 +171,23 @@ private:
     int currentBpm = 0;
     bool isOnlineStatus = true;
     juce::String userName;
+
+    //==============================================================================
+    // Performance stats overlay (see setShowSystemStats()). Sampled/repainted
+    // on its own ~1Hz throttle inside timerCallback() -- the bar's 60fps
+    // timer exists for VU meter smoothness, and there's no reason to pay
+    // the (small but nonzero) cost of an OS CPU/memory query 60x/sec for a
+    // number that only needs to look "live" to a human.
+    bool showSystemStats_ = false;
+    juce::int64 lastStatsSampleMs_ = 0;
+    float  statsCpuPercent_ = -1.0f;
+    double statsMemoryMB_   = -1.0;
+    int    statsNetworkLatencyMs_ = -1;
+    bool   statsNetworkReachable_ = false;
+    bool   statsNetworkStale_ = true;
+    void refreshSystemStats();
+    void drawSystemStats(juce::Graphics& g, juce::Rectangle<int> area) const;
+    juce::Rectangle<int> getPerformanceStatsArea() const;
 
     //==============================================================================
     // VU meter -- vector-drawn, real stereo L/R, four selectable styles

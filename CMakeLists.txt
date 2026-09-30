@@ -141,6 +141,7 @@ target_sources(EncoreJUCE
         ${ENCORE_AD_VIDEO_THUMBNAIL_SOURCE}
         Source/Services/UserPreferences.cpp
         Source/Services/WaveformGenerator.cpp
+        Source/Services/SystemMonitor.cpp
         Source/Services/FirestoreClient.cpp
         Source/Services/SongbookStorageService.cpp
         Source/Services/SongDeliveryService.cpp
@@ -239,6 +240,13 @@ target_link_libraries(EncoreJUCE
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# psapi (Windows only) -- GetProcessMemoryInfo() for SystemMonitor's
+# resident-memory reading (backs TopBar's optional performance-stats
+# overlay). Part of the Windows SDK, no vcpkg package needed.
+if(WIN32)
+    target_link_libraries(EncoreJUCE PRIVATE psapi)
+endif()
 
 # libvlc (Windows only) -- backs Source/UI/LibVlcVideoView for lyric-screen ad
 # playback, because juce::VideoComponent's DirectShow backend can't decode the

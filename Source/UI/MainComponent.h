@@ -68,6 +68,12 @@ public:
         if the window couldn't be constructed. */
     LyricDisplayWindow* getLyricWindow() noexcept { return lyricWindow_.get(); }
 
+    /** Show/hide TopBar's optional CPU/memory/network performance overlay
+        -- see UserPreferences::getShowPerformanceStats() and the Window
+        menu's "Show Performance Stats" item (Main.cpp), which is what
+        actually calls this. */
+    void setShowPerformanceStats(bool show) { if (topBar != nullptr) topBar->setShowSystemStats(show); }
+
     /** Install (or remove) the application's MenuBarModel. On Windows/Linux
         this embeds a MenuBarComponent at the top of the window. On macOS the
         system menu bar is used instead so this is a no-op. */

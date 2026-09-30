@@ -12,6 +12,8 @@
 
 #include "TopBar.h"
 #include "../Services/UserPreferences.h"
+#include "../Services/SystemMonitor.h"
+#include "../Services/FirestoreClient.h"
 #include <cmath>
 
 //==============================================================================
@@ -313,7 +315,10 @@ void TopBar::paint(juce::Graphics& g)
     
     // Draw VU meter
     drawVUMeter(g, getVUMeterArea());
-    
+
+    if (showSystemStats_)
+        drawSystemStats(g, getPerformanceStatsArea());
+
     // Draw user avatar
     auto userArea = getUserArea();
 
@@ -517,6 +522,53 @@ void TopBar::timerCallback()
     else peakR_ = juce::jmax(0.0f, peakR_ - 0.01f);
 
     repaint(getVUMeterArea());
+
+    if (showSystemStats_)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        // ~1Hz -- see the member comments in TopBar.h for why this is
+        // deliberately throttled well below the 60fps VU meter rate.
+        if (now - lastStatsSampleMs_ >= 1000)
+        {
+            lastStatsSampleMs_ = now;
+            refreshSystemStats();
+            repaint(getPerformanceStatsArea());
+        }
+    }
+}
+
+void TopBar::setShowSystemStats(bool show)
+{
+    if (showSystemStats_ == show)
+        return;
+
+    showSystemStats_ = show;
+
+    if (show)
+    {
+        // Sample immediately rather than waiting up to 1s for the first
+        // timerCallback tick, so turning it on doesn't show a blank area
+        // briefly.
+        lastStatsSampleMs_ = 0;
+        refreshSystemStats();
+    }
+
+    repaint(getPerformanceStatsArea());
+}
+
+void TopBar::refreshSystemStats()
+{
+    const auto sample = SystemMonitor::getInstance().sample();
+    statsCpuPercent_ = sample.cpuPercent;
+    statsMemoryMB_   = sample.memoryMB;
+
+    const auto net = FirestoreClient::getNetworkHealth();
+    statsNetworkLatencyMs_ = net.lastLatencyMs;
+    statsNetworkReachable_ = net.lastReachable;
+    // No traffic in the last 10s (no venue set, or the watchers aren't
+    // running yet) reads as "unknown" rather than showing a stale number
+    // from whenever the app last actually talked to the server.
+    statsNetworkStale_ = net.ageMs < 0 || net.ageMs > 10000;
 }
 
 //==============================================================================
@@ -659,6 +711,86 @@ void TopBar::drawVUMeter(juce::Graphics& g, juce::Rectangle<int> bounds)
         case VuMeterStyle::SegmentedLed:  drawSegmentedLedMeter(g, bounds);  break;
         case VuMeterStyle::AnalogNeedle:  drawAnalogNeedleMeter(g, bounds);  break;
         case VuMeterStyle::SpectrumBand:  drawSpectrumBandMeter(g, bounds);  break;
+    }
+}
+
+void TopBar::drawSystemStats(juce::Graphics& g, juce::Rectangle<int> area) const
+{
+    // Too narrow to show anything legible (e.g. a heavily-shrunk window) --
+    // just skip it rather than drawing clipped/overlapping text.
+    if (area.getWidth() < 70 || area.getHeight() < 30)
+        return;
+
+    // Green/yellow/red thresholds, roughly matching what an operator would
+    // actually want to act on:
+    //  - CPU: sustained high usage on a budget laptop is the first sign
+    //    the machine (not just the network) is struggling.
+    //  - Memory: no fixed "bad" number applies across machines, so this is
+    //    really a "is it climbing over the course of the night" readout --
+    //    colour just flags when it's gotten large enough to be worth
+    //    watching, not a hard verdict.
+    //  - Network: round-trip to Firestore. Club wifi routinely spikes into
+    //    the high hundreds of ms without anything actually being wrong, so
+    //    the red threshold is reserved for genuinely bad territory (the
+    //    kind that makes a queue drag feel broken), not every blip.
+    auto colourFor = [] (float value, float yellowAt, float redAt) -> juce::Colour
+    {
+        if (value < 0.0f) return juce::Colours::white.withAlpha(0.4f); // unknown
+        if (value >= redAt)    return juce::Colour(0xffe0483f); // red
+        if (value >= yellowAt) return juce::Colour(0xffe8d24a); // yellow
+        return juce::Colour(0xff3ddc72);                        // green
+    };
+
+    struct Row { juce::String label, value; juce::Colour colour; };
+    std::array<Row, 3> rows;
+
+    rows[0].label = "CPU";
+    rows[0].value = statsCpuPercent_ < 0.0f ? juce::String(juce::CharPointer_UTF8("\xe2\x80\x94"))  // em dash: "still warming up"
+                                             : juce::String(juce::roundToInt(statsCpuPercent_)) + "%";
+    rows[0].colour = colourFor(statsCpuPercent_, 60.0f, 90.0f);
+
+    rows[1].label = "MEM";
+    rows[1].value = statsMemoryMB_ < 0.0 ? juce::String(juce::CharPointer_UTF8("\xe2\x80\x94"))
+                                          : juce::String(juce::roundToInt(statsMemoryMB_)) + " MB";
+    // No hard red line for memory -- a genuine leak reveals itself by
+    // climbing over hours, which a single reading can't distinguish from
+    // "this app just naturally uses more RAM". Flag yellow past 1.5GB as
+    // "worth keeping an eye on", nothing more definitive.
+    rows[1].colour = colourFor((float) statsMemoryMB_, 1536.0f, 1.0e9f);
+
+    if (statsNetworkStale_)
+    {
+        rows[2].label = "NET";
+        rows[2].value = juce::String(juce::CharPointer_UTF8("\xe2\x80\x94"));
+        rows[2].colour = juce::Colours::white.withAlpha(0.4f);
+    }
+    else if (! statsNetworkReachable_)
+    {
+        rows[2].label = "NET";
+        rows[2].value = LocalizationManager::getInstance().getText("topbar.stats.network_down");
+        rows[2].colour = juce::Colour(0xffe0483f);
+    }
+    else
+    {
+        rows[2].label = "NET";
+        rows[2].value = juce::String(statsNetworkLatencyMs_) + " ms";
+        rows[2].colour = colourFor((float) statsNetworkLatencyMs_, 600.0f, 2000.0f);
+    }
+
+    const int rowHeight = juce::jmin(18, area.getHeight() / 3);
+    auto rowsArea = area.withSizeKeepingCentre(area.getWidth(), rowHeight * 3);
+
+    g.setFont(juce::Font(11.0f, juce::Font::bold));
+    for (auto& row : rows)
+    {
+        auto rowArea = rowsArea.removeFromTop(rowHeight);
+
+        g.setColour(juce::Colours::white.withAlpha(0.55f));
+        g.drawText(row.label, rowArea.removeFromLeft(juce::jmax(28, rowArea.getWidth() / 3)),
+                  juce::Justification::centredLeft);
+
+        g.setColour(row.colour);
+        g.drawText(row.value, rowArea, juce::Justification::centredLeft);
     }
 }
 
@@ -1017,6 +1149,26 @@ juce::Rectangle<int> TopBar::getUpdateButtonArea() const
     auto userArea = getUserArea();
     auto area = userArea.withX(userArea.getX() - kGap - kWidth).withWidth(kWidth);
     return area.withSizeKeepingCentre(kWidth, 26); // slim pill, vertically centred in the row
+}
+
+juce::Rectangle<int> TopBar::getPerformanceStatsArea() const
+{
+    // Claims whatever horizontal gap already exists between the VU meter
+    // and the update-pill/user area -- that space is unused today, so this
+    // is purely additive and doesn't disturb any existing widget's layout.
+    // On a narrow window the gap can shrink to nothing; drawSystemStats()
+    // just draws less in that case rather than this needing its own
+    // minimum-width special-casing.
+    constexpr int kMargin = 14;
+    auto bounds = getLocalBounds().withHeight(currentBarHeight - RESIZE_HANDLE_INACTIVE_HEIGHT);
+    const auto vuArea = getVUMeterArea();
+    const auto rightBoundaryArea = updateButton_ != nullptr && updateButton_->isVisible()
+                                  ? getUpdateButtonArea()
+                                  : getUserArea();
+
+    const int left  = vuArea.getRight() + kMargin;
+    const int right = juce::jmax (left, rightBoundaryArea.getX() - kMargin);
+    return { left, bounds.getY(), right - left, bounds.getHeight() };
 }
 
 //==============================================================================

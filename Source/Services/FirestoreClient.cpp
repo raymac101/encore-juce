@@ -21,6 +21,18 @@ namespace
 constexpr int kMaxInFlightRequests = 8;
 std::atomic<int> g_inFlightRequests { 0 };
 
+// Backs FirestoreClient::getNetworkHealth() -- see its doc comment. Written
+// once at the end of every httpJsonRaw() call (success, HTTP error, or
+// watchdog timeout alike), read by TopBar's optional performance-stats
+// overlay. Three separate atomics rather than one struct behind a lock:
+// the overlay only needs an approximate, eventually-consistent snapshot
+// (it repaints ~1/sec), not a point-in-time-consistent one, so the small
+// chance of reading e.g. a just-updated latency alongside the
+// not-yet-updated timestamp from the same call is harmless.
+std::atomic<int>       g_lastLatencyMs   { -1 };
+std::atomic<bool>      g_lastReachable   { false };
+std::atomic<juce::int64> g_lastLatencyAtMs { 0 };
+
 juce::String decodeBase64UrlToString (juce::String value)
 {
     value = value.replaceCharacter ('-', '+').replaceCharacter ('_', '/');
@@ -231,6 +243,12 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
               .withCustomRequestCommand (httpMethod)
               .withConnectionTimeout (15000);
 
+    // Backs getNetworkHealth() -- see its doc comment. Measures the same
+    // connect+read span the watchdog below is timing, so a stalled/slow
+    // link shows up here as latency long before it would ever hit the
+    // kMaxInFlightRequests circuit breaker.
+    const auto requestStartMs = juce::Time::getMillisecondCounter();
+
     ++g_inFlightRequests;
     juce::Thread::launch([u, webStream, result, done]
     {
@@ -271,8 +289,15 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
         juce::Logger::writeToLog("FirestoreClient: request timed out after "
                                   + juce::String(kRequestWatchdogMs) + "ms (cancelled) for " + u.toString(false));
         if (httpStatus != nullptr) *httpStatus = 0;
+        g_lastLatencyMs   = (int) (juce::Time::getMillisecondCounter() - requestStartMs);
+        g_lastReachable   = false;
+        g_lastLatencyAtMs = (juce::int64) juce::Time::getMillisecondCounter();
         return juce::var();
     }
+
+    g_lastLatencyMs   = (int) (juce::Time::getMillisecondCounter() - requestStartMs);
+    g_lastReachable   = result->status != 0;
+    g_lastLatencyAtMs = (juce::int64) juce::Time::getMillisecondCounter();
 
     if (httpStatus != nullptr) *httpStatus = result->status;
     return result->parsed;
@@ -282,6 +307,17 @@ juce::var FirestoreClient::httpJsonRaw(const juce::URL& url,
 void FirestoreClient::resetStalledRequestBudget()
 {
     g_inFlightRequests = 0;
+}
+
+// static
+FirestoreClient::NetworkHealth FirestoreClient::getNetworkHealth()
+{
+    NetworkHealth health;
+    const juce::int64 at = g_lastLatencyAtMs.load();
+    health.lastLatencyMs = g_lastLatencyMs.load();
+    health.lastReachable = g_lastReachable.load();
+    health.ageMs = at == 0 ? -1 : (int) (juce::Time::getMillisecondCounter() - (juce::uint32) at);
+    return health;
 }
 
 //==============================================================================
@@ -522,6 +558,72 @@ bool FirestoreClient::patchDocument(const juce::String& path, const juce::var& f
     int status = 0;
     httpJson(url, "PATCH", juce::JSON::toString(juce::var(body.get())), &status);
     return status >= 200 && status < 300;
+}
+
+bool FirestoreClient::commitPatches(const std::vector<BatchPatch>& patches)
+{
+    if (patches.empty())
+        return true;
+
+    // Firestore caps a single commit at 500 writes; chunk defensively even
+    // though a karaoke queue will never come close (a typical night tops
+    // out at a few dozen singers).
+    constexpr int kMaxWritesPerCommit = 400;
+
+    const juce::String docNamePrefix = "projects/" + FirebaseConfig::projectId
+                                      + "/databases/(default)/documents/";
+
+    bool allOk = true;
+    for (int start = 0; start < (int) patches.size(); start += kMaxWritesPerCommit)
+    {
+        const int end = juce::jmin ((int) patches.size(), start + kMaxWritesPerCommit);
+
+        juce::Array<juce::var> writes;
+        for (int i = start; i < end; ++i)
+        {
+            const auto& p = patches[(size_t) i];
+
+            juce::DynamicObject::Ptr updateDoc = new juce::DynamicObject();
+            updateDoc->setProperty ("name", docNamePrefix + p.path);
+            updateDoc->setProperty ("fields", p.fields);
+
+            // updateMask must list exactly the fields being written, same
+            // as patchDocument()'s callers pass via ?updateMask.fieldPaths=
+            // in the URL -- derive it from the fields object's own keys so
+            // callers don't have to pass it twice.
+            juce::StringArray maskPaths;
+            if (auto* obj = p.fields.getDynamicObject())
+                for (auto& prop : obj->getProperties())
+                    maskPaths.add (prop.name.toString());
+
+            juce::DynamicObject::Ptr maskDoc = new juce::DynamicObject();
+            maskDoc->setProperty ("fieldPaths", maskPaths);
+
+            juce::DynamicObject::Ptr currentDoc = new juce::DynamicObject();
+            currentDoc->setProperty ("exists", true);
+
+            juce::DynamicObject::Ptr writeDoc = new juce::DynamicObject();
+            writeDoc->setProperty ("update", juce::var (updateDoc.get()));
+            writeDoc->setProperty ("updateMask", juce::var (maskDoc.get()));
+            writeDoc->setProperty ("currentDocument", juce::var (currentDoc.get()));
+
+            writes.add (juce::var (writeDoc.get()));
+        }
+
+        juce::DynamicObject::Ptr body = new juce::DynamicObject();
+        body->setProperty ("writes", writes);
+
+        // No `transaction` field -- Firestore implicitly wraps a commit
+        // with none into a single atomic transaction of its own, so this
+        // batch is all-or-nothing just like the loop-of-patchDocument()
+        // callers it replaces (only faster: one round trip, not N).
+        juce::URL url (FirebaseConfig::firestoreBaseUrl() + ":commit");
+        int status = 0;
+        httpJson (url, "POST", juce::JSON::toString (juce::var (body.get())), &status);
+        allOk = allOk && (status >= 200 && status < 300);
+    }
+
+    return allOk;
 }
 
 juce::var FirestoreClient::createDocument(const juce::String& collectionPath,

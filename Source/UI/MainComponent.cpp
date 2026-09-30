@@ -496,6 +496,7 @@ void MainComponent::setupUI()
     // -1 (never saved) leaves TopBar at its own built-in default.
     if (const int savedTopHeight = UserPreferences::getInstance().getTopBarHeight(); savedTopHeight > 0)
         topBar->setBarHeight(savedTopHeight);
+    topBar->setShowSystemStats(UserPreferences::getInstance().getShowPerformanceStats());
 
     // Create BottomBar (music transport and waveform controls)
     bottomBar = std::make_unique<BottomBar>();

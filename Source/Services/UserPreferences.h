@@ -54,6 +54,13 @@ public:
     bool getShowTitleBar() const;
     void setShowTitleBar(bool show);
 
+    //--- TopBar performance stats overlay (CPU / memory / network) -------------
+    // Off by default -- most KJs never need this. Exists for troubleshooting a
+    // sluggish or venue-wifi-limited machine without reaching for Activity
+    // Monitor/Task Manager mid-show. See Window menu > "Show Performance Stats".
+    bool getShowPerformanceStats() const;
+    void setShowPerformanceStats(bool show);
+
     //--- UI language (locale code, e.g. "en_US") -------------------------------
     juce::String getLanguage() const;
     void setLanguage(const juce::String& languageCode);
