@@ -190,6 +190,23 @@ void UserPreferences::setShowTitleBar(bool show)
 }
 
 //==============================================================================
+bool UserPreferences::getShowPerformanceStats() const
+{
+    const juce::ScopedLock sl(lock_);
+    // Default: hidden. Opt-in troubleshooting aid, not something every KJ
+    // needs cluttering the top bar.
+    return (bool) root_.getProperty("showPerformanceStats", juce::var(false));
+}
+
+void UserPreferences::setShowPerformanceStats(bool show)
+{
+    const juce::ScopedLock sl(lock_);
+    auto* rootObj = asObj(root_);
+    rootObj->setProperty("showPerformanceStats", juce::var(show));
+    save();
+}
+
+//==============================================================================
 int UserPreferences::getTopBarHeight() const
 {
     const juce::ScopedLock sl(lock_);

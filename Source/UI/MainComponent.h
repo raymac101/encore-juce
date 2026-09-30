@@ -32,6 +32,7 @@
 #include "../Services/BackgroundMusicPlayer.h"
 
 class BottomBar;
+class LyricStreamServer;
 
 //==============================================================================
 /**
@@ -66,6 +67,12 @@ public:
     /** Accessor for the secondary (singer-facing) lyric window. May be null
         if the window couldn't be constructed. */
     LyricDisplayWindow* getLyricWindow() noexcept { return lyricWindow_.get(); }
+
+    /** Show/hide TopBar's optional CPU/memory/network performance overlay
+        -- see UserPreferences::getShowPerformanceStats() and the Window
+        menu's "Show Performance Stats" item (Main.cpp), which is what
+        actually calls this. */
+    void setShowPerformanceStats(bool show) { if (topBar != nullptr) topBar->setShowSystemStats(show); }
 
     /** Install (or remove) the application's MenuBarModel. On Windows/Linux
         this embeds a MenuBarComponent at the top of the window. On macOS the
@@ -188,6 +195,11 @@ private:
     std::unique_ptr<LyricDisplayWindow> lyricWindow_;
     juce::String pendingVenueCode_;
     juce::Image pendingVenueLogo_;
+
+    // Phone/tablet lyric streaming (see LyricStreamServer, BottomBar's
+    // "Phone Lyrics" button). Created lazily on first use; only actually
+    // listens on the network once started.
+    std::unique_ptr<LyricStreamServer> phoneStreamServer_;
 
     //==============================================================================
     // Embedded menu bar (Windows/Linux only — macOS uses the system bar).

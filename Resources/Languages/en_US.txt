@@ -63,6 +63,7 @@ topbar.anonymous=Anonymous
 topbar.vu=VU
 topbar.vu.mainoutput=Main Output Level
 topbar.vu.spectrumband=Spectrum Band
+topbar.stats.network_down=DOWN
 topbar.menu_edit_profile=Edit Profile
 topbar.menu_my_company=My Company
 topbar.menu_sign_out=Sign Out
@@ -541,6 +542,7 @@ menu.window=Window
 menu.window.fullscreen=Fullscreen
 menu.window.reset_position=Reset Screen Position
 menu.window.show_title_bar=Show Title Bar
+menu.window.show_performance_stats=Show Performance Stats
 menu.local=Local
 
 # ── Lyric (secondary) display window ─────────────────────────────────────────

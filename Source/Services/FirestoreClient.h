@@ -50,6 +50,38 @@ public:
 
     void signOut();
 
+    /** "Reconnect Now"-style escape hatch: forgets about any requests
+        currently counted against httpJsonRaw()'s in-flight cap (see its
+        comment), so a fresh manual reconnect attempt gets a real, immediate
+        chance instead of being silently refused because earlier stalled
+        requests -- which may take the OS's own TCP stack several minutes to
+        actually give up on -- are still counted as "in flight". Safe to
+        call from the message thread. */
+    static void resetStalledRequestBudget();
+
+    /** Snapshot of the most recently COMPLETED request's round-trip time,
+        for a "how's the wifi right now" readout (see TopBar's optional
+        performance-stats overlay). Every request this client makes --
+        auth, queue reads/writes, request polling, etc. -- funnels through
+        httpJsonRaw(), so this reflects real traffic already happening
+        rather than needing its own dedicated ping. */
+    struct NetworkHealth
+    {
+        /** Round-trip ms for the last request that got a response, success
+            or HTTP error alike (both mean the link is up). -1 if no
+            request has completed yet this session. */
+        int lastLatencyMs = -1;
+        /** false for a request that never got a response at all (DNS/TCP/
+            TLS failure or the watchdog timeout) -- as opposed to an HTTP
+            error, which still means the link itself is fine. */
+        bool lastReachable = false;
+        /** How long ago (ms) that measurement was taken -- lets a caller
+            treat a stale reading (no traffic recently, e.g. no venue set)
+            as "unknown" rather than showing a number from minutes ago. */
+        int ageMs = -1;
+    };
+    static NetworkHealth getNetworkHealth();
+
     //==============================================================================
     // Auth: email + password
     struct AuthResult
@@ -109,6 +141,28 @@ public:
     /** PATCH projects/.../documents/<path>. `fields` is a Firestore-format
         object ({ field: { stringValue: ... } }) — use the helpers below. */
     bool patchDocument(const juce::String& path, const juce::var& fields);
+
+    /** One patch to apply as part of a commitPatches() batch — same `path`
+        and `fields` shape as patchDocument(). */
+    struct BatchPatch
+    {
+        juce::String path;
+        juce::var    fields;
+    };
+
+    /** PATCHes several documents in ONE network round trip via Firestore's
+        :commit endpoint, instead of one round trip per document. Existing
+        callers that looped over patchDocument() per-item (e.g. persisting a
+        whole queue's reordered `order`/`rotationOrder`) turned an N-singer
+        reorder into N sequential HTTP requests — on a slow/high-latency
+        venue wifi link that's the difference between an instant reorder and
+        one that visibly drags for many seconds. commitPatches() sends every
+        patch as a single atomic batch (all-or-nothing, same
+        currentDocument.exists precondition as patchDocument()) in one
+        request. Returns true only if every patch in the batch succeeded;
+        chunks internally if `patches` exceeds Firestore's 500-write commit
+        limit (not expected to matter at karaoke-queue scale). */
+    bool commitPatches(const std::vector<BatchPatch>& patches);
 
     /** POST projects/.../documents/<collectionPath>?documentId=<id> (id optional).
         `outOk` (if non-null) is set to true only on an actual 2xx response —

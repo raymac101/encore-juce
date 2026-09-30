@@ -20,7 +20,8 @@
 #include "../Models/Emoji.h"
 
 class AudioEngine;
-class WebVideoView;
+class LibVlcVideoView;
+class LyricStreamServer;
 
 // Lyric screen visual theme, configurable in Settings alongside Color/Motion
 // Intensity. Stored in UserPreferences as a plain clamped int (0-7) so the
@@ -97,6 +98,12 @@ public:
 
     /** The display polls this engine for the current playback position. */
     void setAudioEngine (AudioEngine* engine);
+
+    /** Attach the phone-streaming server (see LyricStreamServer). While set
+        and running, this component periodically hands it a snapshot of what
+        it's currently painting so phones on the venue WiFi can follow along.
+        Pass nullptr to detach (e.g. when streaming is stopped). */
+    void setStreamServer (LyricStreamServer* server);
 
     /** Load a .cdg file for synchronised rendering. Pass an invalid juce::File
         to clear back to the idle screen. */
@@ -192,6 +199,7 @@ private:
     void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
     void updateAdPanelAnimation (bool idleMode);
     juce::Image getQueuePreviewAvatar (const juce::String& avatarPath);
+    void maybeCaptureStreamFrame();
 
     // Resolves avatarPath via ArtworkCache::resolveAvatar(), caching the
     // result in queueAvatarCache_ by the raw path/preset/URL string. If the
@@ -215,6 +223,8 @@ private:
     void showIdleAdVideo (const AdEntry& ad);
 
     AudioEngine* audioEngine_ = nullptr;
+    LyricStreamServer* streamServer_ = nullptr;
+    int streamFrameCounter_ = 0;
 
     CDGDecoder   decoder_;
     juce::File   loadedFile_;
@@ -252,10 +262,10 @@ private:
 
     // macOS renders idle-screen video ads through idleAdVideoComponent_
     // (AVFoundation). On Windows juce::VideoComponent (DirectShow) can't decode
-    // MP4/H.264, so idleAdWebVideo_ (WebView2) is used instead and the clip is
+    // MP4/H.264, so idleAdVideoView_ (libvlc) is used instead and the clip is
     // played from the local AdMediaCache copy. Exactly one is non-null.
     std::unique_ptr<juce::VideoComponent> idleAdVideoComponent_;
-    std::unique_ptr<WebVideoView> idleAdWebVideo_;
+    std::unique_ptr<LibVlcVideoView> idleAdVideoView_;
     bool forceIdleScreen_ = false;
 
     // Emoji cheer reactions (venues/<id>/emojis, via EmojiService).

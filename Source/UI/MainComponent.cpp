@@ -12,6 +12,8 @@
 
 #include "MainComponent.h"
 #include "BottomBar.h"
+#include "PhoneStreamPanel.h"
+#include "../Network/LyricStreamServer.h"
 #include "../Services/WaveformGenerator.h"
 #include "../Services/VenueService.h"
 #include "../Services/QueueService.h"
@@ -500,6 +502,7 @@ void MainComponent::setupUI()
     // -1 (never saved) leaves TopBar at its own built-in default.
     if (const int savedTopHeight = UserPreferences::getInstance().getTopBarHeight(); savedTopHeight > 0)
         topBar->setBarHeight(savedTopHeight);
+    topBar->setShowSystemStats(UserPreferences::getInstance().getShowPerformanceStats());
 
     // Create BottomBar (music transport and waveform controls)
     bottomBar = std::make_unique<BottomBar>();
@@ -1035,6 +1038,27 @@ void MainComponent::setupUI()
             lyricWindow_->toggleFullScreen();
 
         refreshRibbonState();
+    };
+
+    bottomBar->onPhoneLyricsClicked = [this]() {
+        if (lyricWindow_ == nullptr)
+            lyricWindow_ = std::make_unique<LyricDisplayWindow>(audioEngine.get());
+
+        if (phoneStreamServer_ == nullptr)
+            phoneStreamServer_ = std::make_unique<LyricStreamServer>();
+
+        if (lyricWindow_ != nullptr && lyricWindow_->getDisplay() != nullptr)
+            lyricWindow_->getDisplay()->setStreamServer(phoneStreamServer_.get());
+
+        if (! phoneStreamServer_->isRunning() && ! phoneStreamServer_->start())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Phone Lyrics",
+                "Could not start the phone lyric stream (no free port found on this machine).");
+            return;
+        }
+
+        PhoneStreamPanel::launch(this, *phoneStreamServer_);
     };
 
     // The BottomBar's own 30Hz timer will no longer auto-advance progress —
@@ -4886,7 +4910,7 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
 
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         LyricDisplayComponent::QueuePreviewEntry entry;
@@ -4962,7 +4986,7 @@ void MainComponent::refreshRibbonState()
     {
         for (const auto& singer : queueBar->getSingers())
         {
-            if (singer.isHost || singer.songs.empty())
+            if (singer.songs.empty())
                 continue;
 
             nextSingerName = juce::String(singer.name).trim();
@@ -5029,7 +5053,7 @@ juce::String MainComponent::buildLyricLowerThirdNextUpSinger(const std::vector<S
 {
     for (const auto& singer : singers)
     {
-        if (singer.isHost || singer.songs.empty())
+        if (singer.songs.empty())
             continue;
 
         const auto name = juce::String(singer.name).trim();
@@ -6178,6 +6202,13 @@ void MainComponent::updateNetworkHealthUI()
 void MainComponent::reconnectNetworkServices()
 {
     juce::Logger::writeToLog ("[Network] manual reconnect requested");
+    // Drop any requests still counted against FirestoreClient's stalled-
+    // request circuit breaker -- otherwise, if enough requests stalled
+    // during the outage to trip it, this manual reconnect would silently
+    // fail fast just like everything else has been, since the OS's own TCP
+    // stack can take several minutes to give up on each one. The user
+    // pressed a button expecting an immediate real attempt, not a wait.
+    FirestoreClient::resetStalledRequestBudget();
     RequestService::getInstance().forceReconnect();
     QueueService::getInstance().forceReconnect();
 }
@@ -6298,9 +6329,21 @@ void MainComponent::onIncomingNewRequest (const QueueItem& item)
         QueueService::getInstance().appendSong (venueId, approved,
             [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
             {
-                RequestService::getInstance().deleteRequested (venueId, id);
-                if (safe != nullptr && ok)
-                    safe->reloadQueueFromFirestore (venueId);
+                if (ok)
+                {
+                    RequestService::getInstance().deleteRequested (venueId, id);
+                    if (safe != nullptr)
+                        safe->reloadQueueFromFirestore (venueId);
+                }
+                else
+                {
+                    // Same reasoning as onIncomingApprovedRequest's failure
+                    // branch: a network hiccup shouldn't silently drop a
+                    // local desktop request, so retry on the next poll
+                    // instead of deleting it.
+                    DBG ("[Pipeline] new(local) -> enqueue FAILED, will retry: " << id);
+                    RequestService::getInstance().forgetSeenStatus (id);
+                }
             });
         return;
     }
@@ -6403,9 +6446,25 @@ void MainComponent::onIncomingApprovedRequest (const QueueItem& item)
     QueueService::getInstance().appendSong (venueId, item,
         [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
         {
-            RequestService::getInstance().deleteRequested (venueId, id);
-            if (safe != nullptr && ok)
-                safe->reloadQueueFromFirestore (venueId);
+            if (ok)
+            {
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            }
+            else
+            {
+                // A network hiccup, not a real rejection -- leave the
+                // /requested doc in place (deleting it here would make the
+                // singer's approved song vanish with no record it ever
+                // existed) and make it dispatch onApprovedRequest again on
+                // the next poll so this whole enqueue attempt retries
+                // automatically, rather than being silently forgotten
+                // because its status/action hasn't changed since we already
+                // saw it once.
+                DBG ("[Pipeline] approved -> enqueue FAILED, will retry: " << id);
+                RequestService::getInstance().forgetSeenStatus (id);
+            }
         });
 }
 
@@ -6429,11 +6488,23 @@ void MainComponent::onIncomingDeleteRequest (const QueueItem& item)
 
     juce::Component::SafePointer<MainComponent> safe (this);
     QueueService::getInstance().removeSong (venueId, item,
-        [safe, id = juce::String(item.id), venueId](bool /*ok*/, juce::String /*err*/)
+        [safe, id = juce::String(item.id), venueId](bool ok, juce::String /*err*/)
         {
-            RequestService::getInstance().deleteRequested (venueId, id);
-            if (safe != nullptr)
-                safe->reloadQueueFromFirestore (venueId);
+            if (ok)
+            {
+                RequestService::getInstance().deleteRequested (venueId, id);
+                if (safe != nullptr)
+                    safe->reloadQueueFromFirestore (venueId);
+            }
+            else
+            {
+                // If the removal itself failed on a network hiccup, deleting
+                // the /requested doc anyway would strand the song in the
+                // queue with no way for the mobile app to ask again -- retry
+                // on the next poll instead.
+                DBG ("[Pipeline] delete -> removeSong FAILED, will retry: " << id);
+                RequestService::getInstance().forgetSeenStatus (id);
+            }
         });
 }
 

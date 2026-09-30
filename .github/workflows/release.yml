@@ -63,20 +63,37 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      # Azure Trusted Signing is temporarily disabled: AZURE_TENANT_ID,
-      # AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TRUSTED_SIGNING_ENDPOINT,
-      # AZURE_TRUSTED_SIGNING_ACCOUNT, and AZURE_TRUSTED_SIGNING_CERT_PROFILE
-      # are not yet configured as repo secrets, so the signing action fails
-      # with "input is required". Until those are added, this produces an
-      # UNSIGNED Windows exe/installer -- expect SmartScreen "Unknown
-      # Publisher" warnings on install. Restore the two
-      # azure/trusted-signing-action@v0.5.1 steps here (before "Build
-      # installer" and before "Compute sha256") once the secrets exist.
+      # Cloud HSM signing -- avoids the hardware-token requirement modern
+      # CAs impose on traditional OV certs, and works headlessly in CI.
+      # See distribution_plan.md Prerequisites #2.
+      - name: Sign app exe (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: build\EncoreJUCE_artefacts\Release
+          files-folder-filter: exe
 
       - name: Build installer (Inno Setup)
         shell: cmd
         run: |
           iscc packaging\windows\installer.iss /DMyAppVersion=%VERSION% /DSourceExe="%CD%\build\EncoreJUCE_artefacts\Release\Encore Karaoke.exe"
+
+      - name: Sign installer exe (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
 
       - name: Compute sha256
         shell: bash
@@ -207,15 +224,30 @@ jobs:
           test -s dist/windows.sha256
           test -s dist/macos.sha256
 
-      - name: Deploy installers to Firebase Hosting (versioned path only -- NOT the live manifest)
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: default
-          channelId: live
+      # Despite the name, FirebaseExtended/action-hosting-deploy only ever
+      # touches Firebase HOSTING (the hosting/ directory -- just
+      # encore/manifest.json, deployed separately by the manual
+      # promote-release.sh, never here). It does NOT reach Firebase STORAGE,
+      # which is where every installer/manifest URL in releases.json and
+      # UpdateService.cpp actually points. That gap meant every past release
+      # relied on manually re-uploading the installer binaries through the
+      # Firebase console -- fixed below with a real Storage upload instead.
+      - name: Upload installers to Firebase Storage (versioned path only -- NOT the live manifest)
         env:
-          FIREBASE_CLI_PREVIEWS: hostingchannels
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/firebase-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/firebase-sa.json
+          node scripts/upload-to-storage.cjs \
+            "dist/EncoreKaraoke-${VERSION}-win64.exe" \
+            "Installers/EncoreKaraoke-${VERSION}-win64.exe" \
+            application/octet-stream
+          node scripts/upload-to-storage.cjs \
+            "dist/EncoreKaraoke-${VERSION}-mac.dmg" \
+            "Installers/EncoreKaraoke-${VERSION}-mac.dmg" \
+            application/octet-stream
+          rm -f /tmp/firebase-sa.json
 
       - name: Create GitHub Release (backup download source)
         env:
@@ -256,7 +288,11 @@ jobs:
           git config user.email "actions@github.com"
           git add releases/releases.json
           git commit -m "Record release v${VERSION} (staged, not yet promoted)"
-          git push origin HEAD:main
+          # actions/checkout leaves this in detached HEAD (checked out at the
+          # tag, not a branch) -- newer git (2.55+) refuses to infer
+          # refs/heads/main from a bare "main" destination in that state
+          # ("not a full refname"), so it must be spelled out explicitly.
+          git push origin HEAD:refs/heads/main
 
       - name: Summary
         run: |

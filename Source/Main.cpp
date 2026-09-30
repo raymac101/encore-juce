@@ -96,6 +96,12 @@ public:
 
     void shutdown() override
     {
+        // Stop any in-flight update check / installer download and join its
+        // worker thread BEFORE the rest of teardown. A download still
+        // streaming when JUCE frees global state segfaults on the CFNetwork
+        // work queue (freed NSURLSession delegate) -- see UpdateService.h.
+        UpdateService::getInstance().shutdown();
+
        #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (nullptr);
        #else
@@ -160,6 +166,7 @@ public:
         cmdResetScreenPosition = 0x3002,
         cmdShowTitleBar        = 0x3003,
         cmdCheckForUpdates     = 0x3004,
+        cmdShowPerformanceStats = 0x3005,
 
         // Dynamic language items use IDs starting at this base.
         cmdLanguageBase        = 0x3100,
@@ -200,6 +207,11 @@ public:
                           lm.getText ("menu.window.show_title_bar"),
                           /*isActive*/ true,
                           /*isTicked*/ showTitleBar);
+            menu.addSeparator();
+            menu.addItem (cmdShowPerformanceStats,
+                          lm.getText ("menu.window.show_performance_stats"),
+                          /*isActive*/ true,
+                          /*isTicked*/ UserPreferences::getInstance().getShowPerformanceStats());
         }
         else if (topLevelMenuIndex == 2)
         {
@@ -244,6 +256,7 @@ public:
             case cmdResetScreenPosition: resetScreenPositions();  break;
             case cmdShowTitleBar:        toggleTitleBars();       break;
             case cmdCheckForUpdates:     checkForUpdatesManually(); break;
+            case cmdShowPerformanceStats: togglePerformanceStats(); break;
             default: break;
         }
     }
@@ -372,6 +385,20 @@ private:
                 if (auto* lw = content->getLyricWindow())
                     lw->setUsingNativeTitleBar (newValue);
         }
+
+        menuItemsChanged();
+    }
+
+    /** "Window > Show Performance Stats" -- toggles TopBar's optional CPU/
+        memory/network overlay. Same shape as toggleTitleBars() above. */
+    void togglePerformanceStats()
+    {
+        const bool newValue = ! UserPreferences::getInstance().getShowPerformanceStats();
+        UserPreferences::getInstance().setShowPerformanceStats (newValue);
+
+        if (mainWindow != nullptr)
+            if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+                content->setShowPerformanceStats (newValue);
 
         menuItemsChanged();
     }

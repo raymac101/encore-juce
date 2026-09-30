@@ -110,5 +110,61 @@
         "sha256": "e5175ea9309feec742a356f5fdd2a88bf535eb9dbec68a572cb340d451efd809"
       }
     }
+  },
+  {
+    "version": "3.1.311",
+    "releaseNotesUrl": "",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.311-win64.exe?alt=media",
+        "sha256": "62b0c0b0e763853ff2249e5db3110930331d8184967e2348fc5eeaf20a65b428"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.307-mac.dmg?alt=media",
+        "sha256": "PENDING_BUILD"
+      }
+    }
+  },
+  {
+    "version": "3.1.316",
+    "releaseNotesUrl": "https://github.com/raymac101/encore-juce/releases/tag/v3.1.316",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.316-win64.exe?alt=media",
+        "sha256": "7a01083b8a4530b5d6e0753ba6f6955c0691a16af328c3bd7f96c6355e3a8a87"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.316-mac.dmg?alt=media",
+        "sha256": "bc3e8d9134468cf3b47c5a2f64eb6d274aa5f791a21f9c1effa725bed5127c75"
+      }
+    }
+  },
+  {
+    "version": "3.1.320",
+    "releaseNotesUrl": "https://github.com/raymac101/encore-juce/releases/tag/v3.1.320",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.320-win64.exe?alt=media",
+        "sha256": "818396f23f1767ee2a8ebbff7936eb70cfa5d7311a4539ca8b096680c1853fca"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.320-mac.dmg?alt=media",
+        "sha256": "ac3cd97b84209d320c0a2f7c0212d82a6aa8369e7267db6b13e75bb7ae3f5412"
+      }
+    }
+  },
+  {
+    "version": "3.1.321",
+    "releaseNotesUrl": "https://github.com/raymac101/encore-juce/releases/tag/v3.1.321",
+    "platforms": {
+      "windows": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.321-win64.exe?alt=media",
+        "sha256": "0b08778f3a8376439945b36a1ce7d303ac2fb73940f80853ea5d5e7e10180f82"
+      },
+      "macos": {
+        "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.321-mac.dmg?alt=media",
+        "sha256": "658695cda20ac80254f6773e3c72199d69a9fdb5d6556ffee62ddea4cd444b92"
+      }
+    }
   }
 ]

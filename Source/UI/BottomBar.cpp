@@ -291,6 +291,15 @@ void BottomBar::setupUI()
     addAndMakeVisible(expandMainScreenButton);
     addAndMakeVisible(expandLyricScreenButton);
 
+    phoneLyricsButton_.setButtonText(juce::String::fromUTF8("\xF0\x9F\x93\xB1")); // 📱
+    phoneLyricsButton_.setTooltip("Stream lyrics to a phone/tablet");
+    phoneLyricsButton_.onClick = [this]()
+    {
+        if (onPhoneLyricsClicked)
+            onPhoneLyricsClicked();
+    };
+    addAndMakeVisible(phoneLyricsButton_);
+
     currentTimeLabel.setText("0:00", juce::dontSendNotification);
     currentTimeLabel.setJustificationType(juce::Justification::centredRight);
     currentTimeLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(180, 200, 225));
@@ -464,15 +473,19 @@ void BottomBar::resized()
     pitchSlider.setBounds(pitchArea.reduced(0, 2));
     volumeSlider.setBounds(volumeArea.reduced(0, 2));
 
-    // Stack the two screen-expand buttons vertically, centred in their column.
+    // Stack the screen-expand buttons plus the phone-stream button vertically,
+    // centred in their column.
     auto buttonsColumn = screenButtonsArea.withSizeKeepingCentre(
-        kScreenButtonSize, kScreenButtonSize * 2 + kScreenButtonGap);
+        kScreenButtonSize, kScreenButtonSize * 3 + kScreenButtonGap * 2);
     auto topButtonSlot = buttonsColumn.removeFromTop(kScreenButtonSize);
+    buttonsColumn.removeFromTop(kScreenButtonGap);
+    auto middleButtonSlot = buttonsColumn.removeFromTop(kScreenButtonSize);
     buttonsColumn.removeFromTop(kScreenButtonGap);
     auto bottomButtonSlot = buttonsColumn;
 
     expandMainScreenButton.setBounds(topButtonSlot);
-    expandLyricScreenButton.setBounds(bottomButtonSlot);
+    expandLyricScreenButton.setBounds(middleButtonSlot);
+    phoneLyricsButton_.setBounds(bottomButtonSlot);
 
     repaint(waveformArea);
 }

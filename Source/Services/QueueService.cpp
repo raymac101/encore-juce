@@ -892,26 +892,45 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
         const juce::ScopedLock lock(writeLock_);
 
         const auto collPath = "venues/" + venueId + "/queue";
-        auto docs = FirestoreClient::getInstance().listCollection(collPath, 300);
 
-        std::unordered_map<std::string, juce::String> relPathByDocId;
+        // Singer doc IDs are the singer's Firebase Auth UID (see CLAUDE.md's
+        // "Queue Data Model"), and singerFromDoc() always stamps s.id with
+        // the doc ID for every singer that came off the live watcher -- which
+        // is the only source of `orderedSingers` (this is called from a drag
+        // reorder of what's already on screen). That means the relative path
+        // for every singer can be built directly, with NO network round trip
+        // to look it up. The previous version unconditionally called
+        // listCollection(300) here before patching anyone, then PATCHed each
+        // singer one at a time -- on a slow/high-latency venue wifi link, a
+        // single drag-and-drop of an N-singer queue meant 1 + N sequential
+        // HTTP round trips before the reorder finished, which is what made
+        // dragging the queue feel like it hung. Only fall back to the old
+        // list-and-match-by-name path for the rare straggler with no id
+        // (e.g. a stale/partially-loaded row), and only fetch the collection
+        // at all if that actually happens.
         std::unordered_map<std::string, juce::String> relPathByName;
-        relPathByDocId.reserve((size_t) docs.size());
-        relPathByName.reserve((size_t) docs.size());
-
-        for (auto& d : docs)
+        bool listedFallback = false;
+        auto ensureFallbackListed = [&]()
         {
-            const auto fullName = d.getProperty("name", juce::var()).toString();
-            const auto relPath  = relPathFromDocName(fullName);
-            const auto docId    = fullName.fromLastOccurrenceOf("/", false, false).trim();
-            const auto fields   = d.getProperty("fields", juce::var());
-            const auto name     = valueAsString(fieldByName(fields, "name")).trim().toLowerCase();
+            if (listedFallback) return;
+            listedFallback = true;
 
-            if (docId.isNotEmpty() && relPath.isNotEmpty())
-                relPathByDocId[docId.toStdString()] = relPath;
-            if (name.isNotEmpty() && relPath.isNotEmpty())
-                relPathByName[name.toStdString()] = relPath;
-        }
+            auto docs = FirestoreClient::getInstance().listCollection(collPath, 300);
+            relPathByName.reserve((size_t) docs.size());
+            for (auto& d : docs)
+            {
+                const auto fullName = d.getProperty("name", juce::var()).toString();
+                const auto relPath  = relPathFromDocName(fullName);
+                const auto fields   = d.getProperty("fields", juce::var());
+                const auto name     = valueAsString(fieldByName(fields, "name")).trim().toLowerCase();
+
+                if (name.isNotEmpty() && relPath.isNotEmpty())
+                    relPathByName[name.toStdString()] = relPath;
+            }
+        };
+
+        std::vector<FirestoreClient::BatchPatch> patches;
+        patches.reserve(orderedSingers.size());
 
         bool allOk = true;
         int writeOrder = 0;
@@ -919,19 +938,15 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
 
         for (const auto& singer : orderedSingers)
         {
-
             juce::String relPath;
 
             const auto docId = juce::String(singer.id).trim();
             if (docId.isNotEmpty())
-            {
-                auto byId = relPathByDocId.find(docId.toStdString());
-                if (byId != relPathByDocId.end())
-                    relPath = byId->second;
-            }
+                relPath = collPath + "/" + docId;
 
             if (relPath.isEmpty())
             {
+                ensureFallbackListed();
                 const auto key = juce::String(singer.name).trim().toLowerCase();
                 auto byName = relPathByName.find(key.toStdString());
                 if (byName != relPathByName.end())
@@ -950,12 +965,7 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
                     { "strikes", FirestoreClient::integerValue(juce::jmax(0, singer.strikes)) }
                 });
 
-                const auto patchPath = relPath
-                    + "?updateMask.fieldPaths=order&updateMask.fieldPaths=rotationOrder&updateMask.fieldPaths=strikes"
-                    + "&currentDocument.exists=true";
-
-                const bool ok = FirestoreClient::getInstance().patchDocument(patchPath, fields);
-                allOk = allOk && ok;
+                patches.push_back({ relPath, fields });
                 ++patched;
             }
             else
@@ -964,6 +974,14 @@ void QueueService::persistSingerOrder(const juce::String& venueId,
             }
 
             ++writeOrder;
+        }
+
+        // One network round trip for the whole queue (atomic: all patches
+        // land or none do), instead of one round trip per singer.
+        if (! patches.empty())
+        {
+            const bool committed = FirestoreClient::getInstance().commitPatches(patches);
+            allOk = allOk && committed;
         }
 
         DBG ("[Queue] persistSingerOrder singers=" << (int) orderedSingers.size()
@@ -1065,8 +1083,26 @@ void QueueService::forceReconnect()
     watching_ = false;
     watchInFlight_ = false;
     consecutiveFailures_ = 0;
-    reportedUnhealthy_ = false;
+    // Deliberately DO NOT clear reportedUnhealthy_ here. MainComponent's
+    // offline banner is driven by the onConnectionHealthChanged(true)
+    // transition, which pollWatcher() only fires when a good poll lands
+    // while reportedUnhealthy_ is still true. Clearing it here made the
+    // service think it had already reported "recovered" when it hadn't --
+    // so after "Reconnect Now" the queue would resync but the red
+    // "OFFLINE" banner stayed up until the app was restarted.
     lastFingerprint_.clear();
+
+    // A write whose completion callback never fires (its underlying request
+    // thread stalled on bad wifi and is never coming back -- see
+    // FirestoreClient::httpJsonRaw()'s in-flight cap) would otherwise leave
+    // pendingWrites_ stuck above zero forever, and pollWatcher()'s guard
+    // below would then make every future poll -- including the one this
+    // call is about to force -- a silent no-op. "Reconnect Now" needs to
+    // actually reconnect even when a stuck write is the reason things went
+    // quiet, so drop the count here; if that write's callback does still
+    // arrive later, endWrite()'s underflow guard (pendingWrites_ > 0) makes
+    // it a harmless no-op instead of going negative.
+    pendingWrites_ = 0;
 
     if (venueId.isEmpty())
         return;
@@ -1102,11 +1138,13 @@ void QueueService::pollWatcher()
     if (! watching_ || watchInFlight_ || watchVenueId_.isEmpty())
         return;
 
-    // Don't read while a local write hasn't landed yet: persistSingerOrder
-    // in particular PATCHes one singer doc at a time, so a poll issued
-    // mid-write can read a queue that's half the old order and half the
-    // new one, which would momentarily stomp the optimistic local update
-    // the write is trying to confirm. endWrite() polls again the instant
+    // Don't read while a local write hasn't landed yet: a poll issued
+    // mid-write can read a stale pre-write queue, which would momentarily
+    // stomp the optimistic local update the write is trying to confirm.
+    // (persistSingerOrder used to PATCH one singer doc at a time, making
+    // this window proportional to queue size; it's now a single batched
+    // commitPatches() round trip, but the guard still matters for the
+    // other per-doc writers below.) endWrite() polls again the instant
     // the last in-flight write finishes, so this just defers rather than
     // skips.
     if (pendingWrites_ > 0)

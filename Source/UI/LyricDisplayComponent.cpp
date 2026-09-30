@@ -7,8 +7,9 @@
 */
 
 #include "LyricDisplayComponent.h"
-#include "WebVideoView.h"
+#include "LibVlcVideoView.h"
 #include "../Audio/AudioEngine.h"
+#include "../Network/LyricStreamServer.h"
 #include "../Firebase/FirebaseConfig.h"
 #include "../Services/AdMediaCache.h"
 #include "../Services/AdsService.h"
@@ -190,6 +191,11 @@ LyricDisplayComponent::~LyricDisplayComponent()
 void LyricDisplayComponent::setAudioEngine (AudioEngine* engine)
 {
     audioEngine_ = engine;
+}
+
+void LyricDisplayComponent::setStreamServer (LyricStreamServer* server)
+{
+    streamServer_ = server;
 }
 
 void LyricDisplayComponent::loadCDG (const juce::File& cdgFile)
@@ -505,18 +511,56 @@ void LyricDisplayComponent::timerCallback()
     if (isVideoActive())
     {
         repaint();
+        maybeCaptureStreamFrame();
         return;
     }
 
     if (forceIdleScreen_ || ! decoder_.isLoaded() || audioEngine_ == nullptr)
     {
         repaint();
+        maybeCaptureStreamFrame();
         return;
     }
 
     const double pos = audioEngine_->getCurrentPosition();
     decoder_.renderAt (pos);
     repaint();
+    maybeCaptureStreamFrame();
+}
+
+void LyricDisplayComponent::maybeCaptureStreamFrame()
+{
+    if (streamServer_ == nullptr || ! streamServer_->isRunning())
+        return;
+
+    // The timer runs at 30 Hz; throttle to ~10 Hz so PNG-encoding a
+    // window-sized snapshot every tick doesn't add needless CPU load.
+    if ((++streamFrameCounter_ % 3) != 0)
+        return;
+
+    if (isVideoActive())
+    {
+        // juce::VideoComponent renders via a native OS view that
+        // createComponentSnapshot() can't capture (it would show as a black
+        // hole), so send a placeholder rather than a broken frame -- video
+        // songs aren't supported for phone streaming yet.
+        streamServer_->pushPlaceholder ("Lyrics are showing on the main screen");
+        return;
+    }
+
+    constexpr int kMaxStreamWidth = 960;
+    auto snapshot = createComponentSnapshot (getLocalBounds());
+    if (! snapshot.isValid())
+        return;
+
+    if (snapshot.getWidth() > kMaxStreamWidth)
+    {
+        const double scale = (double) kMaxStreamWidth / (double) snapshot.getWidth();
+        snapshot = snapshot.rescaled (kMaxStreamWidth, (int) std::round (snapshot.getHeight() * scale),
+                                       juce::Graphics::mediumResamplingQuality);
+    }
+
+    streamServer_->pushFrame (snapshot);
 }
 
 //==============================================================================
@@ -1343,7 +1387,7 @@ void LyricDisplayComponent::paintEmojis (juce::Graphics& g, juce::Rectangle<int>
 
 void LyricDisplayComponent::layoutIdleAdVideoBounds (juce::Rectangle<int> area)
 {
-    if (idleAdVideoComponent_ == nullptr && idleAdWebVideo_ == nullptr)
+    if (idleAdVideoComponent_ == nullptr && idleAdVideoView_ == nullptr)
         return;
 
     const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
@@ -1356,12 +1400,12 @@ void LyricDisplayComponent::layoutIdleAdVideoBounds (juce::Rectangle<int> area)
         idleAdVideoComponent_->setVisible (bigEnough);
     }
 
-    if (idleAdWebVideo_ != nullptr)
+    if (idleAdVideoView_ != nullptr)
     {
-        idleAdWebVideo_->setBounds (right);
+        idleAdVideoView_->setBounds (right);
         // Only show it once a clip is actually loaded, otherwise a black
         // rectangle covers the "Ads will appear here" placeholder.
-        idleAdWebVideo_->setVisible (bigEnough && idleAdWebVideo_->getCurrentFile() != juce::File{});
+        idleAdVideoView_->setVisible (bigEnough && idleAdVideoView_->getCurrentFile() != juce::File{});
     }
 }
 
@@ -1597,10 +1641,10 @@ void LyricDisplayComponent::stopIdleAdVideo()
         idleAdVideoComponent_->setVisible (false);
     }
 
-    if (idleAdWebVideo_ != nullptr)
+    if (idleAdVideoView_ != nullptr)
     {
-        idleAdWebVideo_->stop();
-        idleAdWebVideo_->setVisible (false);
+        idleAdVideoView_->stop();
+        idleAdVideoView_->setVisible (false);
     }
 }
 
@@ -1608,17 +1652,17 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
 {
    #if JUCE_WINDOWS
     // DirectShow (juce::VideoComponent's Windows backend) can't decode the
-    // MP4/H.264 ad clips, so play them through WebView2 from the local
+    // MP4/H.264 ad clips, so play them through libvlc from the local
     // AdMediaCache copy instead. The download is async; guard the completion
     // against the ad having rotated on and against component teardown.
-    if (idleAdWebVideo_ == nullptr)
+    if (idleAdVideoView_ == nullptr)
     {
-        idleAdWebVideo_ = std::make_unique<WebVideoView>();
-        addChildComponent (*idleAdWebVideo_);
+        idleAdVideoView_ = std::make_unique<LibVlcVideoView>();
+        addChildComponent (*idleAdVideoView_);
     }
 
-    if (! idleAdWebVideo_->isAvailable())
-        return; // No WebView2 runtime -- fall back to the static ad placeholder.
+    if (! idleAdVideoView_->isAvailable())
+        return; // No libvlc backend -- fall back to the static ad placeholder.
 
     juce::Component::SafePointer<LyricDisplayComponent> safe (this);
     const auto wantedUrl = ad.url;
@@ -1626,7 +1670,7 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
     AdMediaCache::getOrFetch (ad.url, ad.name,
         [safe, wantedUrl] (bool ok, juce::File file, juce::String error)
         {
-            if (safe == nullptr || safe->idleAdWebVideo_ == nullptr)
+            if (safe == nullptr || safe->idleAdVideoView_ == nullptr)
                 return;
 
             if (safe->currentAdIndex_ < 0 || safe->currentAdIndex_ >= (int) safe->ads_.size())
@@ -1643,10 +1687,10 @@ void LyricDisplayComponent::showIdleAdVideo (const AdEntry& ad)
                 return;
             }
 
-            safe->idleAdWebVideo_->play (file);
+            safe->idleAdVideoView_->play (file);
             safe->layoutIdleAdVideoBounds (safe->getLocalBounds());
-            safe->idleAdWebVideo_->setVisible (true);
-            safe->idleAdWebVideo_->toFront (false);
+            safe->idleAdVideoView_->setVisible (true);
+            safe->idleAdVideoView_->toFront (false);
         });
    #else
     if (idleAdVideoComponent_ == nullptr)

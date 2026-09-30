@@ -84,6 +84,15 @@ public:
         thread; no-ops if no venue has been started yet. */
     void forceReconnect();
 
+    /** Makes the given /requested doc dispatch again on the next poll even
+        though its status/action hasn't changed -- used when a caller's own
+        handling of an already-dispatched event (e.g. QueueService::appendSong
+        after onApprovedRequest) failed on a network hiccup and the doc was
+        deliberately left in place instead of being deleted, so it needs a
+        real retry rather than being silently forgotten forever. Safe to call
+        from the message thread; no-ops if docId was never seen. */
+    void forgetSeenStatus(const juce::String& docId);
+
 private:
     RequestService();
     ~RequestService() override;

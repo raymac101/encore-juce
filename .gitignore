@@ -1,7 +1,13 @@
 # Build artifacts
-build/
-build-*/
-Builds/
+# Anchored to the repo root (leading /) so these don't also match
+# same-named directories inside vendored third-party code, e.g.
+# third_party/nuget/Microsoft.Web.WebView2.*/build/ -- an unanchored
+# "build/" here silently dropped that NuGet package's headers/libs from
+# git, which broke every CI Windows release build (WebView2.h missing)
+# without ever failing locally, since the files still existed on disk.
+/build/
+/build-*/
+/Builds/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -35,6 +41,12 @@ JuceLibraryCode/
 *.lib
 *.pdb
 
+# Vendored WebView2 NuGet package (headers + WebView2Loader.dll/.lib) --
+# a real dependency checked into third_party/, not a build artifact, so
+# it needs to survive the *.dll/*.lib blanket ignore above.
+!third_party/nuget/**/*.dll
+!third_party/nuget/**/*.lib
+
 # Assets (only track source, not build outputs)
 src/assets/images/
 src/assets/icon/
@@ -50,3 +62,10 @@ firebase-debug.log
 
 # Claude Code machine-local settings (permission grants, etc.)
 .claude/settings.local.json
+
+# Claude Code skills/plugins -- auto-installed locally per machine/session,
+# not project source. skills-lock.json just records where each one came
+# from so it can be reinstalled, not something to diff/merge in git.
+.claude/skills/
+.claude/plugins/
+skills-lock.json

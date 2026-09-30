@@ -69,9 +69,20 @@ public:
         been kicked off. */
     bool restartAndInstall();
 
+    /** Aborts any in-flight manifest check / installer download and waits
+        briefly for the worker thread(s) to unwind. MUST be called from the
+        message thread as part of app shutdown, BEFORE JUCE tears down global
+        state: a download still streaming when teardown begins races its
+        NSURLSession delegate against deallocation and segfaults on the
+        CFNetwork work queue (observed 2026-09 -- quit mid-download). The
+        download loop and manifest fetch both poll an abort flag, so this
+        returns in well under a second in practice. Idempotent; a no-op when
+        nothing is running. */
+    void shutdown();
+
 private:
     UpdateService() = default;
-    ~UpdateService() = default;
+    ~UpdateService();
 
     static bool isRemoteVersionNewer (const juce::String& remoteVersion, const juce::String& localVersion);
     static juce::File getUpdatesDirectory();
@@ -81,7 +92,8 @@ private:
         for this platform. Returns false (leaving `out` untouched) for
         anything unparsable/missing/not-newer -- callers must treat that as
         "nothing to offer," never as an error. Runs synchronously; callers
-        are responsible for calling it from a background thread. */
+        are responsible for calling it from a background thread. Bails out
+        early (returning false) if shutdown() has flipped the abort flag. */
     struct ManifestUpdateInfo
     {
         juce::URL fileUrl;
@@ -89,7 +101,7 @@ private:
         juce::String version;
         juce::String releaseNotesUrl;
     };
-    static bool fetchManifestUpdateInfo (ManifestUpdateInfo& out);
+    bool fetchManifestUpdateInfo (ManifestUpdateInfo& out);
 
     /** Downloads fileUrl, verifies it against expectedSha256Hex, and on
         success marks it ready to install (readyToInstall_/
@@ -102,7 +114,30 @@ private:
                             const juce::String& expectedSha256Hex,
                             const juce::String& version,
                             const juce::String& releaseNotesUrl,
+                            juce::Thread& worker,
                             ReadyCallback onReady);
+
+    //==========================================================================
+    // Every background operation (manifest fetch + installer download) runs on
+    // one of these. They're OWNED (not juce::Thread::launch, which is detached
+    // and un-joinable) so shutdown() can signal and join them before global
+    // teardown -- a detached download thread that outlives shutdown() ends up
+    // messaging a freed NSURLSession delegate.
+    struct Worker : juce::Thread
+    {
+        Worker() : juce::Thread ("UpdateService") {}
+        void run() override { if (job) job(); }
+        std::function<void()> job;
+    };
+
+    /** Reaps finished workers, then starts `job` on a fresh owned thread.
+        `job` receives its own Worker& so it can poll threadShouldExit().
+        No-op once shutdown() has begun. */
+    void startWorker (std::function<void (juce::Thread&)> job);
+
+    juce::CriticalSection    workersLock_;
+    juce::OwnedArray<Worker> workers_;
+    std::atomic<bool>        aborting_ { false };
 
     std::atomic<bool> readyToInstall_ { false };
     juce::File pendingInstallerFile_;
