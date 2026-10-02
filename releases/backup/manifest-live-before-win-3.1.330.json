@@ -1,0 +1,14 @@
+{
+  "latestVersion": "3.1.328",
+  "releaseNotesUrl": "https://github.com/raymac101/encore-juce/releases/tag/v3.1.328",
+  "platforms": {
+    "windows": {
+      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.328-win64.exe?alt=media",
+      "sha256": "55b68840dfe51cfe20b00d4e6c61d62e729dfa3a7527f430b7b5964deb0e7957"
+    },
+    "macos": {
+      "url": "https://firebasestorage.googleapis.com/v0/b/tagg-9ee2b.appspot.com/o/Installers%2FEncoreKaraoke-3.1.328-mac.dmg?alt=media",
+      "sha256": "4e14a4b1723dc91242d9b76b04e3acfa541c1dbc8492c6ecef9244ca37a2bae5"
+    }
+  }
+}
