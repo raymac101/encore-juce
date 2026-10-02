@@ -215,6 +215,14 @@ private:
 
     bool backgroundPlaying_ = false;
     bool backgroundMusicEnabled_ = true;
+
+    // Icon state last applied to bgPlayPauseButton_ / bgEnabledButton_
+    // (-1 = not yet applied). updateControlState() runs ~100x/s via
+    // MainComponent::refreshRibbonState(), and rebuilding a sprite icon
+    // re-parses sprite.svg and writes a temp file -- so only rebuild when
+    // the state actually changes.
+    int appliedPlayIconState_ = -1;
+    int appliedEnabledIconState_ = -1;
     float backgroundVolume01_ = 0.5f;
     juce::String backgroundSongName_;
     double backgroundPositionSeconds_ = 0.0;

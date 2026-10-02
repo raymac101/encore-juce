@@ -69,7 +69,8 @@ void setSfxButtonIconFromFile (juce::DrawableButton& button, const juce::File& i
     // to re-tint them.
     auto over = normal->createCopy();
     auto down = normal->createCopy();
-    button.setImages (normal.release(), over.release(), down.release());
+    // setImages() copies; see setSpriteButtonIcon below.
+    button.setImages (normal.get(), over.get(), down.get());
 }
 
 void setSfxButtonIcon (juce::DrawableButton& button, const juce::String& iconRelativePath)
@@ -110,7 +111,9 @@ void setSpriteButtonIcon (juce::DrawableButton& button, const juce::String& symb
         down->replaceColour (dark, kSfxIconTint);
     }
 
-    button.setImages(normal.release(), over.release(), down.release());
+    // setImages() copies the drawables and never takes ownership -- pass
+    // .get() so ours are freed here. (.release() leaked all three per call.)
+    button.setImages (normal.get(), over.get(), down.get());
 }
 
 juce::String panelTitleFor (RibbonMenu::PanelId panel)
@@ -1028,8 +1031,16 @@ void RibbonMenu::updateControlState()
     panelTitleLabel_.setText (panelTitleFor (expandedPanel_), juce::dontSendNotification);
     collapsePanelButton_.setButtonText (tr ("ribbon.back"));
 
-    setSpriteButtonIcon (bgPlayPauseButton_, backgroundPlaying_ ? "icon-pause2" : "icon-play3");
-    setSpriteButtonIcon (bgEnabledButton_, backgroundMusicEnabled_ ? "icon-toggle-on" : "icon-toggle-off");
+    if (appliedPlayIconState_ != (int) backgroundPlaying_)
+    {
+        appliedPlayIconState_ = (int) backgroundPlaying_;
+        setSpriteButtonIcon (bgPlayPauseButton_, backgroundPlaying_ ? "icon-pause2" : "icon-play3");
+    }
+    if (appliedEnabledIconState_ != (int) backgroundMusicEnabled_)
+    {
+        appliedEnabledIconState_ = (int) backgroundMusicEnabled_;
+        setSpriteButtonIcon (bgEnabledButton_, backgroundMusicEnabled_ ? "icon-toggle-on" : "icon-toggle-off");
+    }
     bgEnabledButton_.setTooltip (backgroundMusicEnabled_ ? tr ("ribbon.background.disable")
                                                           : tr ("ribbon.background.enable"));
     bgPrevButton_.setEnabled (backgroundMusicEnabled_);

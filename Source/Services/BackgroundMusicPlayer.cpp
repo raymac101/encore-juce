@@ -482,6 +482,33 @@ void BackgroundMusicPlayer::prepareToPlay (int samplesPerBlockExpected, double s
         resamplingSource_->prepareToPlay (samplesPerBlockExpected, sampleRate);
 
     pluginChain_.prepare (sampleRate, samplesPerBlockExpected, 2);
+
+    monoScratch_.resize ((size_t) juce::jmax (samplesPerBlockExpected, 4096));
+}
+
+void BackgroundMusicPlayer::updateMeters (const juce::AudioBuffer<float>& buf, int startSample,
+                                          int numSamples, int channels)
+{
+    if (numSamples <= 0 || channels <= 0)
+        return;
+
+    const float l = buf.getRMSLevel (0, startSample, numSamples);
+    levelL_ = l;
+    levelR_ = channels > 1 ? buf.getRMSLevel (1, startSample, numSamples) : l;
+
+    // Same mono feed AudioEngine gives its master spectrum. Silence is
+    // pushed too (rather than skipped) so the bands decay back to zero
+    // when music pauses instead of freezing. Resize only if a device ever
+    // delivers a bigger block than prepareToPlay() was told about.
+    if (monoScratch_.size() < (size_t) numSamples)
+        monoScratch_.resize ((size_t) numSamples);
+
+    auto* left  = buf.getReadPointer (0, startSample);
+    auto* right = channels > 1 ? buf.getReadPointer (1, startSample) : nullptr;
+    for (int i = 0; i < numSamples; ++i)
+        monoScratch_[(size_t) i] = right != nullptr ? 0.5f * (left[i] + right[i]) : left[i];
+
+    spectrum_.pushSamples (monoScratch_.data(), numSamples, deviceSampleRate_);
 }
 
 void BackgroundMusicPlayer::releaseResources()
@@ -498,7 +525,13 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
     std::lock_guard<std::mutex> lock (chainMutex_);
 
     if (resamplingSource_ == nullptr || ! playing_.load())
+    {
+        // Buffer was just cleared -- meter the silence so the VU decays.
+        if (info.buffer != nullptr)
+            updateMeters (*info.buffer, info.startSample, info.numSamples,
+                          juce::jmin (2, info.buffer->getNumChannels()));
         return;
+    }
 
     resamplingSource_->getNextAudioBlock (info);
 
@@ -557,6 +590,8 @@ void BackgroundMusicPlayer::getNextAudioBlock (const juce::AudioSourceChannelInf
     juce::AudioBuffer<float> activeView (buf.getArrayOfWritePointers(), channels, info.startSample, numSamples);
     pluginMidi_.clear();
     pluginChain_.process (activeView, pluginMidi_);
+
+    updateMeters (buf, info.startSample, numSamples, channels);
 
     // Update position.
     if (transportSource_)

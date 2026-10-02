@@ -3510,11 +3510,31 @@ void MainComponent::timerCallback()
         return;
 
     // Feed real stereo levels + spectrum bands into the VU meter.
+    // Background music runs on its own audio device, outside AudioEngine's
+    // master bus, so its levels are merged in here. RMS of two independent
+    // signals playing together combines as sqrt(a^2 + b^2); spectrum bands
+    // take the louder of the two per band.
     if (topBar != nullptr)
     {
-        topBar->setAudioLevels(juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevel() * 4.0f),
-                               juce::jlimit(0.0f, 1.0f, audioEngine->getCurrentLevelRight() * 4.0f));
-        topBar->setSpectrumLevels(audioEngine->getMasterSpectrumBands());
+        float levelL = audioEngine->getCurrentLevel();
+        float levelR = audioEngine->getCurrentLevelRight();
+        auto bands = audioEngine->getMasterSpectrumBands();
+
+        if (bgPlayer_ != nullptr)
+        {
+            const float bgL = bgPlayer_->getCurrentLevelLeft();
+            const float bgR = bgPlayer_->getCurrentLevelRight();
+            levelL = std::sqrt(levelL * levelL + bgL * bgL);
+            levelR = std::sqrt(levelR * levelR + bgR * bgR);
+
+            const auto bgBands = bgPlayer_->getSpectrumBands();
+            for (size_t i = 0; i < bands.size(); ++i)
+                bands[i] = juce::jmax(bands[i], bgBands[i]);
+        }
+
+        topBar->setAudioLevels(juce::jlimit(0.0f, 1.0f, levelL * 4.0f),
+                               juce::jlimit(0.0f, 1.0f, levelR * 4.0f));
+        topBar->setSpectrumLevels(bands);
     }
 
     // Feed real playback position into the BottomBar progress/time labels.

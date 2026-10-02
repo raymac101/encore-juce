@@ -25,6 +25,8 @@
 
 #include <JuceHeader.h>
 #include "../Audio/ChannelPluginChain.h"
+#include "../Audio/SpectrumAnalyzer.h"
+#include <array>
 #include <atomic>
 #include <vector>
 #include <functional>
@@ -134,6 +136,16 @@ public:
     ChannelPluginChain& getPluginChain() noexcept { return pluginChain_; }
 
     //==========================================================================
+    // Output metering for the TopBar VU meter. This player runs on its own
+    // AudioDeviceManager, so AudioEngine's master-bus meter never sees it --
+    // MainComponent combines these with AudioEngine's readings. Measured
+    // post-fade/volume/plugins, i.e. what actually reaches the speakers.
+    // Any thread.
+    float getCurrentLevelLeft() const noexcept  { return levelL_.load(); }
+    float getCurrentLevelRight() const noexcept { return levelR_.load(); }
+    std::array<float, SpectrumAnalyzer::kNumBands> getSpectrumBands() const { return spectrum_.getBandLevels(); }
+
+    //==========================================================================
     // Callbacks (called on the message thread)
     std::function<void()> onTrackChanged;
     std::function<void()> onPlayStateChanged;
@@ -223,6 +235,13 @@ private:
 
     ChannelPluginChain pluginChain_;
     juce::MidiBuffer pluginMidi_;
+
+    // VU metering (written on the audio thread, read anywhere).
+    std::atomic<float> levelL_ { 0.0f };
+    std::atomic<float> levelR_ { 0.0f };
+    SpectrumAnalyzer spectrum_;
+    std::vector<float> monoScratch_;   // sized in prepareToPlay()
+    void updateMeters (const juce::AudioBuffer<float>& buf, int startSample, int numSamples, int channels);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BackgroundMusicPlayer)
 };
