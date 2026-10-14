@@ -1,5 +1,7 @@
 # Venue Marketing Email — Implementation Plan
 
+> **Superseded 2026-10-14 by `VENUE_PORTAL_PLAN.md`.** Encore now sends through its own account and charges venues, and venues no longer see customer emails. The consent, unsubscribe and legal sections below still apply.
+
 Status: DRAFT v3, 2026-10-01. Decisions from the product owner are recorded in section 2. Remaining open questions are in section 13.
 
 ## 1. Goal
