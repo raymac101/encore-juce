@@ -21,6 +21,16 @@
 //==============================================================================
 SearchPage::SongResultRow::SongResultRow() {}
 
+void SearchPage::SongResultRow::setSong(const CdgSong& s)
+{
+    song = s;
+    cachedImage = {};
+    repaint();
+
+    if (! song.imageUrl.empty())
+        setImageUrl(juce::String::fromUTF8(song.imageUrl.data(), (int)song.imageUrl.size()));
+}
+
 void SearchPage::SongResultRow::setImageUrl(const juce::String& url)
 {
     if (url.isEmpty()) return;
@@ -30,6 +40,9 @@ void SearchPage::SongResultRow::setImageUrl(const juce::String& url)
     juce::Image img = ArtworkCache::getInstance().getOrFetch(url, [safeThis, url]()
     {
         if (safeThis == nullptr) return;
+        // Rows are reused across searches -- ignore a late fetch for the
+        // song this row used to show.
+        if (safeThis->song.imageUrl != url.toStdString()) return;
         juce::Image fetched = ArtworkCache::getInstance().getOrFetch(url);
         if (fetched.isValid())
         {
@@ -164,7 +177,7 @@ void SearchPage::SongResultRow::mouseDrag(const juce::MouseEvent& e)
             // The whole song is serialized to JSON as the drag description
             // (CdgSong already has toJson()/fromJson()) so the drop target
             // (QueueBar::ListContent) doesn't need to know about SearchPage
-            // or reach back into displaySongs -- see
+            // or reach back into its result list -- see
             // QueueBar::ListContent::itemDropped().
             auto img = createComponentSnapshot(getLocalBounds(), true);
             dnd->startDragging(song.toJson(), this, juce::ScaledImage(img),
@@ -482,73 +495,102 @@ void SearchPage::resized()
 //==============================================================================
 void SearchPage::textEditorTextChanged(juce::TextEditor&)
 {
+    // applyLetterFilter() clears the search box, and TextEditor delivers
+    // that change asynchronously -- don't let it wipe the letter filter.
+    if (searchBox->isEmpty() && currentLetter.isNotEmpty())
+        return;
+
+    // Debounce: fast typing coalesces into a single search.
+    startTimer(kSearchDebounceMs);
+}
+
+void SearchPage::timerCallback()
+{
+    stopTimer();
     applySearch();
 }
 
 //==============================================================================
-juce::String SearchPage::normalise(const juce::String& text)
+std::string SearchPage::normalise(const juce::String& text)
 {
-    // Strip non-alphanumeric, lowercase
-    juce::String result;
-    for (int i = 0; i < text.length(); ++i)
+    // Strip non-alphanumeric, lowercase. Returned as UTF-8 so matching is a
+    // plain byte-wise std::string::find (valid for UTF-8 substrings).
+    std::string result;
+    result.reserve(text.getNumBytesAsUTF8());
+    for (auto p = text.getCharPointer(); ! p.isEmpty();)
     {
-        auto ch = text[i];
+        auto ch = p.getAndAdvance();
         if (juce::CharacterFunctions::isLetterOrDigit(ch) || ch == ' ')
-            result += juce::CharacterFunctions::toLowerCase(ch);
+        {
+            char buf[8] = {};
+            juce::CharPointer_UTF8 out(buf);
+            out.write(juce::CharacterFunctions::toLowerCase(ch));
+            result += buf;
+        }
     }
     return result;
 }
 
-bool SearchPage::matchesPartialSearch(const juce::String& searchText,
-                                       const CdgSong& song,
+void SearchPage::buildSearchIndex()
+{
+    auto str = [](const std::string& s) { return juce::String::fromUTF8(s.data(), (int)s.size()); };
+    auto lower = [&](const std::string& s) { return str(s).toLowerCase().toStdString(); };
+    auto firstUpper = [&](const std::string& s) {
+        return juce::CharacterFunctions::toUpperCase(str(s).trimStart()[0]);
+    };
+
+    searchIndex_.clear();
+    searchIndex_.reserve(allSongs.size());
+
+    for (const auto& s : allSongs)
+    {
+        SearchKey k;
+        k.song   = normalise(str(s.songName));
+        k.artist = normalise(str(s.artistName));
+        k.year   = normalise(str(s.releaseDate));
+        for (const auto& g : s.genres)  k.genre   += normalise(str(g)) + " ";
+        for (const auto& v : s.version) k.version += normalise(str(v)) + " ";
+
+        k.sortSong    = lower(s.songName);
+        k.sortArtist  = lower(s.artistName);
+        k.sortYear    = lower(s.releaseDate);
+        k.sortVersion = s.version.empty() ? std::string() : lower(s.version[0]);
+        k.sortGenre   = s.genres.empty()  ? std::string() : lower(s.genres[0]);
+
+        k.firstSong   = firstUpper(s.songName);
+        k.firstArtist = firstUpper(s.artistName);
+        k.hasMeta     = s.hasMetadata();
+
+        searchIndex_.push_back(std::move(k));
+    }
+}
+
+bool SearchPage::matchesPartialSearch(const std::vector<std::string>& words,
+                                       const SearchKey& k,
                                        FilterMode mode)
 {
-    if (searchText.isEmpty()) return true;
-
-    // Split search into words
-    juce::StringArray words;
-    words.addTokens(normalise(searchText), " ", "");
-    words.removeEmptyStrings();
-
-    // Build field strings based on filter mode
-    juce::String songNorm    = normalise(juce::String(song.songName));
-    juce::String artistNorm  = normalise(juce::String(song.artistName));
-    juce::String yearNorm    = normalise(juce::String(song.releaseDate));
-
-    juce::String genreNorm;
-    for (auto& g : song.genres)
-        genreNorm += normalise(juce::String(g)) + " ";
-
-    juce::String versionNorm;
-    for (auto& v : song.version)
-        versionNorm += normalise(juce::String(v)) + " ";
+    auto has = [](const std::string& field, const std::string& word) {
+        return field.find(word) != std::string::npos;
+    };
 
     // Every word must match at least one relevant field
-    for (auto& word : words)
+    for (const auto& word : words)
     {
         bool found = false;
 
         switch (mode)
         {
-            case FilterMode::Song:
-                found = songNorm.contains(word);
-                break;
-            case FilterMode::Artist:
-                found = artistNorm.contains(word);
-                break;
-            case FilterMode::Year:
-                found = yearNorm.contains(word);
-                break;
-            case FilterMode::Genre:
-                found = genreNorm.contains(word);
-                break;
+            case FilterMode::Song:   found = has(k.song, word);   break;
+            case FilterMode::Artist: found = has(k.artist, word); break;
+            case FilterMode::Year:   found = has(k.year, word);   break;
+            case FilterMode::Genre:  found = has(k.genre, word);  break;
             case FilterMode::All:
             default:
-                found = songNorm.contains(word)
-                     || artistNorm.contains(word)
-                     || versionNorm.contains(word)
-                     || yearNorm.contains(word)
-                     || genreNorm.contains(word);
+                found = has(k.song, word)
+                     || has(k.artist, word)
+                     || has(k.version, word)
+                     || has(k.year, word)
+                     || has(k.genre, word);
                 break;
         }
 
@@ -560,60 +602,99 @@ bool SearchPage::matchesPartialSearch(const juce::String& searchText,
 //==============================================================================
 void SearchPage::applySearch()
 {
-    juce::String query = searchBox->getText();
+    stopTimer();
+
+    const std::string query = normalise(searchBox->getText());
+
+    // Split search into words
+    std::vector<std::string> words;
+    {
+        size_t pos = 0;
+        while (pos < query.size())
+        {
+            size_t end = query.find(' ', pos);
+            if (end == std::string::npos) end = query.size();
+            if (end > pos) words.push_back(query.substr(pos, end - pos));
+            pos = end + 1;
+        }
+    }
+
+    // If the new query extends the previous one, every match must already be
+    // in the previous result set -- just narrow it (order, incl. any column
+    // sort, is preserved). Otherwise scan the whole index.
+    const bool narrow = lastQueryValid_ && currentLetter.isEmpty()
+                     && query.compare(0, lastQuery_.size(), lastQuery_) == 0;
     currentLetter = "";
 
-    filteredSongs.clear();
-    for (auto& s : allSongs)
+    std::vector<int> result;
+    auto consider = [&](int i) {
+        const auto& k = searchIndex_[(size_t)i];
+        if ((! onlyWithMetadata_ || k.hasMeta) && matchesPartialSearch(words, k, filterMode))
+            result.push_back(i);
+    };
+
+    if (narrow)
     {
-        if (matchesPartialSearch(query, s, filterMode) && (! onlyWithMetadata_ || s.hasMetadata()))
-            filteredSongs.push_back(s);
+        result.reserve(filtered_.size());
+        for (int i : filtered_) consider(i);
     }
+    else
+    {
+        result.reserve(searchIndex_.size());
+        for (int i = 0; i < (int)searchIndex_.size(); ++i) consider(i);
+    }
+
+    filtered_ = std::move(result);
+    if (! narrow)
+        sortFiltered();
+
+    lastQuery_ = query;
+    lastQueryValid_ = true;
 
     rebuildDisplayList();
 }
 
 void SearchPage::applyLetterFilter(const juce::String& letter)
 {
+    lastQueryValid_ = false;
+    stopTimer();
+    filtered_.clear();
+
     if (currentLetter == letter)
     {
         // Toggle off – show all (still honoring the metadata toggle)
         currentLetter = "";
-        filteredSongs.clear();
-        for (auto& s : allSongs)
-            if (! onlyWithMetadata_ || s.hasMetadata())
-                filteredSongs.push_back(s);
+        for (int i = 0; i < (int)searchIndex_.size(); ++i)
+            if (! onlyWithMetadata_ || searchIndex_[(size_t)i].hasMeta)
+                filtered_.push_back(i);
     }
     else
     {
         currentLetter = letter;
-        filteredSongs.clear();
         searchBox->clear();
 
-        for (auto& s : allSongs)
+        const juce::juce_wchar letterCh = letter[0];
+        for (int i = 0; i < (int)searchIndex_.size(); ++i)
         {
-            if (onlyWithMetadata_ && ! s.hasMetadata())
+            const auto& k = searchIndex_[(size_t)i];
+            if (onlyWithMetadata_ && ! k.hasMeta)
                 continue;
 
-            juce::String firstChar;
-            if (filterMode == FilterMode::Artist)
-                firstChar = juce::String(s.artistName).trimStart().substring(0, 1).toUpperCase();
-            else
-                firstChar = juce::String(s.songName).trimStart().substring(0, 1).toUpperCase();
+            const auto firstChar = (filterMode == FilterMode::Artist) ? k.firstArtist : k.firstSong;
 
             if (letter == "#")
             {
                 // Numbers and symbols
-                if (!juce::CharacterFunctions::isLetter(firstChar[0]))
-                    filteredSongs.push_back(s);
+                if (!juce::CharacterFunctions::isLetter(firstChar))
+                    filtered_.push_back(i);
             }
-            else
+            else if (firstChar == letterCh)
             {
-                if (firstChar == letter)
-                    filteredSongs.push_back(s);
+                filtered_.push_back(i);
             }
         }
     }
+    sortFiltered();
 
     // Highlight the active letter button
     for (auto* btn : letterButtons)
@@ -632,19 +713,21 @@ void SearchPage::clearSearch()
     currentLetter = "";
     filterMode = FilterMode::All;
     sortColumn = SortColumn::None;
-    filteredSongs = allSongs;
+    lastQueryValid_ = false;
 
     for (auto* btn : letterButtons)
         btn->setColour(juce::TextButton::textColourOffId, textColour.withAlpha(0.6f));
 
     updateFilterButtonColours();
-    rebuildDisplayList();
+    updateColumnHeaderText();
+    applySearch();
     searchBox->grabKeyboardFocus();
 }
 
 void SearchPage::setFilterMode(FilterMode mode)
 {
     filterMode = mode;
+    lastQueryValid_ = false;
     updateFilterButtonColours();
     applySearch();
 }
@@ -652,6 +735,7 @@ void SearchPage::setFilterMode(FilterMode mode)
 void SearchPage::toggleMetadataFilter()
 {
     onlyWithMetadata_ = filterHasMetaBtn->getToggleState();
+    lastQueryValid_ = false;
     updateFilterButtonColours();
     applySearch();
 }
@@ -666,110 +750,88 @@ void SearchPage::sortByColumn(SortColumn col)
         sortDir = SortDir::Asc;
     }
 
-    auto cmp = [&](const CdgSong& a, const CdgSong& b) -> bool {
-        juce::String va, vb;
-        switch (sortColumn)
-        {
-            case SortColumn::Song:
-                va = juce::String(a.songName).toLowerCase();
-                vb = juce::String(b.songName).toLowerCase();
-                break;
-            case SortColumn::Artist:
-                va = juce::String(a.artistName).toLowerCase();
-                vb = juce::String(b.artistName).toLowerCase();
-                break;
-            case SortColumn::Version:
-                va = a.version.empty() ? "" : juce::String(a.version[0]).toLowerCase();
-                vb = b.version.empty() ? "" : juce::String(b.version[0]).toLowerCase();
-                break;
-            case SortColumn::Year:
-                va = juce::String(a.releaseDate).toLowerCase();
-                vb = juce::String(b.releaseDate).toLowerCase();
-                break;
-            case SortColumn::Genre:
-                va = a.genres.empty() ? "" : juce::String(a.genres[0]).toLowerCase();
-                vb = b.genres.empty() ? "" : juce::String(b.genres[0]).toLowerCase();
-                break;
-            default:
-                return false;
-        }
-        return (sortDir == SortDir::Asc) ? (va < vb) : (va > vb);
-    };
-
-    std::sort(filteredSongs.begin(), filteredSongs.end(), cmp);
+    sortFiltered();
     updateColumnHeaderText();
     rebuildDisplayList();
+}
+
+void SearchPage::sortFiltered()
+{
+    if (sortColumn == SortColumn::None) return;
+
+    auto keyFor = [this](int i) -> const std::string& {
+        const auto& k = searchIndex_[(size_t)i];
+        switch (sortColumn)
+        {
+            case SortColumn::Artist:  return k.sortArtist;
+            case SortColumn::Version: return k.sortVersion;
+            case SortColumn::Year:    return k.sortYear;
+            case SortColumn::Genre:   return k.sortGenre;
+            case SortColumn::Song:
+            default:                  return k.sortSong;
+        }
+    };
+
+    const bool asc = (sortDir == SortDir::Asc);
+    std::stable_sort(filtered_.begin(), filtered_.end(), [&](int a, int b) {
+        return asc ? (keyFor(a) < keyFor(b)) : (keyFor(a) > keyFor(b));
+    });
 }
 
 //==============================================================================
 void SearchPage::rebuildDisplayList()
 {
-    int count = juce::jmin((int)filteredSongs.size(), kInitialBatch);
-    displaySongs.assign(filteredSongs.begin(), filteredSongs.begin() + count);
+    const int count = juce::jmin((int)filtered_.size(), kInitialBatch);
     loadedCount = count;
 
     rebuildResultRows();
     updateCountLabel();
+    listViewport.setViewPosition(0, 0);
     resized();
+}
+
+SearchPage::SongResultRow* SearchPage::createRow(int index)
+{
+    auto* row = new SongResultRow();
+    row->index = index;
+    row->columnFractions = &columnFractions_;
+    row->onClicked = [this](int idx) {
+        if (idx >= 0 && idx < resultRows.size())
+            if (onSongClicked) onSongClicked(resultRows[idx]->song);
+    };
+    row->onEditClicked = [this](int idx) {
+        if (idx >= 0 && idx < resultRows.size())
+            if (onSongEditClicked) onSongEditClicked(resultRows[idx]->song);
+    };
+    listContent.addAndMakeVisible(row);
+    resultRows.add(row);
+    return row;
 }
 
 void SearchPage::rebuildResultRows()
 {
-    for (auto* row : resultRows)
-        listContent.removeChildComponent(row);
-    resultRows.clear();
-
-    for (int i = 0; i < (int)displaySongs.size(); ++i)
+    // Reuse existing row components; only create / delete the difference.
+    while (resultRows.size() > loadedCount)
     {
-        auto* row = new SongResultRow();
-        row->song  = displaySongs[(size_t)i];
-        row->index = i;
-        row->columnFractions = &columnFractions_;
-        row->onClicked = [this](int idx) {
-            if (idx >= 0 && idx < (int)displaySongs.size())
-                if (onSongClicked) onSongClicked(displaySongs[(size_t)idx]);
-        };
-        row->onEditClicked = [this](int idx) {
-            if (idx >= 0 && idx < (int)displaySongs.size())
-                if (onSongEditClicked) onSongEditClicked(displaySongs[(size_t)idx]);
-        };
-        listContent.addAndMakeVisible(row);
-        resultRows.add(row);
+        listContent.removeChildComponent(resultRows.getLast());
+        resultRows.removeLast();
+    }
 
-        // Trigger async image load if the song has artwork
-        if (! displaySongs[(size_t)i].imageUrl.empty())
-            row->setImageUrl(juce::String(displaySongs[(size_t)i].imageUrl));
+    for (int i = 0; i < loadedCount; ++i)
+    {
+        auto* row = (i < resultRows.size()) ? resultRows[i] : createRow(i);
+        row->setSong(allSongs[(size_t)filtered_[(size_t)i]]);
     }
 }
 
 void SearchPage::loadMoreRows()
 {
-    if (loadedCount >= (int)filteredSongs.size()) return;
+    if (loadedCount >= (int)filtered_.size()) return;
 
-    int next = juce::jmin(loadedCount + kScrollBatch, (int)filteredSongs.size());
+    int next = juce::jmin(loadedCount + kScrollBatch, (int)filtered_.size());
 
     for (int i = loadedCount; i < next; ++i)
-    {
-        displaySongs.push_back(filteredSongs[(size_t)i]);
-
-        auto* row = new SongResultRow();
-        row->song  = filteredSongs[(size_t)i];
-        row->index = i;
-        row->columnFractions = &columnFractions_;
-        row->onClicked = [this](int idx) {
-            if (idx >= 0 && idx < (int)displaySongs.size())
-                if (onSongClicked) onSongClicked(displaySongs[(size_t)idx]);
-        };
-        row->onEditClicked = [this](int idx) {
-            if (idx >= 0 && idx < (int)displaySongs.size())
-                if (onSongEditClicked) onSongEditClicked(displaySongs[(size_t)idx]);
-        };
-        listContent.addAndMakeVisible(row);
-        resultRows.add(row);
-
-        if (! filteredSongs[(size_t)i].imageUrl.empty())
-            row->setImageUrl(juce::String(filteredSongs[(size_t)i].imageUrl));
-    }
+        createRow(i)->setSong(allSongs[(size_t)filtered_[(size_t)i]]);
 
     loadedCount = next;
     resized();
@@ -777,7 +839,7 @@ void SearchPage::loadMoreRows()
 
 void SearchPage::updateCountLabel()
 {
-    juce::String text = juce::String((int)filteredSongs.size()) + " " + LocalizationManager::getInstance().getText("search.count_suffix");
+    juce::String text = juce::String((int)filtered_.size()) + " " + LocalizationManager::getInstance().getText("search.count_suffix");
     countLabel->setText(text, juce::dontSendNotification);
 }
 
@@ -816,8 +878,20 @@ void SearchPage::updateColumnHeaderText()
 void SearchPage::setSongs(const std::vector<CdgSong>& songs)
 {
     allSongs = songs;
-    filteredSongs = songs;
-    rebuildDisplayList();
+    buildSearchIndex();
+
+    // Re-run whatever the user currently has on screen against the new data.
+    lastQueryValid_ = false;
+    if (currentLetter.isNotEmpty())
+    {
+        const auto letter = currentLetter;
+        currentLetter = "";
+        applyLetterFilter(letter);
+    }
+    else
+    {
+        applySearch();
+    }
 }
 
 void SearchPage::setSearchName(const juce::String& name)

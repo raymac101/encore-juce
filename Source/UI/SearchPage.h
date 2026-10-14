@@ -28,7 +28,8 @@
 
 //==============================================================================
 class SearchPage : public juce::Component,
-                   public juce::TextEditor::Listener
+                   public juce::TextEditor::Listener,
+                   private juce::Timer
 {
 public:
     SearchPage();
@@ -77,6 +78,10 @@ public:
 
         std::function<void(int)> onClicked;
         std::function<void(int)> onEditClicked;
+
+        // Rebinds this row to a different song (rows are reused across
+        // searches instead of being destroyed and recreated per keystroke).
+        void setSong(const CdgSong& s);
 
         // Triggers an async download of the song's imageUrl and repaints when ready.
         void setImageUrl(const juce::String& url);
@@ -185,8 +190,29 @@ private:
     //==============================================================================
     // State
     std::vector<CdgSong> allSongs;
-    std::vector<CdgSong> filteredSongs;
-    std::vector<CdgSong> displaySongs;
+
+    // In-memory search index, built once in setSongs() and parallel to
+    // allSongs. Holds pre-normalised (lowercase, alnum + space, UTF-8)
+    // haystacks and pre-lowered sort keys so a keystroke never has to touch
+    // the full CdgSong records or re-normalise any field.
+    struct SearchKey
+    {
+        std::string song, artist, year, genre, version;          // normalised for matching
+        std::string sortSong, sortArtist, sortYear,
+                    sortVersion, sortGenre;                      // lowercased for sorting
+        juce::juce_wchar firstSong = 0, firstArtist = 0;         // uppercased, for A-Z bar
+        bool hasMeta = false;
+    };
+    std::vector<SearchKey> searchIndex_;
+
+    // Indices into allSongs / searchIndex_ for the current result set.
+    std::vector<int> filtered_;
+
+    // Last applied normalised query. When the next query extends it (the
+    // usual typing case) we only re-filter the previous results.
+    std::string lastQuery_;
+    bool        lastQueryValid_ = false;
+    static constexpr int kSearchDebounceMs = 90;
 
     juce::String searchName = "Search";
     FilterMode   filterMode = FilterMode::All;
@@ -234,7 +260,11 @@ private:
     //==============================================================================
     // Internal methods
     void textEditorTextChanged(juce::TextEditor&) override;
+    void timerCallback() override;
 
+    void buildSearchIndex();
+    void sortFiltered();
+    SongResultRow* createRow(int index);
     void applySearch();
     void applyLetterFilter(const juce::String& letter);
     void clearSearch();
@@ -247,10 +277,10 @@ private:
     void updateCountLabel();
 
     // Partial multi-word search ("don st bel" matches "Don't Stop Believin'")
-    static bool matchesPartialSearch(const juce::String& searchText,
-                                      const CdgSong& song,
+    static bool matchesPartialSearch(const std::vector<std::string>& words,
+                                      const SearchKey& key,
                                       FilterMode mode);
-    static juce::String normalise(const juce::String& text);
+    static std::string normalise(const juce::String& text);
 
     void updateFilterButtonColours();
     void updateColumnHeaderText();
