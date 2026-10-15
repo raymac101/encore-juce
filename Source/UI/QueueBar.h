@@ -20,6 +20,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "DesignTokens.h"
 #include "../Models/Singers.h"
 #include "../Models/QueueItem.h"
 #include "../Models/CdgSong.h"
@@ -143,6 +144,13 @@ public:
     // currentSong / loadAndPlaySong).
     std::function<void()> onNowPlayingSongClicked;
 
+    // Fired from setNowPlaying()/clearNowPlaying() -- the single choke
+    // point both go through, regardless of which of the many call sites in
+    // MainComponent triggered it. Wired to TopBar::setSingerInfo() so the
+    // top bar's singer field always matches the Now Playing card without
+    // every call site needing to remember to update it separately.
+    std::function<void(const Singers& singer, bool hasSinger)> onNowPlayingChanged;
+
 private:
     class ExpandArrowButton : public juce::Button,
                               private juce::Timer
@@ -238,6 +246,42 @@ private:
     };
 
     //==============================================================================
+    // Drag-to-rotate wheel -- replaces the old rotateBackButton/
+    // rotateForwardButton pair with a single light-grey dial + dark marker
+    // (like a stereo volume wheel). Dragging clockwise/counter-clockwise
+    // snaps to one step per singer and fires onRotateSteps(+N/-N); QueueBar
+    // turns that into N calls to the existing onRotateForward()/onRotateBack()
+    // callbacks, so no rotation logic changes -- purely a new front end for
+    // the same single-step moves the two buttons already drove.
+    class RotateWheel : public juce::Component,
+                        public juce::SettableTooltipClient
+    {
+    public:
+        RotateWheel() = default;
+        void paint(juce::Graphics& g) override;
+        void mouseDown(const juce::MouseEvent& e) override;
+        void mouseDrag(const juce::MouseEvent& e) override;
+        void mouseUp(const juce::MouseEvent& e) override;
+
+        /** Snap positions per full revolution -- set to the current singer
+            count so one drag-step always corresponds to one rotation step. */
+        void setStepCount(int steps) { stepCount = juce::jmax(1, steps); }
+
+        /** Fired once per snapped step on release -- positive = forward
+            (clockwise), negative = backward. */
+        std::function<void(int steps)> onRotateSteps;
+
+    private:
+        float angleFromCentre(juce::Point<float> p) const;
+
+        int   stepCount = 5;
+        float rotation = 0.0f;
+        float dragStartAngle = 0.0f;
+        float dragStartRotation = 0.0f;
+        bool  dragging = false;
+    };
+
+    //==============================================================================
     // List container — accepts the singer-row drag and computes the new
     // index from the drop position. Owned by `listViewport`.
     class ListContent : public juce::Component,
@@ -283,8 +327,8 @@ private:
     std::unique_ptr<juce::Label>      totalTimeLabel;
     std::unique_ptr<juce::TextButton> clearQueueButton;
     std::unique_ptr<juce::TextButton> addSingerButton;
-    std::unique_ptr<juce::TextButton> rotateBackButton;
-    std::unique_ptr<juce::TextButton> rotateForwardButton;
+    std::unique_ptr<juce::Label>      rotateLabel;
+    std::unique_ptr<RotateWheel>      rotateWheel;
     std::unique_ptr<juce::ToggleButton> queueToggle;   // "Queue Open" / "Queue Closed"
     std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 
@@ -309,17 +353,17 @@ private:
     int  dragStartX = 0;
     int  dragStartWidth = 0;
 
-    // Colours
-    juce::Colour bgColour          { 0xff262626 };
-    juce::Colour closedBgColour    { 0xff3a1414 };  // dark red -- shown instead of bgColour while queueClosed
-    juce::Colour headerBgColour    { 0xff333333 };
-    juce::Colour nowPlayingBg      { 0xff30daff };
-    juce::Colour cardBgColour      { 0xff262626 };
-    juce::Colour firstBorderColour { 0xff30daff };  // blue = round leader
-    juce::Colour lastBorderColour  { 0xffdb3d40 };  // red  = round tail
+    // Colours -- centralised in DesignTokens.h
+    juce::Colour bgColour          { DesignTokens::colour(DesignTokens::kSurface) };
+    juce::Colour closedBgColour    { 0xff3a1414 };  // dark red wash -- shown instead of bgColour while queueClosed
+    juce::Colour headerBgColour    { DesignTokens::colour(DesignTokens::kSurface2) };
+    juce::Colour nowPlayingBg      { DesignTokens::colour(DesignTokens::kAccent) };
+    juce::Colour cardBgColour      { DesignTokens::colour(DesignTokens::kSurface) };
+    juce::Colour firstBorderColour { DesignTokens::colour(DesignTokens::kAccent) };  // round leader
+    juce::Colour lastBorderColour  { DesignTokens::colour(DesignTokens::kDanger) };  // round tail -- was its own #DB3D40
     juce::Colour textColour        { 0xffe4e4e4 };
-    juce::Colour accentColour      { 0xff30daff };
-    juce::Colour separatorColour   { 0xff474747 };
+    juce::Colour accentColour      { DesignTokens::colour(DesignTokens::kAccent) };
+    juce::Colour separatorColour   { DesignTokens::colour(DesignTokens::kBorder) };
 
     //==============================================================================
     void rebuildSingerRows();

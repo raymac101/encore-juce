@@ -84,7 +84,7 @@ static std::unique_ptr<juce::Drawable> loadSpriteSymbolDrawable(const juce::Stri
 static juce::Drawable* getStrikeDrawable()
 {
     static std::unique_ptr<juce::Drawable> strikeDrawable =
-        loadSpriteSymbolDrawable("icon-squared-cross", "#db3d40");
+        loadSpriteSymbolDrawable("icon-squared-cross", "#f87171"); // DesignTokens::kDanger
     return strikeDrawable.get();
 }
 
@@ -137,6 +137,78 @@ void QueueBar::ExpandArrowButton::timerCallback()
         stopTimer();
     }
     repaint();
+}
+
+//==============================================================================
+//  RotateWheel
+//==============================================================================
+float QueueBar::RotateWheel::angleFromCentre(juce::Point<float> p) const
+{
+    auto centre = getLocalBounds().toFloat().getCentre();
+    return std::atan2(p.y - centre.y, p.x - centre.x);
+}
+
+void QueueBar::RotateWheel::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+
+    juce::ColourGradient grad(juce::Colour(0xffe4e6ea),
+                              bounds.getX() + bounds.getWidth() * 0.35f, bounds.getY() + bounds.getHeight() * 0.28f,
+                              juce::Colour(0xff888c96),
+                              bounds.getRight(), bounds.getBottom(), true);
+    g.setGradientFill(grad);
+    g.fillEllipse(bounds);
+
+    g.setColour(juce::Colours::black.withAlpha(0.35f));
+    g.drawEllipse(bounds, 1.0f);
+
+    // Marker dot -- rotates with `rotation`, riding near the rim, same
+    // "volume wheel" language as the bottom bar's knobs but drag-only
+    // (no value readout; it just shows where the top of the rotation is).
+    auto centre = bounds.getCentre();
+    const float radius = bounds.getWidth() * 0.5f;
+    const float markerR = juce::jmax(1.5f, radius * 0.18f);
+    const float markerDist = radius - markerR - 1.5f;
+    juce::Point<float> markerPos(centre.x + markerDist * std::cos(rotation - juce::MathConstants<float>::halfPi),
+                                 centre.y + markerDist * std::sin(rotation - juce::MathConstants<float>::halfPi));
+    g.setColour(juce::Colour(0xff3b3e45));
+    g.fillEllipse(juce::Rectangle<float>(markerR * 2.0f, markerR * 2.0f).withCentre(markerPos));
+}
+
+void QueueBar::RotateWheel::mouseDown(const juce::MouseEvent& e)
+{
+    dragging = true;
+    dragStartAngle = angleFromCentre(e.position);
+    dragStartRotation = rotation;
+}
+
+void QueueBar::RotateWheel::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! dragging)
+        return;
+
+    float delta = angleFromCentre(e.position) - dragStartAngle;
+    if (delta > juce::MathConstants<float>::pi)  delta -= juce::MathConstants<float>::twoPi;
+    if (delta < -juce::MathConstants<float>::pi) delta += juce::MathConstants<float>::twoPi;
+
+    rotation = dragStartRotation + delta;
+    repaint();
+}
+
+void QueueBar::RotateWheel::mouseUp(const juce::MouseEvent&)
+{
+    if (! dragging)
+        return;
+    dragging = false;
+
+    const float stepAngle = juce::MathConstants<float>::twoPi / (float) stepCount;
+    const int steps = juce::roundToInt((rotation - dragStartRotation) / stepAngle);
+
+    rotation = dragStartRotation + (float) steps * stepAngle;
+    repaint();
+
+    if (steps != 0 && onRotateSteps)
+        onRotateSteps(steps);
 }
 
 //==============================================================================
@@ -460,7 +532,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     }
     else if (isLast)
     {
-        g.setColour(juce::Colour(0xffdb3d40));
+        g.setColour(DesignTokens::colour(DesignTokens::kDanger));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
     }
 
@@ -572,7 +644,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
 
             if (singer.strikes > drawCount)
             {
-                g.setColour(juce::Colour(0xffdb3d40).withAlpha(0.9f));
+                g.setColour(DesignTokens::colour(DesignTokens::kDanger).withAlpha(0.9f));
                 g.setFont(juce::Font(juce::jmax(10.0f, iconSize * 0.75f)));
                 g.drawText("+" + juce::String(singer.strikes - drawCount),
                            juce::Rectangle<int>((int) x, (int) y, (int) (strikeArea.getRight() - x), (int) iconSize),
@@ -582,7 +654,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         }
         else
         {
-            g.setColour(juce::Colour(0xffdb3d40));
+            g.setColour(DesignTokens::colour(DesignTokens::kDanger));
             g.setFont(juce::Font(12.f));
             juce::String strikeStr;
             for (int s = 0; s < singer.strikes; ++s)
@@ -624,7 +696,7 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     else if (singer.strikes > 0)
     {
         // Keep singer name visible; show skip strikes in the chip lane.
-        g.setColour(juce::Colour(0xffdb3d40));
+        g.setColour(DesignTokens::colour(DesignTokens::kDanger));
         g.setFont(juce::Font(12.f).boldened());
         juce::String strikeStr;
         for (int s = 0; s < singer.strikes; ++s)
@@ -855,19 +927,24 @@ QueueBar::QueueBar()
     addSingerButton->onClick = [this]() { if (onAddSinger) onAddSinger(); };
     addAndMakeVisible(*addSingerButton);
 
-    rotateBackButton = std::make_unique<juce::TextButton>(juce::CharPointer_UTF8("\xe2\x97\x80 Rotate"));
-    rotateBackButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
-    rotateBackButton->setColour(juce::TextButton::textColourOffId, accentColour);
-    rotateBackButton->setTooltip("Move the rotation back to the previous singer");
-    rotateBackButton->onClick = [this]() { if (onRotateBack) onRotateBack(); };
-    addAndMakeVisible(*rotateBackButton);
+    rotateLabel = std::make_unique<juce::Label>("rotateLabel", LocalizationManager::getInstance().getText("queue.rotate_label"));
+    rotateLabel->setFont(juce::Font(12.0f, juce::Font::bold));
+    rotateLabel->setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.7f));
+    rotateLabel->setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(*rotateLabel);
 
-    rotateForwardButton = std::make_unique<juce::TextButton>(juce::CharPointer_UTF8("Rotate \xe2\x96\xb6"));
-    rotateForwardButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
-    rotateForwardButton->setColour(juce::TextButton::textColourOffId, accentColour);
-    rotateForwardButton->setTooltip("Move the rotation forward to the next singer");
-    rotateForwardButton->onClick = [this]() { if (onRotateForward) onRotateForward(); };
-    addAndMakeVisible(*rotateForwardButton);
+    rotateWheel = std::make_unique<RotateWheel>();
+    rotateWheel->setTooltip("Drag to rotate the queue forward or backward");
+    rotateWheel->onRotateSteps = [this](int steps)
+    {
+        const int n = std::abs(steps);
+        for (int i = 0; i < n; ++i)
+        {
+            if (steps > 0) { if (onRotateForward) onRotateForward(); }
+            else           { if (onRotateBack)    onRotateBack(); }
+        }
+    };
+    addAndMakeVisible(*rotateWheel);
 
     countdownLabel = std::make_unique<juce::Label>("countdown", "");
     countdownLabel->setColour(juce::Label::textColourId, accentColour);
@@ -953,10 +1030,9 @@ void QueueBar::resized()
         addSingerButton->setBounds(row4Right);
 
         auto row5 = statusArea.removeFromTop(28).reduced(8, 2);
-        auto row5Left  = row5.removeFromLeft(row5.getWidth() / 2 - 2);
-        auto row5Right = row5.withTrimmedLeft(2);
-        rotateBackButton->setBounds(row5Left);
-        rotateForwardButton->setBounds(row5Right);
+        rotateWheel->setBounds(row5.removeFromRight(row5.getHeight()));
+        row5.removeFromRight(8);
+        rotateLabel->setBounds(row5);
 
         // Countdown label floats over the list area (set in resized, shown/hidden by state)
         countdownLabel->setBounds(0, venueHeaderHeight + nowPlayingHeight + 5,
@@ -1098,6 +1174,9 @@ void QueueBar::setNowPlaying(const Singers& singer)
             safe->nowPlayingCard->repaint();
         });
     nowPlayingCard->repaint();
+
+    if (onNowPlayingChanged)
+        onNowPlayingChanged(currentSinger, hasCurrentSinger);
 }
 
 void QueueBar::clearNowPlaying()
@@ -1108,6 +1187,9 @@ void QueueBar::clearNowPlaying()
     nowPlayingCard->repaint();
     // The "Now Singing:" label always remains visible above the card,
     // even when there is no active singer.
+
+    if (onNowPlayingChanged)
+        onNowPlayingChanged(currentSinger, hasCurrentSinger);
 }
 
 void QueueBar::setSingers(const std::vector<Singers>& newSingers)
@@ -1216,6 +1298,11 @@ void QueueBar::setExpanded(bool shouldExpand)
 //==============================================================================
 void QueueBar::rebuildSingerRows()
 {
+    // One drag-step on the rotate wheel should correspond to one singer
+    // moving past the anchor, so the wheel's snap granularity always
+    // matches the current queue size.
+    rotateWheel->setStepCount((int) singers.size());
+
     // Clear existing rows
     for (auto* row : singerRows)
         listContent.removeChildComponent(row);
@@ -1400,8 +1487,7 @@ void QueueBar::updateAllText()
     auto& lm = LocalizationManager::getInstance();
     nowSingingLabel->setText(lm.getText("queue.now_singing"), juce::dontSendNotification);
     clearQueueButton->setButtonText(lm.getText("queue.clear_queue"));
-    rotateBackButton->setButtonText(lm.getText("queue.rotate_back"));
-    rotateForwardButton->setButtonText(lm.getText("queue.rotate_forward"));
+    rotateLabel->setText(lm.getText("queue.rotate_label"), juce::dontSendNotification);
     queueToggle->setButtonText(queueClosed ? lm.getText("queue.queue_closed")
                                             : lm.getText("queue.queue_open"));
     updateStatusLabels();

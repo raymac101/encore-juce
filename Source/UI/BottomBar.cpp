@@ -11,18 +11,46 @@
 */
 
 #include "BottomBar.h"
+#include "DesignTokens.h"
 #include <cmath>
 
 namespace
 {
-    const juce::Colour kBackground = juce::Colour(0x26, 0x26, 0x26);          // #262626
-    const juce::Colour kSectionBackground = juce::Colour(0x1e, 0x1e, 0x1e);   // slightly darker section
-    const juce::Colour kAccent = juce::Colour(0x30, 0xda, 0xff);  // #30DAFF
+    const juce::Colour kBackground = DesignTokens::colour(DesignTokens::kSurface);
+    const juce::Colour kSectionBackground = DesignTokens::colour(DesignTokens::kSurface2);
+    const juce::Colour kAccent = DesignTokens::colour(DesignTokens::kAccent);
     const juce::Colour kText = juce::Colours::white;
     const juce::Colour kMutedText = juce::Colours::white.withAlpha(0.65f);
 
     constexpr int kTransportIconSize = 22;
     constexpr int kPlayPauseIconSize = 30;
+
+    // Speaker-with-X glyph, centred in `bounds` -- drawn in the volume
+    // knob's hub in place of the pointer needle while hovering or muted
+    // (see VolumeKnobLookAndFeel::drawRotarySlider()).
+    static void drawMuteGlyph(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour colour)
+    {
+        auto b = bounds.reduced(bounds.getWidth() * 0.22f);
+
+        juce::Path speaker;
+        speaker.startNewSubPath(b.getX(), b.getCentreY() - b.getHeight() * 0.18f);
+        speaker.lineTo(b.getX() + b.getWidth() * 0.35f, b.getCentreY() - b.getHeight() * 0.18f);
+        speaker.lineTo(b.getX() + b.getWidth() * 0.62f, b.getY());
+        speaker.lineTo(b.getX() + b.getWidth() * 0.62f, b.getBottom());
+        speaker.lineTo(b.getX() + b.getWidth() * 0.35f, b.getCentreY() + b.getHeight() * 0.18f);
+        speaker.lineTo(b.getX(), b.getCentreY() + b.getHeight() * 0.18f);
+        speaker.closeSubPath();
+        g.setColour(colour);
+        g.fillPath(speaker);
+
+        juce::Path cross;
+        cross.startNewSubPath(b.getX() + b.getWidth() * 0.68f, b.getCentreY() - b.getHeight() * 0.22f);
+        cross.lineTo(b.getRight(), b.getCentreY() + b.getHeight() * 0.22f);
+        cross.startNewSubPath(b.getRight(), b.getCentreY() - b.getHeight() * 0.22f);
+        cross.lineTo(b.getX() + b.getWidth() * 0.68f, b.getCentreY() + b.getHeight() * 0.22f);
+        g.strokePath(cross, juce::PathStrokeType(juce::jmax(1.2f, bounds.getWidth() * 0.08f),
+                                                  juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
 
     class VolumeKnobLookAndFeel : public juce::LookAndFeel_V4
     {
@@ -31,8 +59,6 @@ namespace
                               float sliderPosProportional, float rotaryStartAngle,
                               float rotaryEndAngle, juce::Slider& slider) override
         {
-            juce::ignoreUnused(slider);
-
             auto bounds = juce::Rectangle<float>((float) x, (float) y, (float) width, (float) height).reduced(8.0f);
             const float diameter = juce::jmin(bounds.getWidth(), bounds.getHeight());
             auto knobBounds = bounds.withSizeKeepingCentre(diameter, diameter);
@@ -54,14 +80,27 @@ namespace
             g.setColour(kAccent);
             g.strokePath(valueArc, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
+            auto hubBounds = knobBounds.reduced(lineW * 1.35f);
             g.setColour(juce::Colour(0xff111821));
-            g.fillEllipse(knobBounds.reduced(lineW * 1.35f));
+            g.fillEllipse(hubBounds);
 
-            juce::Path pointer;
-            pointer.addRoundedRectangle(-lineW * 0.45f, -arcRadius + lineW * 1.2f,
-                                        lineW * 0.9f, arcRadius * 0.58f, lineW * 0.45f);
-            g.setColour(kAccent.brighter(0.25f));
-            g.fillPath(pointer, juce::AffineTransform::rotation(angle).translated(centre.x, centre.y));
+            // Hover or muted: swap the pointer needle for a mute glyph in
+            // the hub (click without dragging toggles mute -- see
+            // BottomBar::VolumeHoverListener / toggleVolumeMute()).
+            const bool muted = slider.getProperties().getWithDefault("muted", false);
+            if (muted || slider.isMouseOver())
+            {
+                drawMuteGlyph(g, hubBounds, muted ? DesignTokens::colour(DesignTokens::kDanger)
+                                                   : DesignTokens::colour(DesignTokens::kAccent).brighter(0.2f));
+            }
+            else
+            {
+                juce::Path pointer;
+                pointer.addRoundedRectangle(-lineW * 0.45f, -arcRadius + lineW * 1.2f,
+                                            lineW * 0.9f, arcRadius * 0.58f, lineW * 0.45f);
+                g.setColour(kAccent.brighter(0.25f));
+                g.fillPath(pointer, juce::AffineTransform::rotation(angle).translated(centre.x, centre.y));
+            }
         }
     };
 
@@ -246,6 +285,14 @@ void BottomBar::setupUI()
     volumeSlider.onValueChange = [this]()
     {
         auto volume = static_cast<int>(volumeSlider.getValue());
+
+        // Dragging the knob to a nonzero value while muted is an implicit unmute.
+        if (volumeMuted_ && volume > 0)
+        {
+            volumeMuted_ = false;
+            volumeSlider.getProperties().set("muted", false);
+        }
+
         if (onVolumeChanged)
             onVolumeChanged(volume);
     };
@@ -258,6 +305,12 @@ void BottomBar::setupUI()
 
     addAndMakeVisible(pitchSlider);
     addAndMakeVisible(volumeSlider);
+
+    // Hover the knob's hub to preview mute (see VolumeKnobLookAndFeel); a
+    // plain click (no drag) on it toggles mute via toggleVolumeMute().
+    volumeHoverListener_.onHoverChanged = [this](bool) { volumeSlider.repaint(); };
+    volumeHoverListener_.onPlainClick   = [this]() { toggleVolumeMute(); };
+    volumeSlider.addMouseListener(&volumeHoverListener_, false);
 
     {
         auto appDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
@@ -612,8 +665,39 @@ void BottomBar::setPitch(int semitones)
 
 void BottomBar::setVolume(int volumeStep)
 {
+    if (volumeMuted_ && volumeStep > 0)
+    {
+        volumeMuted_ = false;
+        volumeSlider.getProperties().set("muted", false);
+    }
+
     volumeSlider.setValue(volumeStep, juce::dontSendNotification);
     volumeSlider.updateText();
+}
+
+void BottomBar::toggleVolumeMute()
+{
+    if (volumeMuted_)
+    {
+        volumeMuted_ = false;
+        volumeSlider.getProperties().set("muted", false);
+        volumeSlider.setValue(volumeBeforeMute_, juce::dontSendNotification);
+        volumeSlider.updateText();
+        if (onVolumeChanged)
+            onVolumeChanged(volumeBeforeMute_);
+    }
+    else
+    {
+        volumeBeforeMute_ = juce::jmax(1, static_cast<int>(volumeSlider.getValue()));
+        volumeMuted_ = true;
+        volumeSlider.getProperties().set("muted", true);
+        volumeSlider.setValue(0, juce::dontSendNotification);
+        volumeSlider.updateText();
+        if (onVolumeChanged)
+            onVolumeChanged(0);
+    }
+
+    volumeSlider.repaint();
 }
 
 void BottomBar::setPlayEnabled(bool enabled)
@@ -910,17 +994,29 @@ void BottomBar::setWaveformStatusMessage(const juce::String& message)
         repaint(getWaveformArea());
 }
 
+void BottomBar::setSideRailWidths(int leftWidth, int rightWidth)
+{
+    if (leftRailWidth_ == leftWidth && rightRailWidth_ == rightWidth)
+        return;
+
+    leftRailWidth_ = leftWidth;
+    rightRailWidth_ = rightWidth;
+    resized();
+    repaint();
+}
+
 juce::Rectangle<int> BottomBar::getTransportArea() const
 {
     auto bounds = getLocalBounds();
-    return bounds.removeFromLeft(static_cast<int>(getWidth() * 0.16f));
+    const int w = leftRailWidth_ > 0 ? leftRailWidth_ : static_cast<int>(getWidth() * 0.16f);
+    return bounds.removeFromLeft(w);
 }
 
 juce::Rectangle<int> BottomBar::getWaveformArea() const
 {
     auto bounds = getLocalBounds();
-    const int leftWidth = static_cast<int>(getWidth() * 0.16f);
-    const int rightWidth = static_cast<int>(getWidth() * 0.24f);
+    const int leftWidth = leftRailWidth_ > 0 ? leftRailWidth_ : static_cast<int>(getWidth() * 0.16f);
+    const int rightWidth = rightRailWidth_ > 0 ? rightRailWidth_ : static_cast<int>(getWidth() * 0.24f);
     bounds.removeFromLeft(leftWidth);
     bounds.removeFromRight(rightWidth);
     return bounds;
@@ -938,7 +1034,8 @@ juce::Rectangle<int> BottomBar::getWaveformDrawArea() const
 juce::Rectangle<int> BottomBar::getSlidersArea() const
 {
     auto bounds = getLocalBounds();
-    return bounds.removeFromRight(static_cast<int>(getWidth() * 0.24f));
+    const int w = rightRailWidth_ > 0 ? rightRailWidth_ : static_cast<int>(getWidth() * 0.24f);
+    return bounds.removeFromRight(w);
 }
 
 void BottomBar::setButtonImage(juce::ImageButton& button, const juce::Image& image)

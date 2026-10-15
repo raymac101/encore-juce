@@ -15,6 +15,7 @@
 #include "UI/MainComponent.h"
 #include "UI/LyricDisplayWindow.h"
 #include "UI/LoginWindow.h"
+#include "UI/AppLookAndFeel.h"
 #include "Localization/LocalizationManager.h"
 #include "Services/UserPreferences.h"
 #include "Services/VenueService.h"
@@ -37,6 +38,13 @@ public:
     //==============================================================================
     void initialise (const juce::String& commandLine) override
     {
+        // Install the shared look-and-feel before any window is created, so
+        // every default-skinned widget (anything without its own custom
+        // LookAndFeel -- see MenuTheme/LoginTheme/the Mixer fader/the Pitch
+        // and Volume knobs, which stay as they are) picks up the unified
+        // palette from the very first frame instead of stock JUCE grey.
+        juce::LookAndFeel::setDefaultLookAndFeel (&appLookAndFeel_);
+
         // DBG() is compiled out entirely in Release builds, so without this
         // there is no way to diagnose field issues (e.g. a venue's ads not
         // appearing) after the fact -- writeToLog() calls throughout the app
@@ -101,6 +109,10 @@ public:
         // streaming when JUCE frees global state segfaults on the CFNetwork
         // work queue (freed NSURLSession delegate) -- see UpdateService.h.
         UpdateService::getInstance().shutdown();
+
+        // appLookAndFeel_ is about to be destroyed along with this object --
+        // make sure nothing still points the global default at it.
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
 
        #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (nullptr);
@@ -836,6 +848,7 @@ private:
     std::unique_ptr<LoginWindow> loginWindow_;
     std::unique_ptr<MainWindow>  mainWindow;
     std::unique_ptr<juce::FileLogger> fileLogger_;
+    AppLookAndFeel appLookAndFeel_;
 
     // Language codes for the dynamic Local menu, index matches (menuID - cmdLanguageBase).
     juce::StringArray languageCodes_;

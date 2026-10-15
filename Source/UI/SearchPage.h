@@ -43,6 +43,12 @@ public:
     void setSongs(const std::vector<CdgSong>& allSongs);
     void setSearchName(const juce::String& name);
 
+    // Programmatically injects a query and runs it through the normal
+    // search pipeline (same debounce/applySearch() path a keystroke would
+    // take) -- used by HomePage, which owns the one visible search box now
+    // that SearchPage is embedded underneath it instead of showing its own.
+    void setQueryText(const juce::String& text);
+
     // Localization
     void updateAllText();
 

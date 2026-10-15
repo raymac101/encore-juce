@@ -16,8 +16,7 @@
 
 #include <JuceHeader.h>
 #include "NavBar.h"           // For NavPage enum
-#include "HomePage.h"
-#include "SearchPage.h"
+#include "HomePage.h"         // Also brings in SearchPage.h -- HomePage embeds one directly now
 #include "LibraryPage.h"
 #include "ChartsPage.h"
 #include "SettingsPage.h"
@@ -112,8 +111,7 @@ private:
     std::unordered_map<int, std::unique_ptr<juce::Component>> pages;
 
     // Concrete page pointers (non-owning, for type-safe access)
-    HomePage*     homePage     = nullptr;
-    SearchPage*   searchPage   = nullptr;
+    HomePage*     homePage     = nullptr;  // owns an embedded SearchPage -- see HomePage.h
     LibraryPage*  libraryPage  = nullptr;
     ChartsPage*   chartsPage   = nullptr;
     MixerPage*    mixerPage    = nullptr;

@@ -32,22 +32,19 @@ MainArea::MainArea()
 
     auto& lm = LocalizationManager::getInstance();
 
-    // Create real Home page
+    // Create real Home page. Search no longer has its own NavBar destination
+    // or MainArea page -- HomePage owns an embedded SearchPage directly (see
+    // HomePage.h) and swaps it in for the Popular/New rows when the user
+    // searches, so this is the only page that needs constructing here.
     {
         auto hp = std::make_unique<HomePage>();
         homePage = hp.get();
         addChildComponent(hp.get());
         pages[static_cast<int>(NavPage::Home)] = std::move(hp);
     }
-    // Create real Search page
-    {
-        auto sp = std::make_unique<SearchPage>();
-        searchPage = sp.get();
-        addChildComponent(sp.get());
-        pages[static_cast<int>(NavPage::Search)] = std::move(sp);
-    }
 
-    // Show the Song Selection dialog whenever a song is chosen from Search or Home.
+    // Show the Song Selection dialog whenever a song is chosen from Home's
+    // rows or its embedded Search view.
     // Only require a song name + artist — we don't gate on `id` here because
     // some scanned files have valid title/artist but blank IDs, and silently
     // dropping the click was confusing for the user.
@@ -58,12 +55,13 @@ MainArea::MainArea()
                 if (onSongSelectionResult) onSongSelectionResult(r);
             });
     };
-    searchPage->onSongClicked = openSongDialog;
+    homePage->onSongClicked = openSongDialog;
 
-    // Edit column → Song Edit dialog → forward the result up to MainComponent
-    // for persistence.  MainComponent supplies the initial playlist
-    // membership and (later) a Spotify-style metadata fetcher.
-    searchPage->onSongEditClicked = [this](const CdgSong& song) {
+    // Edit column (on the embedded Search view) → Song Edit dialog → forward
+    // the result up to MainComponent for persistence. MainComponent supplies
+    // the initial playlist membership and (later) a Spotify-style metadata
+    // fetcher.
+    homePage->onSongEditClicked = [this](const CdgSong& song) {
         SongEditDialog::InitialPlaylists pls;
         if (onSongEditPlaylistQuery)
             onSongEditPlaylistQuery(song, pls);
@@ -80,10 +78,11 @@ MainArea::MainArea()
         auto lp = std::make_unique<LibraryPage>();
         libraryPage = lp.get();
 
-        // When the songbook changes, push the updated songs to Search and Home pages
+        // When the songbook changes, push the updated songs to Home (which
+        // forwards into its embedded Search view -- see
+        // HomePage::setSongsFromLibrary()).
         libraryPage->onSongbookChanged = [this](const std::vector<CdgSong>& songs) {
-            if (searchPage) searchPage->setSongs(songs);
-            if (homePage)   homePage->setSongsFromLibrary(songs);
+            if (homePage) homePage->setSongsFromLibrary(songs);
         };
 
         libraryPage->onStatusMessage = [this](const juce::String& msg) {
@@ -94,14 +93,9 @@ MainArea::MainArea()
             if (onSongsAddedViaAddSongs) onSongsAddedViaAddSongs(songs);
         };
 
-        // Seed Search and Home pages with whatever is already on disk
-        if (searchPage)
-            searchPage->setSongs(libraryPage->getSongs());
+        // Seed Home (and its embedded Search view) with whatever is already on disk
         if (homePage)
-        {
             homePage->setSongsFromLibrary(libraryPage->getSongs());
-            homePage->onSongClicked = openSongDialog;
-        }
 
         addChildComponent(lp.get());
         pages[static_cast<int>(NavPage::Library)] = std::move(lp);
@@ -232,7 +226,6 @@ void MainArea::updateAllText()
 
     static const struct { NavPage page; const char* key; } pageKeys[] = {
         { NavPage::Home,            "page.home" },
-        { NavPage::Search,          "page.search" },
         { NavPage::Library,         "page.library" },
         { NavPage::Charts,          "page.charts" },
         { NavPage::Mixer,           "page.mixer" },
@@ -252,9 +245,9 @@ void MainArea::updateAllText()
         }
     }
 
-    // Update concrete pages
+    // Update concrete pages. homePage->updateAllText() also updates its
+    // embedded SearchPage -- see HomePage::updateAllText().
     if (homePage)     homePage->updateAllText();
-    if (searchPage)   searchPage->updateAllText();
     if (libraryPage)  libraryPage->updateAllText();
     if (chartsPage)   chartsPage->updateAllText();
     if (mixerPage)    mixerPage->updateAllText();

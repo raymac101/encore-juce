@@ -13,12 +13,12 @@ namespace
             setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(MenuTheme::kInputBorderFocus));
             setColour(juce::CaretComponent::caretColourId, juce::Colours::white);
 
-            setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1630));
+            setColour(juce::ComboBox::backgroundColourId, DesignTokens::colour(DesignTokens::kSurface2));
             setColour(juce::ComboBox::textColourId, juce::Colours::white);
             setColour(juce::ComboBox::outlineColourId, juce::Colour(MenuTheme::kInputBorder));
             setColour(juce::ComboBox::arrowColourId, juce::Colours::white.withAlpha(0.75f));
 
-            setColour(juce::TextButton::buttonColourId, juce::Colour(0xff4272b8));
+            setColour(juce::TextButton::buttonColourId, DesignTokens::colour(DesignTokens::kAccent));
             setColour(juce::TextButton::textColourOffId, juce::Colours::white);
             setColour(juce::TextButton::textColourOnId, juce::Colours::white);
         }

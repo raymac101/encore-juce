@@ -234,6 +234,10 @@ SearchPage::SearchPage()
     searchBox->setBorder(juce::BorderSize<int>(6, 10, 6, 10));
     searchBox->addListener(this);
     addAndMakeVisible(*searchBox);
+    // HomePage now owns the one visible search box above this embedded
+    // page (see setQueryText()); this one still exists and still drives
+    // applySearch() via the listener above, it's just never shown/laid out.
+    searchBox->setVisible(false);
 
     // Clear button
     clearButton = std::make_unique<juce::TextButton>(lm.getText("search.clear"));
@@ -242,6 +246,7 @@ SearchPage::SearchPage()
     clearButton->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
     clearButton->onClick = [this]() { clearSearch(); };
     addAndMakeVisible(*clearButton);
+    clearButton->setVisible(false);
 
     // Filter buttons
     auto makeFilterBtn = [&](const juce::String& text) {
@@ -418,12 +423,15 @@ void SearchPage::resized()
 
     bounds.removeFromTop(4);
 
-    // ── Controls card (search box + letter bar + filter bar + column headers) ──
-    const int controlsH = searchBarHeight
-                        + letterBarHeight
+    // ── Controls card (letter bar + filter bar + column headers) ──
+    // The search box + clear button used to be the first slice of this
+    // card; SearchPage is now embedded under HomePage's own search bar
+    // (see setQueryText()), so that slice -- and the two components
+    // themselves (hidden in the constructor) -- are no longer laid out here.
+    const int controlsH = letterBarHeight
                         + filterBarHeight
                         + columnHeaderHeight
-                        + kCardPad * 2 + 12; // extra inner gaps between sub-rows
+                        + kCardPad * 2 + 8; // extra inner gaps between sub-rows
     juce::Rectangle<int> controlsCard(bounds.getX(), bounds.getY(),
                                       bounds.getWidth(), controlsH);
     cardRects_.push_back(controlsCard);
@@ -432,14 +440,6 @@ void SearchPage::resized()
     // shift inner content right by a few px so it clears the left accent stripe
     controlsInner.setX(controlsInner.getX() + 4);
     controlsInner.setWidth(controlsInner.getWidth() - 4);
-
-    // Search bar
-    {
-        auto searchArea = controlsInner.removeFromTop(searchBarHeight).reduced(0, 2);
-        clearButton->setBounds(searchArea.removeFromRight(80).reduced(4, 0));
-        searchBox->setBounds(searchArea);
-    }
-    controlsInner.removeFromTop(4);
 
     // Letter bar (A-Z)
     {
@@ -898,6 +898,16 @@ void SearchPage::setSearchName(const juce::String& name)
 {
     searchName = name;
     titleLabel->setText(name, juce::dontSendNotification);
+}
+
+void SearchPage::setQueryText(const juce::String& text)
+{
+    // Goes through the exact same textEditorTextChanged() -> debounce ->
+    // applySearch() pipeline a keystroke would, just driven by whoever
+    // owns the visible search box now (HomePage) instead of this hidden one.
+    // TextEditor::setText's second argument is a plain bool (fire the
+    // listener notification), not a NotificationType.
+    searchBox->setText(text, true);
 }
 
 //==============================================================================

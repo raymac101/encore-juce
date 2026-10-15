@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "DesignTokens.h"
 #include "../Models/AccessRights.h"
 #include "../Localization/LocalizationManager.h"
 #include <vector>
@@ -168,13 +169,13 @@ private:
     int       dragStartWidth = 0;
 
     //==============================================================================
-    // Colours (matching the Angular dark theme)
-    juce::Colour bgColour            { 0xff262626 };
-    juce::Colour bgHoverColour       { 0xff161616 };
+    // Colours -- centralised in DesignTokens.h
+    juce::Colour bgColour            { DesignTokens::colour(DesignTokens::kSurface) };
+    juce::Colour bgHoverColour       { DesignTokens::colour(DesignTokens::kSurfaceHover) };
     juce::Colour textColour          { 0xffe0e0e0 };
-    juce::Colour activeTextColour    { 0xffffffff };
-    juce::Colour separatorColour     { 0xff424242 };
-    juce::Colour accentColour        { 0xff30daff };
+    juce::Colour activeTextColour    { DesignTokens::colour(DesignTokens::kText) };
+    juce::Colour separatorColour     { DesignTokens::colour(DesignTokens::kBorder) };
+    juce::Colour accentColour        { DesignTokens::colour(DesignTokens::kAccent) };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NavBar)
 };

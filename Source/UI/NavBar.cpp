@@ -26,14 +26,6 @@ namespace NavIcons
         return p;
     }
 
-    static juce::Path makeSearch()
-    {
-        juce::Path p;
-        p.addEllipse(3, 3, 11, 11);                // circle
-        p.addLineSegment({ 12, 12, 18, 18 }, 2.0f); // handle
-        return p;
-    }
-
     static juce::Path makeLibrary()
     {
         juce::Path p;
@@ -122,10 +114,10 @@ NavBar::NavButton::NavButton(const juce::String& text, const juce::Path& icon)
 void NavBar::NavButton::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    const juce::Colour bg         = juce::Colour(0xff262626);
-    const juce::Colour bgHover    = juce::Colour(0xff161616);
+    const juce::Colour bg         = DesignTokens::colour(DesignTokens::kSurface);
+    const juce::Colour bgHover    = DesignTokens::colour(DesignTokens::kSurfaceHover);
     const juce::Colour textNorm   = juce::Colour(0xffe0e0e0).withAlpha(0.4f);
-    const juce::Colour textActive = juce::Colour(0xffffffff);
+    const juce::Colour textActive = DesignTokens::colour(DesignTokens::kText);
 
     // Background
     if (isActive || hovering)
@@ -137,7 +129,7 @@ void NavBar::NavButton::paint(juce::Graphics& g)
     // Active indicator bar on left edge
     if (isActive)
     {
-        g.setColour(juce::Colour(0xff30daff));
+        g.setColour(DesignTokens::colour(DesignTokens::kAccent));
         g.fillRect(0, 0, 3, getHeight());
     }
 
@@ -181,7 +173,11 @@ NavBar::NavBar()
         switch (item.page)
         {
             case NavPage::Home:            iconPath = NavIcons::makeHome();     break;
-            case NavPage::Search:          iconPath = NavIcons::makeSearch();   break;
+            // NavPage::Search is intentionally not a sidebar destination any
+            // more -- Home owns an embedded search view directly (see
+            // HomePage.h) -- but the enumerator itself stays defined so
+            // nothing elsewhere that references it by value needs renumbering.
+            case NavPage::Search:          break;
             case NavPage::Library:         iconPath = NavIcons::makeLibrary();  break;
             case NavPage::Charts:          iconPath = NavIcons::makeCharts();   break;
             case NavPage::Mixer:           iconPath = NavIcons::makeMixer();    break;
@@ -218,7 +214,8 @@ void NavBar::buildMenuItems()
     auto& lm = LocalizationManager::getInstance();
     menuItems = {
         { NavPage::Home,     lm.getText("nav.home"),     {}, AccessRight::Home     },
-        { NavPage::Search,   lm.getText("nav.search"),   {}, AccessRight::Search   },
+        // Search is no longer its own sidebar destination -- see the note on
+        // the NavPage::Search case above.
         { NavPage::Library,  lm.getText("nav.library"),  {}, AccessRight::Library  },
         { NavPage::Charts,   lm.getText("nav.charts"),   {}, AccessRight::Charts   },
         { NavPage::Mixer,    lm.getText("nav.mixer"),    {}, AccessRight::Mixer    },
@@ -367,21 +364,23 @@ void NavBar::setCompanyContext(bool enabled, const juce::String& role)
 //==============================================================================
 void NavBar::updateAllText()
 {
-    auto& lm = LocalizationManager::getInstance();
+    // Rebuild menuItems straight from buildMenuItems() -- the single place
+    // that maps each NavPage to its localization key -- rather than a
+    // hand-maintained parallel array indexed by position, which had already
+    // drifted out of sync with buildMenuItems()'s own keys/order (and would
+    // only have gotten worse once Search stopped being an entry here).
+    // buildMenuItems() is deterministic, so buttons[i] still corresponds to
+    // the rebuilt menuItems[i] for the same i. It resets every item's
+    // `visible` flag to its struct default though, so role-based gating
+    // has to be reapplied from the state NavBar already keeps around for
+    // exactly this purpose.
+    buildMenuItems();
+    setUserRole(currentRole);
+    setGlobalHostRole(globalHostRole_);
+    setCompanyContext(companyModeEnabled, companyRole);
 
-    // Rebuild menu item labels
-    static const juce::String navKeys[] = {
-        "nav.home", "nav.search", "nav.library", "nav.charts",
-        "nav.mixer", "nav.setup", "nav.testing", "nav.ads", "nav.locations",
-        "nav.company_admin"
-    };
-
-    for (size_t i = 0; i < menuItems.size() && i < std::size(navKeys); ++i)
-    {
-        menuItems[i].label = lm.getText(navKeys[i]);
-        if (i < (size_t) buttons.size())
-            buttons[(int) i]->setLabel(menuItems[i].label);
-    }
+    for (size_t i = 0; i < menuItems.size() && i < (size_t) buttons.size(); ++i)
+        buttons[(int) i]->setLabel(menuItems[i].label);
 
     repaint();
 }

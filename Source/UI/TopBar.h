@@ -61,11 +61,15 @@ public:
     
     //==============================================================================
     // Song information updates
-    void setTrackInfo(const juce::String& trackName, 
+    void setTrackInfo(const juce::String& trackName,
                      const juce::String& artistName,
                      const juce::String& version = "");
     void setMusicInfo(const juce::String& key, int bpm);
     void setCoverArt(const juce::Image& coverImage);
+
+    /** Name of the singer currently performing (empty to hide the field).
+        Shown as a small row above the track/artist text. */
+    void setSingerInfo(const juce::String& singerName);
     
     //==============================================================================
     // Audio level updates -- real stereo, replacing the old single-value
@@ -111,6 +115,11 @@ public:
     std::function<void()> onUserButtonClicked;
     std::function<void()> onLogoClicked;
     std::function<void()> onUpdateButtonClicked;
+
+    /** Fired when the cover art is clicked while hovering reveals the play
+        overlay (see paint()/mouseMove()) -- wired by MainComponent to the
+        same playback-start path BottomBar's play button uses. */
+    std::function<void()> onPlayClicked;
     
     //==============================================================================
     // Localization
@@ -140,6 +149,7 @@ private:
     //==============================================================================
     // UI Elements
     std::unique_ptr<juce::Label> versionLabel;
+    std::unique_ptr<juce::Label> singerNameLabel;
     std::unique_ptr<juce::Label> trackNameLabel;
     std::unique_ptr<juce::Label> artistNameLabel;
     std::unique_ptr<juce::Label> keyTitleLabel;
@@ -167,10 +177,14 @@ private:
     juce::String currentTrackName;
     juce::String currentArtistName;
     juce::String currentVersion;
+    juce::String currentSingerName;
     juce::String currentKey;
     int currentBpm = 0;
     bool isOnlineStatus = true;
     juce::String userName;
+
+    // Hover-to-play on the cover art (see paint()/mouseMove()/mouseUp()).
+    bool isOverCoverArt = false;
 
     //==============================================================================
     // Performance stats overlay (see setShowSystemStats()). Sampled/repainted

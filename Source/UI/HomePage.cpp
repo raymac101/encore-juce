@@ -11,14 +11,77 @@
 */
 
 #include "HomePage.h"
+#include "DesignTokens.h"
+
+//==============================================================================
+//  Small stroke-icon button shared by the home icon and the search-submit
+//  icon -- same lightweight pattern NavBar/QueueBar already use for their
+//  own hand-drawn icons, kept file-local since nothing else needs it.
+//==============================================================================
+namespace
+{
+    class IconButton : public juce::Button
+    {
+    public:
+        IconButton(const juce::String& name, juce::Path path)
+            : juce::Button(name), iconPath(std::move(path)) {}
+
+        void paintButton(juce::Graphics& g, bool highlighted, bool down) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+
+            g.setColour(DesignTokens::colour(DesignTokens::kSurface2));
+            g.fillRoundedRectangle(bounds.reduced(0.5f), 8.0f);
+
+            auto iconColour = DesignTokens::colour((highlighted || down) ? DesignTokens::kAccent
+                                                                          : DesignTokens::kText);
+            g.setColour(iconColour.withAlpha(down ? 0.75f : 1.0f));
+
+            auto iconBounds = bounds.reduced(bounds.getWidth() * 0.26f);
+            juce::Path scaled(iconPath);
+            scaled.scaleToFit(iconBounds.getX(), iconBounds.getY(),
+                              iconBounds.getWidth(), iconBounds.getHeight(), true);
+            g.strokePath(scaled, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                                       juce::PathStrokeType::rounded));
+        }
+
+    private:
+        juce::Path iconPath;
+    };
+
+    juce::Path makeHomeIconPath()
+    {
+        juce::Path p;
+        p.startNewSubPath(2.0f, 11.0f);
+        p.lineTo(12.0f, 3.0f);
+        p.lineTo(22.0f, 11.0f);
+        p.lineTo(19.0f, 11.0f);
+        p.lineTo(19.0f, 21.0f);
+        p.lineTo(5.0f, 21.0f);
+        p.lineTo(5.0f, 11.0f);
+        p.closeSubPath();
+        return p;
+    }
+
+    juce::Path makeSearchIconPath()
+    {
+        juce::Path p;
+        p.addEllipse(2.0f, 2.0f, 13.0f, 13.0f);
+        p.startNewSubPath(13.5f, 13.5f);
+        p.lineTo(21.0f, 21.0f);
+        return p;
+    }
+}
 
 //==============================================================================
 //  SongCard
 //==============================================================================
 SongCard::SongCard()
 {
-    // A random-ish placeholder colour will be set when setTrack is called
-    placeholderColour = juce::Colour(0xff6c6c6c);
+    // One neutral placeholder tone for every card -- previously a
+    // per-song hashed HSV hue, which read as muddy/inconsistent saturation
+    // from card to card with no real information encoded in the colour.
+    placeholderColour = DesignTokens::colour(DesignTokens::kSurface2);
 }
 
 void SongCard::setTrack(const juce::String& artist, const juce::String& song,
@@ -28,10 +91,6 @@ void SongCard::setTrack(const juce::String& artist, const juce::String& song,
     songText     = song;
     imageUrlText = imageUrl;
     explicitFlag = isExplicit;
-
-    // Generate a deterministic placeholder colour from the song name
-    auto hash = (uint32_t)song.hashCode();
-    placeholderColour = juce::Colour::fromHSV((float)(hash % 360) / 360.f, 0.35f, 0.45f, 1.f);
 
     repaint();
 }
@@ -91,7 +150,7 @@ void SongCard::paint(juce::Graphics& g)
     // Hover scale effect – subtle highlight border
     if (hovering)
     {
-        g.setColour(juce::Colour(0xff30daff).withAlpha(0.6f));
+        g.setColour(DesignTokens::colour(DesignTokens::kAccent).withAlpha(0.6f));
         g.drawRect(getLocalBounds(), 2);
     }
 
@@ -300,6 +359,48 @@ HomePage::HomePage()
 
     // All four rows are populated by setSongsFromLibrary() once the
     // LibraryPage finishes scanning the venue's songbook.
+
+    // Top search row -- replaces the standalone Search NavBar destination.
+    // Typing a query and hitting Enter (or clicking the magnifying glass)
+    // swaps the rows above for the embedded SearchPage below; the home
+    // icon brings the rows back. See showBrowseView()/showSearchResults().
+    homeIconButton_ = std::make_unique<IconButton>("homeIcon", makeHomeIconPath());
+    homeIconButton_->onClick = [this]() { showBrowseView(); };
+    addAndMakeVisible(*homeIconButton_);
+
+    searchBox_ = std::make_unique<juce::TextEditor>("homeSearchBox");
+    searchBox_->setMultiLine(false);
+    searchBox_->setTextToShowWhenEmpty(lm.getText("search.placeholder"),
+                                       DesignTokens::colour(DesignTokens::kTextDim));
+    searchBox_->setColour(juce::TextEditor::backgroundColourId, DesignTokens::colour(DesignTokens::kSurface2));
+    searchBox_->setColour(juce::TextEditor::textColourId, DesignTokens::colour(DesignTokens::kText));
+    searchBox_->setColour(juce::TextEditor::outlineColourId, DesignTokens::colour(DesignTokens::kBorder));
+    searchBox_->setColour(juce::TextEditor::focusedOutlineColourId, DesignTokens::colour(DesignTokens::kAccent));
+    searchBox_->setBorder(juce::BorderSize<int>(6, 10, 6, 10));
+    // Live filtering: every keystroke swaps to the Search view and forwards
+    // the current text straight into the embedded SearchPage (which runs it
+    // through its own debounced applySearch() -- see setQueryText()), so
+    // results update continuously instead of waiting for Enter. Clearing
+    // the box back to empty falls back to the browse view automatically
+    // (see showSearchResults()'s empty-query check).
+    searchBox_->onTextChange = [this]() { showSearchResults(); };
+    searchBox_->onReturnKey = [this]() { showSearchResults(); };
+    addAndMakeVisible(*searchBox_);
+
+    searchSubmitButton_ = std::make_unique<IconButton>("searchSubmit", makeSearchIconPath());
+    searchSubmitButton_->onClick = [this]() { showSearchResults(); };
+    addAndMakeVisible(*searchSubmitButton_);
+
+    embeddedSearch_ = std::make_unique<SearchPage>();
+    embeddedSearch_->onSongClicked = [this](const CdgSong& song)
+    {
+        if (onSongClicked) onSongClicked(song);
+    };
+    embeddedSearch_->onSongEditClicked = [this](const CdgSong& song)
+    {
+        if (onSongEditClicked) onSongEditClicked(song);
+    };
+    addChildComponent(*embeddedSearch_);   // hidden until showSearchResults()
 }
 
 //==============================================================================
@@ -311,8 +412,44 @@ void HomePage::paint(juce::Graphics& g)
 //==============================================================================
 void HomePage::resized()
 {
-    pageViewport.setBounds(getLocalBounds().reduced(20, 10));
+    auto bounds = getLocalBounds().reduced(20, 10);
+
+    constexpr int kSearchRowHeight = 40;
+    constexpr int kGap = 10;
+    auto searchRow = bounds.removeFromTop(kSearchRowHeight);
+    homeIconButton_->setBounds(searchRow.removeFromLeft(kSearchRowHeight));
+    searchRow.removeFromLeft(kGap);
+    searchSubmitButton_->setBounds(searchRow.removeFromLeft(kSearchRowHeight));
+    searchRow.removeFromLeft(kGap);
+    searchBox_->setBounds(searchRow);
+
+    bounds.removeFromTop(kGap);
+
+    pageViewport.setBounds(bounds);
+    embeddedSearch_->setBounds(bounds);
+
     layoutRows();
+}
+
+void HomePage::showBrowseView()
+{
+    showingSearch_ = false;
+    searchBox_->clear();
+    pageViewport.setVisible(true);
+    embeddedSearch_->setVisible(false);
+}
+
+void HomePage::showSearchResults()
+{
+    // Always switches to the Search view, even with an empty box -- clicking
+    // the magnifying glass (or just starting to type) should take you there
+    // regardless; an empty query is SearchPage's own concern (it shows
+    // everything, same as clearing its own search box always did). The
+    // home icon (showBrowseView()) is the only way back to the browse rows.
+    embeddedSearch_->setQueryText(searchBox_->getText().trim());
+    showingSearch_ = true;
+    pageViewport.setVisible(false);
+    embeddedSearch_->setVisible(true);
 }
 
 void HomePage::layoutRows()
@@ -412,6 +549,7 @@ void HomePage::updateAllText()
     newSongsRow->setTitle(lm.getText("home.new_songs"));
     popularRow->setTitle(lm.getText("home.popular_songs"));
     recommendedRow->setTitle(lm.getText("home.recommended_songs"));
+    embeddedSearch_->updateAllText();
 }
 
 //==============================================================================
@@ -425,4 +563,5 @@ void HomePage::setSongsFromLibrary(const std::vector<CdgSong>& songs)
     // are derived from the local library directly, so a fresh/first scan
     // never shows up as "new" on its own.
     libraryRef_ = songs;
+    embeddedSearch_->setSongs(songs);
 }

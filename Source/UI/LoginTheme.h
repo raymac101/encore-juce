@@ -14,11 +14,15 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "DesignTokens.h"
 
 namespace LoginTheme
 {
-    static constexpr uint32_t kAccentBlue       = 0xff4272b8;
-    static constexpr uint32_t kAccentBlueLight  = 0xff5a8fd8;
+    // Was its own independent blue-gradient palette -- repointed onto
+    // DesignTokens so the first screen a user sees matches the chrome
+    // they land on next instead of reading as a different app.
+    static constexpr uint32_t kAccentBlue       = DesignTokens::kAccent;
+    static constexpr uint32_t kAccentBlueLight  = 0xff6fe3ff; // lighter tint of kAccent, for gradient highlights
     static constexpr uint32_t kInputFill        = 0x1affffff; // rgba(255,255,255,0.10)
     static constexpr uint32_t kInputFillFocus   = 0x26ffffff; // rgba(255,255,255,0.15)
     static constexpr uint32_t kInputBorder      = 0x33ffffff; // rgba(255,255,255,0.20)
@@ -29,8 +33,8 @@ namespace LoginTheme
     static constexpr uint32_t kBodyText         = 0xffffffff;
     static constexpr uint32_t kSubtleText       = 0xe6ffffff; // rgba(255,255,255,0.90)
     static constexpr uint32_t kDividerText      = 0x80ffffff;
-    static constexpr uint32_t kErrorText        = 0xfff87171; // readable red on a dark bg
-    static constexpr uint32_t kSuccessText      = 0xff34d399; // readable green on a dark bg
+    static constexpr uint32_t kErrorText        = DesignTokens::kDanger;
+    static constexpr uint32_t kSuccessText      = DesignTokens::kSuccess;
 
     // Paints the standard top-to-bottom blue -> black gradient used behind
     // both the login screen and the onboarding wizard.
@@ -123,7 +127,7 @@ public:
         if (greenSelect)
         {
             // Solid green pill (matches the SELECT button in the mock-up).
-            const auto base = juce::Colour (0xff10b981);
+            const auto base = DesignTokens::colour (DesignTokens::kSuccess);
             g.setColour (shouldDrawButtonAsHighlighted ? base.brighter (0.10f) : base);
             g.fillRoundedRectangle (bounds, r);
             if (shouldDrawButtonAsDown)

@@ -992,6 +992,13 @@ void MainComponent::setupUI()
         }
     };
 
+    // Hovering the cover art in the top bar reveals a play overlay (see
+    // TopBar::paint()) -- clicking it starts/resumes playback via the same
+    // path BottomBar's play button uses.
+    topBar->onPlayClicked = [this, startTransportPlayback]() {
+        startTransportPlayback(true);
+    };
+
     bottomBar->onJumpToEnd = [this]() {
         if (lyricWindow_ != nullptr && lyricWindow_->isVideoActive() && lyricWindow_->getVideoDuration() > 0.25)
             lyricWindow_->seekVideo(lyricWindow_->getVideoDuration() - 0.25);
@@ -2499,6 +2506,14 @@ void MainComponent::setupUI()
         resized();
     };
 
+    // Keep the top bar's singer field in sync with the Now Playing card --
+    // fires from QueueBar::setNowPlaying()/clearNowPlaying(), the single
+    // choke point every "who's performing now" call site goes through.
+    queueBar->onNowPlayingChanged = [this](const Singers& singer, bool hasSinger)
+    {
+        topBar->setSingerInfo(hasSinger ? juce::String(singer.name) : juce::String());
+    };
+
     // Persist queue ordering whenever the UI reorders singers locally.
     queueBar->onReorder = [this](int /*from*/, int /*to*/)
     {
@@ -3298,6 +3313,11 @@ void MainComponent::resized()
             : bounds.removeFromRight(queueBar->getBarWidth());
         queueBar->setBounds(queueBounds);
     }
+
+    // Keep the bottom bar's transport/waveform/sliders columns aligned with
+    // the nav bar / main area / queue bar columns above them.
+    if (bottomBar && navBar && queueBar)
+        bottomBar->setSideRailWidths(navBar->getBarWidth(), queueExpanded_ ? 0 : queueBar->getBarWidth());
 
     // Ribbon + MainArea fill the remaining centre space.
     if (mainArea)

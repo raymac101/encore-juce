@@ -13,6 +13,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "DesignTokens.h"
 #include "../Localization/LocalizationManager.h"
 #include "../Services/GlobalProgressService.h"
 
@@ -72,6 +73,14 @@ public:
         an external source (e.g. the audio engine) drives it via setProgress(). */
     void setExternalProgressControl(bool externalControl) { externalProgressControl_ = externalControl; }
 
+    /** Mirrors the nav bar / queue bar's current widths so the transport
+        controls sit under the nav rail, the sliders sit under the queue
+        rail, and the waveform in between lines up with the main content
+        area above -- call whenever either bar's width changes (see
+        MainComponent::resized()). 0 falls back to the old fixed-percentage
+        sizing (used before the first real widths are known). */
+    void setSideRailWidths(int leftWidth, int rightWidth);
+
     std::function<void()> onReturnToZero;
     std::function<void()> onStopAndReturnToZero;
     std::function<void(bool isNowPlaying)> onPlayPause;
@@ -111,6 +120,31 @@ public:
     void updateAllText();
 
 private:
+    // Forwards hover state and "clicked without dragging" from volumeSlider.
+    // A plain juce::MouseListener (not a Component override) so it can't
+    // collide with BottomBar's own mouseEnter/mouseExit, which handle the
+    // resize handle for the bar itself.
+    class VolumeHoverListener : public juce::MouseListener
+    {
+    public:
+        std::function<void(bool)> onHoverChanged;
+        std::function<void()> onPlainClick;
+
+        void mouseEnter(const juce::MouseEvent&) override { if (onHoverChanged) onHoverChanged(true); }
+        void mouseExit(const juce::MouseEvent&) override  { if (onHoverChanged) onHoverChanged(false); }
+        void mouseDown(const juce::MouseEvent& e) override { downPos = e.getPosition(); moved = false; }
+        void mouseDrag(const juce::MouseEvent& e) override { if (e.getPosition().getDistanceFrom(downPos) > 3) moved = true; }
+        void mouseUp(const juce::MouseEvent&) override    { if (! moved && onPlainClick) onPlainClick(); }
+
+    private:
+        juce::Point<int> downPos;
+        bool moved = false;
+    };
+    VolumeHoverListener volumeHoverListener_;
+    void toggleVolumeMute();
+    bool volumeMuted_ = false;
+    int  volumeBeforeMute_ = 5;
+
     void timerCallback() override;
   void globalProgressChanged(bool isBusy, const juce::String& message) override;
     void setupUI();
@@ -128,7 +162,7 @@ private:
     juce::Rectangle<int> getSlidersArea() const;
 
   juce::ShapeButton returnToZeroButton { "toStart", juce::Colours::white, juce::Colours::white, juce::Colours::white };
-  juce::ShapeButton stopButton { "stop", juce::Colours::red, juce::Colours::red, juce::Colours::red };
+  juce::ShapeButton stopButton { "stop", DesignTokens::colour(DesignTokens::kDanger), DesignTokens::colour(DesignTokens::kDanger), DesignTokens::colour(DesignTokens::kDanger) };
   juce::ShapeButton playPauseButton { "playPause", juce::Colours::white, juce::Colours::white, juce::Colours::white };
   juce::ShapeButton jumpToEndButton { "toEnd", juce::Colours::white, juce::Colours::white, juce::Colours::white };
 
@@ -156,6 +190,8 @@ private:
     std::vector<float> waveform;
     juce::String waveformStatusMessage_;
     bool externalProgressControl_ = false;
+    int  leftRailWidth_ = 0;
+    int  rightRailWidth_ = 0;
     bool globalBusy_ = false;
     juce::String globalBusyMessage_;
     float spinnerPhase_ = 0.0f;

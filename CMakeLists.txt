@@ -91,6 +91,7 @@ target_sources(EncoreJUCE
         Source/Audio/SpectrumAnalyzer.cpp
         Source/UI/MainComponent.cpp
         Source/UI/ResponsiveLayout.cpp
+        Source/UI/AppLookAndFeel.cpp
         Source/UI/TopBar.cpp
         Source/UI/BottomBar.cpp
         Source/UI/NavBar.cpp

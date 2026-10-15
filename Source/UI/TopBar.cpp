@@ -11,21 +11,23 @@
 */
 
 #include "TopBar.h"
+#include "DesignTokens.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/SystemMonitor.h"
 #include "../Services/FirestoreClient.h"
 #include <cmath>
 
 //==============================================================================
-// Color constants from original app
-const juce::Colour TopBar::BACKGROUND_COLOR = juce::Colour(0x26, 0x26, 0x26);  // #262626
-const juce::Colour TopBar::OFFLINE_COLOR = juce::Colour(0x8b, 0x00, 0x00);     // darkred
+// Colour constants -- centralised in DesignTokens.h; kept as TopBar statics
+// so existing call sites throughout this file don't need to change.
+const juce::Colour TopBar::BACKGROUND_COLOR = DesignTokens::colour(DesignTokens::kSurface);
+const juce::Colour TopBar::OFFLINE_COLOR = DesignTokens::colour(DesignTokens::kDanger);
 const juce::Colour TopBar::TEXT_COLOR = juce::Colours::white;
-const juce::Colour TopBar::ACCENT_COLOR = juce::Colour(0x30, 0xda, 0xff);      // #30DAFF
+const juce::Colour TopBar::ACCENT_COLOR = DesignTokens::colour(DesignTokens::kAccent);
 
 // Resize handle colors - Visual Studio style
-static const juce::Colour RESIZE_HANDLE_INACTIVE_COLOR = juce::Colour(0x3c, 0x3c, 0x3c); // Dark grey
-static const juce::Colour RESIZE_HANDLE_ACTIVE_COLOR = juce::Colour(0x30, 0xda, 0xff);   // #30DAFF
+static const juce::Colour RESIZE_HANDLE_INACTIVE_COLOR = DesignTokens::colour(DesignTokens::kBorder);
+static const juce::Colour RESIZE_HANDLE_ACTIVE_COLOR = DesignTokens::colour(DesignTokens::kAccent);
 
 //==============================================================================
 TopBar::TopBar()
@@ -62,6 +64,16 @@ void TopBar::setupUI()
     versionLabel->setJustificationType(juce::Justification::centred);
     addAndMakeVisible(versionLabel.get());
     
+    // Singer name label -- small row above track/artist, hidden until
+    // setSingerInfo() is given a name (see resized()).
+    singerNameLabel = std::make_unique<juce::Label>("singerName", "");
+    singerNameLabel->setFont(juce::Font(11.0f, juce::Font::bold));
+    singerNameLabel->setColour(juce::Label::textColourId, DesignTokens::colour(DesignTokens::kAccent));
+    singerNameLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+    singerNameLabel->setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(singerNameLabel.get());
+    singerNameLabel->setVisible(false);
+
     // Track name label
     trackNameLabel = std::make_unique<juce::Label>("trackName", "Test Song - Test Artist");
     trackNameLabel->setFont(juce::Font(16.0f, juce::Font::bold));
@@ -89,7 +101,7 @@ void TopBar::setupUI()
     // Key value label (normal)
     keyValueLabel = std::make_unique<juce::Label>("keyValue", "");
     keyValueLabel->setFont(juce::Font(14.0f));
-    keyValueLabel->setColour(juce::Label::textColourId, juce::Colour(0xffb8c1cf));
+    keyValueLabel->setColour(juce::Label::textColourId, DesignTokens::colour(DesignTokens::kTextMuted));
     keyValueLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     keyValueLabel->setJustificationType(juce::Justification::centred);
     addAndMakeVisible(keyValueLabel.get());
@@ -105,7 +117,7 @@ void TopBar::setupUI()
     // BPM value label (normal)  
     bpmValueLabel = std::make_unique<juce::Label>("bpmValue", "");
     bpmValueLabel->setFont(juce::Font(14.0f));
-    bpmValueLabel->setColour(juce::Label::textColourId, juce::Colour(0xffb8c1cf));
+    bpmValueLabel->setColour(juce::Label::textColourId, DesignTokens::colour(DesignTokens::kTextMuted));
     bpmValueLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     bpmValueLabel->setJustificationType(juce::Justification::centred);
     addAndMakeVisible(bpmValueLabel.get());
@@ -312,7 +324,25 @@ void TopBar::paint(juce::Graphics& g)
         g.setFont(juce::Font(12.0f));
         g.drawText("No\\nCover", coverArea, juce::Justification::centred);
     }
-    
+
+    // Hover-to-play overlay -- a dark scrim + play triangle over the cover
+    // art, clicked via onPlayClicked (see mouseMove()/mouseUp()).
+    if (isOverCoverArt)
+    {
+        g.setColour(juce::Colours::black.withAlpha(0.55f));
+        g.fillRect(coverArea);
+
+        auto playSize = (float) juce::jmin(coverArea.getWidth(), coverArea.getHeight()) * 0.4f;
+        auto playBounds = juce::Rectangle<float>(playSize, playSize).withCentre(coverArea.getCentre().toFloat());
+
+        juce::Path triangle;
+        triangle.addTriangle(playBounds.getX(), playBounds.getY(),
+                              playBounds.getX(), playBounds.getBottom(),
+                              playBounds.getRight(), playBounds.getCentreY());
+        g.setColour(DesignTokens::colour(DesignTokens::kAccent));
+        g.fillPath(triangle);
+    }
+
     // Draw VU meter
     drawVUMeter(g, getVUMeterArea());
 
@@ -436,15 +466,25 @@ void TopBar::resized()
     if (!isOnlineStatus)
     {
         offlineWarningLabel->setBounds(trackArea);
+        singerNameLabel->setBounds(juce::Rectangle<int>());
     }
     else
     {
         // Layout track info and KEY/BPM side by side
         auto songInfoWidth = trackArea.getWidth() * 0.65f; // Reserve 65% for song info
         auto keyBpmWidth = trackArea.getWidth() * 0.35f; // Reserve 35% for KEY/BPM
-        
+
         // Song info area (left side)
         auto songInfoArea = trackArea.removeFromLeft(songInfoWidth);
+
+        // Singer name -- small row above track/artist, only reserved when
+        // someone is actually performing (see setSingerInfo()).
+        if (singerNameLabel->isVisible())
+        {
+            auto singerHeight = juce::jmin(18, songInfoArea.getHeight() / 4);
+            singerNameLabel->setBounds(songInfoArea.removeFromTop(singerHeight));
+        }
+
         auto infoHeight = songInfoArea.getHeight() / 2;
         trackNameLabel->setBounds(songInfoArea.removeFromTop(infoHeight));
         artistNameLabel->setBounds(songInfoArea);
@@ -596,6 +636,20 @@ void TopBar::setTrackInfo(const juce::String& trackName,
 }
 
 //==============================================================================
+void TopBar::setSingerInfo(const juce::String& singerName)
+{
+    currentSingerName = singerName;
+
+    if (singerNameLabel)
+    {
+        singerNameLabel->setText(singerName, juce::dontSendNotification);
+        singerNameLabel->setVisible(singerName.isNotEmpty());
+    }
+
+    resized(); // Row above track/artist appears/disappears -- re-layout
+}
+
+//==============================================================================
 void TopBar::setMusicInfo(const juce::String& key, int bpm)
 {
     currentKey = key;
@@ -736,9 +790,9 @@ void TopBar::drawSystemStats(juce::Graphics& g, juce::Rectangle<int> area) const
     auto colourFor = [] (float value, float yellowAt, float redAt) -> juce::Colour
     {
         if (value < 0.0f) return juce::Colours::white.withAlpha(0.4f); // unknown
-        if (value >= redAt)    return juce::Colour(0xffe0483f); // red
-        if (value >= yellowAt) return juce::Colour(0xffe8d24a); // yellow
-        return juce::Colour(0xff3ddc72);                        // green
+        if (value >= redAt)    return DesignTokens::colour(DesignTokens::kDanger); // red
+        if (value >= yellowAt) return DesignTokens::colour(DesignTokens::kWarning); // yellow
+        return DesignTokens::colour(DesignTokens::kSuccess);                        // green
     };
 
     struct Row { juce::String label, value; juce::Colour colour; };
@@ -768,7 +822,7 @@ void TopBar::drawSystemStats(juce::Graphics& g, juce::Rectangle<int> area) const
     {
         rows[2].label = "NET";
         rows[2].value = LocalizationManager::getInstance().getText("topbar.stats.network_down");
-        rows[2].colour = juce::Colour(0xffe0483f);
+        rows[2].colour = DesignTokens::colour(DesignTokens::kDanger);
     }
     else
     {
@@ -796,9 +850,9 @@ void TopBar::drawSystemStats(juce::Graphics& g, juce::Rectangle<int> area) const
 
 juce::Colour TopBar::vuLevelColour(float level01)
 {
-    if (level01 < 0.7f)  return juce::Colour(0xff3ddc72);  // green
-    if (level01 < 0.9f)  return juce::Colour(0xffe8d24a);  // yellow
-    return juce::Colour(0xffe0483f);                        // red
+    if (level01 < 0.7f)  return DesignTokens::colour(DesignTokens::kSuccess);  // green
+    if (level01 < 0.9f)  return DesignTokens::colour(DesignTokens::kWarning);  // yellow
+    return DesignTokens::colour(DesignTokens::kDanger);                        // red
 }
 
 //==============================================================================
@@ -870,9 +924,9 @@ void TopBar::drawGradientBarMeter(juce::Graphics& g, juce::Rectangle<int> bounds
         const int fillWidth = (int) std::round (row.getWidth() * level);
         if (fillWidth > 0)
         {
-            juce::ColourGradient grad (juce::Colour(0xff3ddc72), (float) row.getX(), 0.0f,
-                                        juce::Colour(0xffe0483f), (float) row.getRight(), 0.0f, false);
-            grad.addColour (0.75, juce::Colour(0xffe8d24a));
+            juce::ColourGradient grad (DesignTokens::colour(DesignTokens::kSuccess), (float) row.getX(), 0.0f,
+                                        DesignTokens::colour(DesignTokens::kDanger), (float) row.getRight(), 0.0f, false);
+            grad.addColour (0.75, DesignTokens::colour(DesignTokens::kWarning));
             g.setGradientFill (grad);
             g.fillRoundedRectangle (row.withWidth(fillWidth).toFloat(), 3.0f);
         }
@@ -918,9 +972,9 @@ void TopBar::drawSegmentedLedMeter(juce::Graphics& g, juce::Rectangle<int> bound
         for (int i = 0; i < kNumSegments; ++i)
         {
             const float frac = (float) i / (float) kNumSegments;
-            juce::Colour onColour = frac < 0.7f ? juce::Colour(0xff3ddc72)
-                                   : frac < 0.9f ? juce::Colour(0xffe8d24a)
-                                                  : juce::Colour(0xffe0483f);
+            juce::Colour onColour = frac < 0.7f ? DesignTokens::colour(DesignTokens::kSuccess)
+                                   : frac < 0.9f ? DesignTokens::colour(DesignTokens::kWarning)
+                                                  : DesignTokens::colour(DesignTokens::kDanger);
             const bool lit = i < litCount;
             g2.setColour (lit ? onColour : onColour.withAlpha(0.14f));
 
@@ -1047,9 +1101,9 @@ void TopBar::drawSpectrumBandMeter(juce::Graphics& g, juce::Rectangle<int> bound
         if (litHeight > 1.0f)
         {
             juce::Rectangle<float> lit (x, (float) area.getBottom() - litHeight, w, litHeight);
-            juce::ColourGradient grad (juce::Colour(0xff3ddc72), 0.0f, (float) area.getBottom(),
-                                        juce::Colour(0xffe0483f), 0.0f, (float) area.getY(), false);
-            grad.addColour (0.75, juce::Colour(0xffe8d24a));
+            juce::ColourGradient grad (DesignTokens::colour(DesignTokens::kSuccess), 0.0f, (float) area.getBottom(),
+                                        DesignTokens::colour(DesignTokens::kDanger), 0.0f, (float) area.getY(), false);
+            grad.addColour (0.75, DesignTokens::colour(DesignTokens::kWarning));
             g.setGradientFill (grad);
             g.fillRoundedRectangle (lit, 1.5f);
         }
@@ -1206,12 +1260,18 @@ void TopBar::mouseMove(const juce::MouseEvent& event)
     {
         repaint(); // Repaint entire component to update handle size and color
     }
-    
-    // Change cursor when over resize handle, or a pointing hand over the
-    // VU meter as a hint that clicking it does something (cycles style).
+
+    const bool wasOverCoverArt = isOverCoverArt;
+    isOverCoverArt = getCoverArtArea().contains(event.getPosition());
+    if (wasOverCoverArt != isOverCoverArt)
+        repaint(getCoverArtArea());
+
+    // Change cursor when over resize handle, a pointing hand over the VU
+    // meter as a hint that clicking it does something (cycles style), or
+    // over the cover art (reveals the play overlay -- see paint()).
     if (isOverResizeHandle)
         setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
-    else if (getVUMeterArea().contains(event.getPosition()))
+    else if (getVUMeterArea().contains(event.getPosition()) || isOverCoverArt)
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
     else
         setMouseCursor(juce::MouseCursor::NormalCursor);
@@ -1230,6 +1290,10 @@ void TopBar::mouseUp(const juce::MouseEvent& event)
     // style -- no separate Settings entry, per how you wanted this reached.
     if (! wasResizing && getVUMeterArea().contains(event.getPosition()))
         cycleVuMeterStyle();
+
+    if (! wasResizing && getCoverArtArea().contains(event.getPosition()))
+        if (onPlayClicked)
+            onPlayClicked();
 }
 
 void TopBar::cycleVuMeterStyle()
@@ -1248,6 +1312,12 @@ void TopBar::mouseExit(const juce::MouseEvent& event)
         isOverResizeHandle = false;
         repaint();
         setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+
+    if (isOverCoverArt)
+    {
+        isOverCoverArt = false;
+        repaint(getCoverArtArea());
     }
 }
 

@@ -16,6 +16,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "SearchPage.h"
 #include "../Models/Track.h"
 #include "../Models/Playlist.h"
 #include "../Models/CdgSong.h"
@@ -107,7 +108,11 @@ private:
 
 //==============================================================================
 /**
-    Home page component containing multiple SongRow sections.
+    Home page component containing multiple SongRow sections, plus an
+    embedded SearchPage. The two used to be separate NavBar destinations;
+    now Home owns the one visible search bar, and typing a query swaps the
+    Popular/New rows for the (otherwise unmodified) Search results -- see
+    showBrowseView()/showSearchResults().
 */
 class HomePage : public juce::Component
 {
@@ -146,11 +151,26 @@ public:
         have a matching library entry. */
     std::function<void(const CdgSong& song)> onSongClicked;
 
+    /** Fired by the embedded Search view's Edit column -- forwarded
+        verbatim from SearchPage::onSongEditClicked. */
+    std::function<void(const CdgSong& song)> onSongEditClicked;
+
 private:
     std::unique_ptr<SongRow> recentRow;
     std::unique_ptr<SongRow> newSongsRow;
     std::unique_ptr<SongRow> popularRow;
     std::unique_ptr<SongRow> recommendedRow;
+
+    // Top search row -- home icon + search box + submit icon -- and the
+    // two mutually-exclusive views it switches between.
+    std::unique_ptr<juce::Button>     homeIconButton_;
+    std::unique_ptr<juce::TextEditor> searchBox_;
+    std::unique_ptr<juce::Button>     searchSubmitButton_;
+    std::unique_ptr<SearchPage>       embeddedSearch_;
+    bool                              showingSearch_ = false;
+
+    void showBrowseView();
+    void showSearchResults();
 
     // Per-section CdgSong backing lists.  setSongsFromLibrary populates the
     // Recently Played + New rows; the Popular and Recommended rows are
