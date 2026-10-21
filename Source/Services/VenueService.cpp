@@ -137,14 +137,21 @@ namespace
 
     // ── Bulk-delete helper: synchronously DELETE every doc in a collection.
     //   Runs in one thread; not transactional but safe for housekeeping.
-    int deleteCollectionContents(const juce::String& collectionPath)
+    // excludeRelPath, if non-empty, is a full relative doc path (e.g.
+    // "venues/<id>/queue/<hostUid>") that's skipped even though it's inside
+    // collectionPath -- used to keep the host's own doc alive through
+    // "Clear Queue" (see deleteAllSingersFromQueue).
+    int deleteCollectionContents(const juce::String& collectionPath,
+                                 const juce::String& excludeRelPath = {})
     {
         auto docs = FC::getInstance().listCollection(collectionPath, 500);
         int n = 0;
         for (auto& d : docs)
         {
             auto rel = relPathFromDocName(d.getProperty("name", "").toString());
-            if (rel.isNotEmpty() && FC::getInstance().deleteDocument(rel))
+            if (rel.isEmpty() || rel == excludeRelPath)
+                continue;
+            if (FC::getInstance().deleteDocument(rel))
                 ++n;
         }
         return n;
@@ -1399,16 +1406,21 @@ void VenueService::cleanupAllPlaylists(IntCallback onDone)
 
 //==============================================================================
 // Queue / requested cleanup
-void VenueService::deleteAllSingersFromQueue(const juce::String& venueId, WriteCallback onDone)
+void VenueService::deleteAllSingersFromQueue(const juce::String& venueId,
+                                             const juce::String& hostUid,
+                                             WriteCallback onDone)
 {
     if (venueId.isEmpty())
     {
         if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
         return;
     }
-    juce::Thread::launch([venueId, onDone = std::move(onDone)]()
+    juce::Thread::launch([venueId, hostUid, onDone = std::move(onDone)]()
     {
-        deleteCollectionContents("venues/" + venueId + "/queue");
+        const auto excludePath = hostUid.isNotEmpty()
+            ? "venues/" + venueId + "/queue/" + hostUid
+            : juce::String();
+        deleteCollectionContents("venues/" + venueId + "/queue", excludePath);
         if (onDone)
             juce::MessageManager::callAsync([onDone]() { onDone(true, {}); });
     });

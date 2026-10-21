@@ -260,13 +260,6 @@ juce::File resolveAssetFile(const juce::String& relativePath)
     return {};
 }
 
-int findHostIndexInQueue(const std::vector<Singers>& singers)
-{
-    for (int i = 0; i < (int) singers.size(); ++i)
-        if (singers[(size_t) i].isHost)
-            return i;
-    return -1;
-}
 }
 
 //==============================================================================
@@ -2588,6 +2581,7 @@ void MainComponent::setupUI()
 
                     VenueService::getInstance().deleteAllSingersFromQueue(
                         venueId,
+                        FirestoreClient::getInstance().getUserId(),
                         [safe, venueId, failedTitle, failedSingersBody, partialTitle, partialBody, clearedText](bool queueOk, juce::String queueErr)
                         {
                             if (safe == nullptr)
@@ -2828,32 +2822,44 @@ void MainComponent::setupUI()
         });
     };
 
+    // "Move to Next" (3-dot menu) -- pure reorder to the front of the
+    // upcoming queue, right after whoever's currently performing. Must NOT
+    // touch localNowPlaying_/transport playback at all -- that's the
+    // avatar-click "Play Now" path (onPlaySinger below), a deliberately
+    // different action. The host is just another row here -- no special
+    // casing, so they can be moved like anyone else (they still can never
+    // be deleted -- see onRemoveSinger).
+    queueBar->onMoveSingerToNext = [this](int singerIndex)
+    {
+        if (queueBar == nullptr) return;
+        if (singerIndex <= 0) return; // already up next
+
+        queueBar->moveSingerToNext(singerIndex);
+        if (queueBar->onReorder) queueBar->onReorder(singerIndex, 0);
+    };
+
     // ── Move up / down (persist via existing onReorder logic) ─────────────────
     queueBar->onMoveSingerUp = [this](int singerIndex)
     {
         if (queueBar == nullptr) return;
-        const auto& singers = queueBar->getSingers();
-        const int hostIndex = findHostIndexInQueue(singers);
-        if (hostIndex >= 0 && singerIndex == hostIndex)
-            return;
         int targetIndex = singerIndex - 1;
-        if (hostIndex >= 0 && singerIndex > hostIndex)
-            targetIndex = juce::jmax(targetIndex, hostIndex + 1);
         if (targetIndex < 0 || targetIndex >= singerIndex) return;
-        queueBar->moveSinger(singerIndex, targetIndex);
+
+        // moveSinger() refuses index 0 on purpose (an accidental drag
+        // shouldn't bump who's up next) -- Move Up is an explicit click,
+        // so when it lands on index 0 use moveSingerToNext() instead,
+        // the same way the "Move to Next" menu item does.
+        if (targetIndex == 0)
+            queueBar->moveSingerToNext(singerIndex);
+        else
+            queueBar->moveSinger(singerIndex, targetIndex);
         if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
     };
 
     queueBar->onMoveSingerDown = [this](int singerIndex)
     {
         if (queueBar == nullptr) return;
-        const auto& singers = queueBar->getSingers();
-        const int hostIndex = findHostIndexInQueue(singers);
-        if (hostIndex >= 0 && singerIndex == hostIndex)
-            return;
         int targetIndex = singerIndex + 1;
-        if (hostIndex >= 0 && singerIndex < hostIndex)
-            targetIndex = juce::jmin(targetIndex, hostIndex - 1);
         if (targetIndex >= (int) queueBar->getSingers().size()) return;
         queueBar->moveSinger(singerIndex, targetIndex);
         if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);

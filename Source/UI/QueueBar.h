@@ -67,6 +67,13 @@ public:
     void removeSinger(int index);
     void moveSinger(int fromIndex, int toIndex);
 
+    /** Pure reorder -- moves the singer at fromIndex to the front of the
+        upcoming queue (display index 0, "up next"), without touching
+        localNowPlaying_ or playback. Unlike moveSinger(), this is allowed
+        to target index 0 deliberately (see the "Move to Next" 3-dot menu
+        item). No-op for the host or a singer already at index 0. */
+    void moveSingerToNext(int fromIndex);
+
     // State
     void setPlaying(bool playing);
 
@@ -120,6 +127,7 @@ public:
 
     // Context-menu actions — wired by MainComponent
     std::function<void(int singerIndex)>  onRemoveSinger;     // remove singer from queue
+    std::function<void(int singerIndex)>  onMoveSingerToNext; // move to front of upcoming queue (pure reorder, no playback)
     std::function<void(int singerIndex)>  onMoveSingerUp;     // move up in order
     std::function<void(int singerIndex)>  onMoveSingerDown;   // move down in order
     std::function<void()>                 onReturnCurrentToQueueNext; // now-playing → front
@@ -189,9 +197,9 @@ private:
 
         Singers singer;
         int     index = 0;
-        bool    isFirst      = false;  // blue border (round leader)
-        bool    isLast       = false;  // red border (round tail)
-        bool    isHost       = false;  // green border (host pin)
+        bool    isFirst      = false;  // green border -- start of the round (display index 0)
+        bool    isHost       = false;  // today's signed-in host for this venue -- "— HOST" text
+        bool    isHostAccount = false; // this identity has a hosts/{uid} doc anywhere -- purple avatar glow
         bool    isNewlyAdded = false;  // yellow-green glow on first appearance
         bool    hovering    = false;
         bool    hoverAvatar = false;
@@ -201,6 +209,7 @@ private:
 
         std::function<void(int)>      onPlayClicked;
         std::function<void(int, int)> onSongChipClicked;
+        std::function<void(int)>      onMoveToNextClicked;
         std::function<void(int)>      onMoveUpClicked;
         std::function<void(int)>      onMoveDownClicked;
         std::function<void(int)>      onRemoveClicked;

@@ -13,18 +13,8 @@
 #include "QueueBar.h"
 #include "../Services/ImageCache.h"
 #include "../Services/QueueRotation.h"
+#include "../Services/HostIdentityCache.h"
 #include <cmath>
-
-//==============================================================================
-// Helper – microphone emoji repeat
-static juce::String getMicIcons(int count)
-{
-    juce::String s;
-    // Use a simple Unicode music note since emoji rendering is font-dependent
-    for (int i = 0; i < count; ++i)
-        s += juce::String::fromUTF8("\xF0\x9F\x8E\xA4");  // 🎤
-    return s;
-}
 
 //==============================================================================
 // Avatar string -> image resolution (preset:<id>, legacy relative path, or
@@ -270,6 +260,16 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
     // a translucent circle with the singer's first initial.
     juce::Path circle;
     circle.addEllipse(avatarRect.toFloat());
+
+    // Same host-account glow as SingerRow -- scoped to the simple per-venue
+    // isHost flag here rather than the full cross-venue lookup, since this
+    // card only ever shows one person at a time.
+    if (singer.isHost)
+    {
+        juce::DropShadow glow(juce::Colour(0xffa855f7).withAlpha(0.85f), 10, {});
+        glow.drawForPath(g, circle);
+    }
+
     g.saveState();
     g.reduceClipRegion(circle);
     if (avatarImage.isValid())
@@ -349,8 +349,10 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
     g.setColour(juce::Colours::black);
     g.setFont(juce::Font(14.f).boldened());
     juce::String displayName = juce::String(singer.name);
+    if (singer.isHost)
+        displayName += " - HOST";
     if (singer.songsPerformed > 0)
-        displayName += " " + getMicIcons(singer.songsPerformed);
+        displayName += " - Has sang " + juce::String(singer.songsPerformed) + " times";
     g.drawText(displayName, nameArea, juce::Justification::centredLeft, true);
 
     // Song info (bottom half)
@@ -518,9 +520,10 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         g.fillRoundedRectangle(bounds.toFloat(), 8.f);
     }
 
-    // Round border: green for host, primary colour for newly added,
-    // red for the singer at the tail of the current round.
-    if (isHost)
+    // Round border: green for the start of the round (display index 0,
+    // whoever that is), primary colour for newly added. No red/"end of
+    // round" indicator any more -- not needed.
+    if (isFirst)
     {
         g.setColour(juce::Colour(0xff10b981));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
@@ -529,11 +532,6 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     {
         g.setColour(juce::Colour(0xff30daff));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 2.f);
-    }
-    else if (isLast)
-    {
-        g.setColour(DesignTokens::colour(DesignTokens::kDanger));
-        g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
     }
 
     // Bottom separator
@@ -546,6 +544,17 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     // Avatar — circle clip, real image if we loaded one, else first-initial.
     juce::Path circle;
     circle.addEllipse(avatarRect.toFloat());
+
+    // Host-account glow -- soft purple halo behind the avatar for anyone
+    // with a hosts/{uid} doc anywhere (today's host, trivially, or a
+    // KJ/host from a different venue just singing here tonight -- see
+    // isHostAccount in rebuildSingerRows()).
+    if (isHostAccount)
+    {
+        juce::DropShadow glow(juce::Colour(0xffa855f7).withAlpha(0.85f), 10, {});
+        glow.drawForPath(g, circle);
+    }
+
     g.saveState();
     g.reduceClipRegion(circle);
     if (avatarImage.isValid())
@@ -610,8 +619,10 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xffe4e4e4));
     g.setFont(juce::Font(13.f).boldened());
     juce::String displayName = juce::String(singer.name);
+    if (isHost)
+        displayName += " - HOST";
     if (singer.songsPerformed > 0)
-        displayName += " " + getMicIcons(singer.songsPerformed);
+        displayName += " - Has sang " + juce::String(singer.songsPerformed) + " times";
     g.drawText(displayName, nameArea, juce::Justification::centredLeft, true);
 
     // Song chips / strikes area (bottom half)
@@ -731,7 +742,7 @@ void QueueBar::SingerRow::mouseMove(const juce::MouseEvent& e)
     juce::MouseCursor cursor (juce::MouseCursor::NormalCursor);
     if (overMenu || overAvatar || songIdx >= 0)
         cursor = juce::MouseCursor::PointingHandCursor;
-    else if (!isHost)
+    else
         cursor = juce::MouseCursor::DraggingHandCursor;
     setMouseCursor(cursor);
 
@@ -744,10 +755,15 @@ void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& e)
         return;
 
     juce::PopupMenu menu;
-    menu.addItem(1, "Play Next",  true);
+    // Pure reorder -- moves this singer to the front of the upcoming queue
+    // (right after whoever's performing now) without touching playback.
+    // NOT "start this person singing right now" -- that's the avatar click
+    // (see isOverAvatar() in mouseUp()), which still goes through
+    // onPlayClicked/onPlaySinger exactly as before.
+    menu.addItem(1, "Move to Next", true);
     menu.addSeparator();
-    menu.addItem(2, "Move Up",   !isHost);
-    menu.addItem(3, "Move Down", !isHost);
+    menu.addItem(2, "Move Up",   true);
+    menu.addItem(3, "Move Down", true);
     menu.addSeparator();
     menu.addItem(4, "Edit Songs", true);
     if (!isHost)
@@ -762,7 +778,7 @@ void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& e)
         {
             switch (result)
             {
-                case 1: if (onPlayClicked)     onPlayClicked(index);    break;
+                case 1: if (onMoveToNextClicked) onMoveToNextClicked(index); break;
                 case 2: if (onMoveUpClicked)   onMoveUpClicked(index);  break;
                 case 3: if (onMoveDownClicked) onMoveDownClicked(index); break;
                 case 4: if (onSongChipClicked && !singer.songs.empty())
@@ -775,9 +791,6 @@ void QueueBar::SingerRow::mouseDown(const juce::MouseEvent& e)
 
 void QueueBar::SingerRow::mouseDrag(const juce::MouseEvent& e)
 {
-    // Host can never be reordered.
-    if (isHost) return;
-
     // Drags only start from the "body" of the row — not from the avatar,
     // not from a song chip, and not from the 3-dot menu button.
     const auto start = e.getMouseDownPosition();
@@ -1236,15 +1249,13 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
 
-    // Host cannot be moved at all. Position 1 (index 0 -- whoever's up
-    // next) can never be displaced by a drop, so a drag can't accidentally
-    // bump the singer about to perform. Everything else in the round,
-    // including crossing the host's own slot, is a valid target:
-    // remapFromDisplayDrag below re-derives the round-robin order from
-    // wherever the host ends up after the splice, so there's no ordering
-    // hazard in allowing a singer to move from one side of the host to
-    // the other.
-    if (singers[(size_t)fromIndex].isHost) return;
+    // Position 1 (index 0 -- whoever's up next) can never be displaced by a
+    // drop, so a drag can't accidentally bump the singer about to perform
+    // (use moveSingerToNext() for that, an explicit action). The host is
+    // otherwise just another row: remapFromDisplayDrag below re-derives
+    // the round-robin order from wherever anyone (host included) ends up
+    // after the splice, so there's no ordering hazard in moving the host
+    // or crossing their slot with someone else.
     if (toIndex == 0) return;
 
     // `singers` here is the currently DISPLAYED (anchor-rotated) order, not
@@ -1252,6 +1263,25 @@ void QueueBar::moveSinger(int fromIndex, int toIndex)
     // reconstructs the canonical RR (host-first) + the (possibly unchanged)
     // anchor, then we re-derive the display from that.
     auto remap = QueueRotation::remapFromDisplayDrag(singers, fromIndex, toIndex);
+    QueueRotation::stampDerivedRanks(remap.newRR, remap.newAnchorId);
+    singers = QueueRotation::deriveDisplayQueue(remap.newRR, remap.newAnchorId);
+
+    rebuildSingerRows();
+    resized();
+}
+
+void QueueBar::moveSingerToNext(int fromIndex)
+{
+    if (fromIndex < 0 || fromIndex >= (int) singers.size()) return;
+    if (fromIndex == 0) return;   // already up next
+
+    // Same splice moveSinger() uses, just deliberately targeting display
+    // index 0 ("up next") -- moveSinger() refuses that destination on
+    // purpose (an accidental drag shouldn't bump who's about to perform),
+    // but this is an explicit "Move to Next" menu action, so the whole
+    // point is to land there. Purely a reorder: never touches
+    // localNowPlaying_ or playback.
+    auto remap = QueueRotation::remapFromDisplayDrag(singers, fromIndex, 0);
     QueueRotation::stampDerivedRanks(remap.newRR, remap.newAnchorId);
     singers = QueueRotation::deriveDisplayQueue(remap.newRR, remap.newAnchorId);
 
@@ -1308,67 +1338,40 @@ void QueueBar::rebuildSingerRows()
         listContent.removeChildComponent(row);
     singerRows.clear();
 
-    // Determine first/last in round across NON-HOST singers only.
-    // The host is the round leader (green border).
-    int firstRotation = INT_MAX;
-    int lastRotation  = INT_MIN;
-    int nonHostCount  = 0;
-    int hostIndex     = -1;
-    for (auto& s : singers)
-    {
-        if (s.isHost)
-        {
-            hostIndex = (int) (&s - singers.data());
-            continue;
-        }
-        ++nonHostCount;
-        if (s.rotationOrder < firstRotation) firstRotation = s.rotationOrder;
-        if (s.rotationOrder > lastRotation)  lastRotation  = s.rotationOrder;
-    }
-
-    // Round-tail rule: the singer immediately before host in circular queue
-    // order is the end of round (red). This matches KJ expectations even when
-    // the host is not at visual index 0.
-    int roundTailIndex = -1;
-    if (nonHostCount > 0)
-    {
-        if (hostIndex >= 0)
-        {
-            const int n = (int) singers.size();
-            for (int step = 1; step < n; ++step)
-            {
-                const int idx = (hostIndex - step + n) % n;
-                if (! singers[(size_t) idx].isHost)
-                {
-                    roundTailIndex = idx;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            // Fallback when no host row exists in the list.
-            for (int i = 0; i < (int) singers.size(); ++i)
-            {
-                if (! singers[(size_t) i].isHost
-                    && singers[(size_t) i].rotationOrder == lastRotation)
-                {
-                    roundTailIndex = i;
-                    break;
-                }
-            }
-        }
-    }
-
     for (int i = 0; i < (int)singers.size(); ++i)
     {
         auto* row = new SingerRow();
         row->singer  = singers[(size_t)i];
         row->index   = i;
         row->isHost  = singers[(size_t)i].isHost;
-        row->isFirst = (! row->isHost) && nonHostCount > 0
-                     && (singers[(size_t)i].rotationOrder == firstRotation);
-        row->isLast  = (! row->isHost) && (i == roundTailIndex);
+
+        // `singers` is already the anchor-rotated displayed queue, so
+        // index 0 is always "start of the round" -- green border --
+        // regardless of who that happens to be.
+        row->isFirst = (i == 0);
+
+        // Purple avatar glow: today's host is trivially a host account
+        // (no lookup needed); anyone else gets checked against the global
+        // hosts/{uid} collection, cached -- see HostIdentityCache. The
+        // callback re-runs this whole rebuild once a not-yet-cached
+        // lookup resolves, same pattern the avatar fetch below already uses.
+        if (row->isHost)
+        {
+            row->isHostAccount = true;
+        }
+        else
+        {
+            row->isHostAccount = HostIdentityCache::getInstance().isKnownHost(
+                juce::String(singers[(size_t)i].id),
+                [safe = juce::Component::SafePointer<QueueBar>(this)]
+                {
+                    if (safe == nullptr) return;
+                    safe->rebuildSingerRows();
+                    safe->resized();
+                    safe->repaint();
+                });
+        }
+
         row->avatarImage = ArtworkCache::getInstance().resolveAvatar(juce::String(singers[(size_t)i].avatar),
             [safe = juce::Component::SafePointer<QueueBar>(this)]
             {
@@ -1393,6 +1396,10 @@ void QueueBar::rebuildSingerRows()
         row->onSongChipClicked = [this](int singerIdx, int songIdx)
         {
             if (onSongClicked) onSongClicked(singerIdx, songIdx);
+        };
+        row->onMoveToNextClicked = [this](int idx)
+        {
+            if (onMoveSingerToNext) onMoveSingerToNext(idx);
         };
         row->onMoveUpClicked = [this](int idx)
         {

@@ -227,8 +227,12 @@ public:
     // QueueService and RequestService — placed here to mirror the Angular
     // service surface).
 
-    /** Hard-delete every doc under venues/<id>/queue. */
+    /** Hard-delete every doc under venues/<id>/queue, except the host's own
+        doc (keyed by hostUid) -- the host can never be deleted, "Clear
+        Queue" included. Pass an empty hostUid to delete everything
+        (old/no-host-yet behaviour). */
     void deleteAllSingersFromQueue(const juce::String& venueId,
+                                   const juce::String& hostUid,
                                    WriteCallback onDone = nullptr);
 
     /** Hard-delete every doc under venues/<id>/requested. */
