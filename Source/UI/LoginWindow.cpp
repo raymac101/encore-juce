@@ -435,8 +435,9 @@ public:
         statusLabel_.setFont(juce::Font(juce::FontOptions(13.0f)));
         inner.removeFromTop(6);
 
-        auto spinnerArea = inner.removeFromTop(busySpinner_.isVisible() ? 24 : 0);
-        busySpinner_.setBounds(spinnerArea);
+        // Always reserve the spinner row so showing it (e.g. after clicking
+        // Log In) doesn't push the form down past the bottom of the card.
+        busySpinner_.setBounds(inner.removeFromTop(24));
 
         switch (page_)
         {
@@ -480,9 +481,9 @@ private:
     {
         // Big breathable inputs to match the original.
         area.removeFromTop(16);
-        emailEditor_.setBounds(area.removeFromTop(54));
-        area.removeFromTop(16);
-        passwordEditor_.setBounds(area.removeFromTop(54));
+        emailEditor_.setBounds(area.removeFromTop(48));
+        area.removeFromTop(14);
+        passwordEditor_.setBounds(area.removeFromTop(48));
 
         // Clear buttons sit inside their editor's own bounds, at the right
         // edge -- derived from a copy so the editor's actual bounds above
@@ -509,7 +510,7 @@ private:
         switchModeButton_.setBounds(area.removeFromTop(44).withSizeKeepingCentre(220, 44));
 
         // OAuth buttons — always visible.
-        area.removeFromTop(20);
+        area.removeFromTop(16);
 
         // Faint "or" divider.
         // (Drawn by the buttons themselves; just a small spacer.)
@@ -1480,8 +1481,8 @@ LoginWindow::LoginWindow(LoginCompleteCallback onComplete)
         onComplete_ = nullptr;
         if (cb) cb(venueId, requestInitialScan, openCompanyDashboard, companyId, companyRole);
     });
-    setContentOwned(c, true);
-    centreWithSize(720, 820);
+    setContentOwned(c, true);   // sizes the window to the content (see LoginContent's setSize)
+    centreWithSize(getWidth(), getHeight());
     setVisible(true);
 }
 
