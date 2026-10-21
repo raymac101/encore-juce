@@ -65,7 +65,15 @@ public:
     void setSingers(const std::vector<Singers>& singers);
     void addSinger(const Singers& singer);
     void removeSinger(int index);
-    void moveSinger(int fromIndex, int toIndex);
+    /** With `takeRoundStartSlot`, a singer landing directly above the
+        round start becomes the new round start (see
+        QueueRotation::remapFromDisplayDrag). */
+    void moveSinger(int fromIndex, int toIndex, bool takeRoundStartSlot = true);
+
+    /** Clamps a drag-drop destination: display index 0 ("up next") is off
+        limits, except when that row is also the round start -- then a drop
+        there claims the "Start of Round" slot. */
+    int clampDropIndex(int fromIndex, int toIndex) const;
 
     /** Pure reorder -- moves the singer at fromIndex to the front of the
         upcoming queue (display index 0, "up next"), without touching
@@ -197,7 +205,7 @@ private:
 
         Singers singer;
         int     index = 0;
-        bool    isFirst      = false;  // green border -- start of the round (display index 0)
+        bool    isRoundStart = false;  // green border + "Start of Round" -- first singer in the RR (lowest stable order)
         bool    isHost       = false;  // today's signed-in host for this venue -- "— HOST" text
         bool    isHostAccount = false; // this identity has a hosts/{uid} doc anywhere -- purple avatar glow
         bool    isNewlyAdded = false;  // yellow-green glow on first appearance
@@ -255,42 +263,6 @@ private:
     };
 
     //==============================================================================
-    // Drag-to-rotate wheel -- replaces the old rotateBackButton/
-    // rotateForwardButton pair with a single light-grey dial + dark marker
-    // (like a stereo volume wheel). Dragging clockwise/counter-clockwise
-    // snaps to one step per singer and fires onRotateSteps(+N/-N); QueueBar
-    // turns that into N calls to the existing onRotateForward()/onRotateBack()
-    // callbacks, so no rotation logic changes -- purely a new front end for
-    // the same single-step moves the two buttons already drove.
-    class RotateWheel : public juce::Component,
-                        public juce::SettableTooltipClient
-    {
-    public:
-        RotateWheel() = default;
-        void paint(juce::Graphics& g) override;
-        void mouseDown(const juce::MouseEvent& e) override;
-        void mouseDrag(const juce::MouseEvent& e) override;
-        void mouseUp(const juce::MouseEvent& e) override;
-
-        /** Snap positions per full revolution -- set to the current singer
-            count so one drag-step always corresponds to one rotation step. */
-        void setStepCount(int steps) { stepCount = juce::jmax(1, steps); }
-
-        /** Fired once per snapped step on release -- positive = forward
-            (clockwise), negative = backward. */
-        std::function<void(int steps)> onRotateSteps;
-
-    private:
-        float angleFromCentre(juce::Point<float> p) const;
-
-        int   stepCount = 5;
-        float rotation = 0.0f;
-        float dragStartAngle = 0.0f;
-        float dragStartRotation = 0.0f;
-        bool  dragging = false;
-    };
-
-    //==============================================================================
     // List container — accepts the singer-row drag and computes the new
     // index from the drop position. Owned by `listViewport`.
     class ListContent : public juce::Component,
@@ -336,8 +308,8 @@ private:
     std::unique_ptr<juce::Label>      totalTimeLabel;
     std::unique_ptr<juce::TextButton> clearQueueButton;
     std::unique_ptr<juce::TextButton> addSingerButton;
-    std::unique_ptr<juce::Label>      rotateLabel;
-    std::unique_ptr<RotateWheel>      rotateWheel;
+    std::unique_ptr<juce::TextButton> rotateLeftButton;   // onRotateBack
+    std::unique_ptr<juce::TextButton> rotateRightButton;  // onRotateForward
     std::unique_ptr<juce::ToggleButton> queueToggle;   // "Queue Open" / "Queue Closed"
     std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 

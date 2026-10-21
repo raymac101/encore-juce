@@ -188,3 +188,5 @@ ribbon.sfx.woohoo=WooHoo
 ribbon.sfx.drum_fill=Relleno de bateria
 ribbon.sfx.drum_roll=Redoble
 ribbon.sfx.buzzer=Zumbador
+queue.rotate_left=Rotar a la izquierda
+queue.rotate_right=Rotar a la derecha

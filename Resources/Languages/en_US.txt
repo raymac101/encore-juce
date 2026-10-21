@@ -289,8 +289,10 @@ settings.language=Language
 
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Now Singing:
+queue.start_of_round=Start of Round
 queue.clear_queue=Clear Queue
-queue.rotate_label=Rotate
+queue.rotate_left=Rotate Left
+queue.rotate_right=Rotate Right
 queue.queue_open=Queue Open
 queue.queue_closed=Queue Closed
 queue.clear.no_venue_title=No Active Venue

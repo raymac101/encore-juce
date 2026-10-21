@@ -203,9 +203,8 @@ namespace
             all.push_back(std::move(s));
         }
 
-        // Sort by stable RR order (host always first, regardless of its
-        // stored order value -- heals any historical data where that wasn't
-        // enforced), with deterministic tie-breakers so duplicate/missing
+        // Sort by stable RR order (host wins ties), with deterministic
+        // tie-breakers so duplicate/missing
         // order values do not reshuffle singers on restart. `order` is the
         // persisted Round Robin position and must NOT be rewritten here --
         // only join/removal/manual-reorder are allowed to change it (see
@@ -214,8 +213,8 @@ namespace
         std::sort(all.begin(), all.end(),
                   [](const Singers& a, const Singers& b)
                   {
-                      if (a.isHost != b.isHost) return a.isHost;
                       if (a.order != b.order) return a.order < b.order;
+                      if (a.isHost != b.isHost) return a.isHost;
                       if (a.rotationOrder != b.rotationOrder) return a.rotationOrder < b.rotationOrder;
                       return juce::String(a.name).toLowerCase() < juce::String(b.name).toLowerCase();
                   });

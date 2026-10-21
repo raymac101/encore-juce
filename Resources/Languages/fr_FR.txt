@@ -165,6 +165,9 @@ settings.language=Langue
 
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Chante actuellement :
+queue.rotate_left=Rotation gauche
+queue.rotate_right=Rotation droite
+queue.start_of_round=Début de la rotation
 queue.clear_queue=Vider la file
 queue.queue_open=File d'attente ouverte
 queue.queue_closed=File d'attente fermée

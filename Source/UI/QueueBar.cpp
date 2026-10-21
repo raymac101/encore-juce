@@ -130,78 +130,6 @@ void QueueBar::ExpandArrowButton::timerCallback()
 }
 
 //==============================================================================
-//  RotateWheel
-//==============================================================================
-float QueueBar::RotateWheel::angleFromCentre(juce::Point<float> p) const
-{
-    auto centre = getLocalBounds().toFloat().getCentre();
-    return std::atan2(p.y - centre.y, p.x - centre.x);
-}
-
-void QueueBar::RotateWheel::paint(juce::Graphics& g)
-{
-    auto bounds = getLocalBounds().toFloat().reduced(1.0f);
-
-    juce::ColourGradient grad(juce::Colour(0xffe4e6ea),
-                              bounds.getX() + bounds.getWidth() * 0.35f, bounds.getY() + bounds.getHeight() * 0.28f,
-                              juce::Colour(0xff888c96),
-                              bounds.getRight(), bounds.getBottom(), true);
-    g.setGradientFill(grad);
-    g.fillEllipse(bounds);
-
-    g.setColour(juce::Colours::black.withAlpha(0.35f));
-    g.drawEllipse(bounds, 1.0f);
-
-    // Marker dot -- rotates with `rotation`, riding near the rim, same
-    // "volume wheel" language as the bottom bar's knobs but drag-only
-    // (no value readout; it just shows where the top of the rotation is).
-    auto centre = bounds.getCentre();
-    const float radius = bounds.getWidth() * 0.5f;
-    const float markerR = juce::jmax(1.5f, radius * 0.18f);
-    const float markerDist = radius - markerR - 1.5f;
-    juce::Point<float> markerPos(centre.x + markerDist * std::cos(rotation - juce::MathConstants<float>::halfPi),
-                                 centre.y + markerDist * std::sin(rotation - juce::MathConstants<float>::halfPi));
-    g.setColour(juce::Colour(0xff3b3e45));
-    g.fillEllipse(juce::Rectangle<float>(markerR * 2.0f, markerR * 2.0f).withCentre(markerPos));
-}
-
-void QueueBar::RotateWheel::mouseDown(const juce::MouseEvent& e)
-{
-    dragging = true;
-    dragStartAngle = angleFromCentre(e.position);
-    dragStartRotation = rotation;
-}
-
-void QueueBar::RotateWheel::mouseDrag(const juce::MouseEvent& e)
-{
-    if (! dragging)
-        return;
-
-    float delta = angleFromCentre(e.position) - dragStartAngle;
-    if (delta > juce::MathConstants<float>::pi)  delta -= juce::MathConstants<float>::twoPi;
-    if (delta < -juce::MathConstants<float>::pi) delta += juce::MathConstants<float>::twoPi;
-
-    rotation = dragStartRotation + delta;
-    repaint();
-}
-
-void QueueBar::RotateWheel::mouseUp(const juce::MouseEvent&)
-{
-    if (! dragging)
-        return;
-    dragging = false;
-
-    const float stepAngle = juce::MathConstants<float>::twoPi / (float) stepCount;
-    const int steps = juce::roundToInt((rotation - dragStartRotation) / stepAngle);
-
-    rotation = dragStartRotation + (float) steps * stepAngle;
-    repaint();
-
-    if (steps != 0 && onRotateSteps)
-        onRotateSteps(steps);
-}
-
-//==============================================================================
 //  NowPlayingCard
 //==============================================================================
 QueueBar::NowPlayingCard::NowPlayingCard() {}
@@ -513,25 +441,12 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff262626));
     g.fillRoundedRectangle(bounds.toFloat(), 8.f);
 
-    // Newly-added highlight — subtle primary-colour tint on the card background
-    if (isNewlyAdded)
-    {
-        g.setColour(juce::Colour(0xff30daff).withAlpha(0.16f));
-        g.fillRoundedRectangle(bounds.toFloat(), 8.f);
-    }
-
-    // Round border: green for the start of the round (display index 0,
-    // whoever that is), primary colour for newly added. No red/"end of
-    // round" indicator any more -- not needed.
-    if (isFirst)
+    // Green border on the singer who starts the round (first in the RR),
+    // wherever the rotation currently puts them in the displayed list.
+    if (isRoundStart)
     {
         g.setColour(juce::Colour(0xff10b981));
         g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 3.f);
-    }
-    else if (isNewlyAdded)
-    {
-        g.setColour(juce::Colour(0xff30daff));
-        g.drawRoundedRectangle(bounds.toFloat().reduced(1.5f), 8.f, 2.f);
     }
 
     // Bottom separator
@@ -616,6 +531,14 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
 
     // Name area – top half (bounds already has menu column removed)
     auto nameArea = bounds.removeFromTop(bounds.getHeight() / 2).reduced(4, 0);
+    if (isRoundStart)
+    {
+        auto labelArea = nameArea.removeFromTop(12).translated(0, 2);
+        g.setColour(juce::Colour(0xff10b981));
+        g.setFont(juce::Font(9.f).boldened());
+        g.drawText(LocalizationManager::getInstance().getText("queue.start_of_round"),
+                   labelArea, juce::Justification::centredLeft, true);
+    }
     g.setColour(juce::Colour(0xffe4e4e4));
     g.setFont(juce::Font(13.f).boldened());
     juce::String displayName = juce::String(singer.name);
@@ -940,24 +863,18 @@ QueueBar::QueueBar()
     addSingerButton->onClick = [this]() { if (onAddSinger) onAddSinger(); };
     addAndMakeVisible(*addSingerButton);
 
-    rotateLabel = std::make_unique<juce::Label>("rotateLabel", LocalizationManager::getInstance().getText("queue.rotate_label"));
-    rotateLabel->setFont(juce::Font(12.0f, juce::Font::bold));
-    rotateLabel->setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.7f));
-    rotateLabel->setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(*rotateLabel);
+    // One step either way per click -- see MainComponent::rotateQueueManually().
+    rotateLeftButton = std::make_unique<juce::TextButton>(LocalizationManager::getInstance().getText("queue.rotate_left"));
+    rotateLeftButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
+    rotateLeftButton->setColour(juce::TextButton::textColourOffId, accentColour);
+    rotateLeftButton->onClick = [this]() { if (onRotateBack) onRotateBack(); };
+    addAndMakeVisible(*rotateLeftButton);
 
-    rotateWheel = std::make_unique<RotateWheel>();
-    rotateWheel->setTooltip("Drag to rotate the queue forward or backward");
-    rotateWheel->onRotateSteps = [this](int steps)
-    {
-        const int n = std::abs(steps);
-        for (int i = 0; i < n; ++i)
-        {
-            if (steps > 0) { if (onRotateForward) onRotateForward(); }
-            else           { if (onRotateBack)    onRotateBack(); }
-        }
-    };
-    addAndMakeVisible(*rotateWheel);
+    rotateRightButton = std::make_unique<juce::TextButton>(LocalizationManager::getInstance().getText("queue.rotate_right"));
+    rotateRightButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
+    rotateRightButton->setColour(juce::TextButton::textColourOffId, accentColour);
+    rotateRightButton->onClick = [this]() { if (onRotateForward) onRotateForward(); };
+    addAndMakeVisible(*rotateRightButton);
 
     countdownLabel = std::make_unique<juce::Label>("countdown", "");
     countdownLabel->setColour(juce::Label::textColourId, accentColour);
@@ -1043,9 +960,8 @@ void QueueBar::resized()
         addSingerButton->setBounds(row4Right);
 
         auto row5 = statusArea.removeFromTop(28).reduced(8, 2);
-        rotateWheel->setBounds(row5.removeFromRight(row5.getHeight()));
-        row5.removeFromRight(8);
-        rotateLabel->setBounds(row5);
+        rotateLeftButton->setBounds(row5.removeFromLeft(row5.getWidth() / 2 - 2));
+        rotateRightButton->setBounds(row5.withTrimmedLeft(2));
 
         // Countdown label floats over the list area (set in resized, shown/hidden by state)
         countdownLabel->setBounds(0, venueHeaderHeight + nowPlayingHeight + 5,
@@ -1243,31 +1159,39 @@ void QueueBar::removeSinger(int index)
     }
 }
 
-void QueueBar::moveSinger(int fromIndex, int toIndex)
+void QueueBar::moveSinger(int fromIndex, int toIndex, bool takeRoundStartSlot)
 {
     if (fromIndex < 0 || fromIndex >= (int)singers.size()) return;
     if (toIndex < 0 || toIndex >= (int)singers.size()) return;
     if (fromIndex == toIndex) return;
 
-    // Position 1 (index 0 -- whoever's up next) can never be displaced by a
-    // drop, so a drag can't accidentally bump the singer about to perform
-    // (use moveSingerToNext() for that, an explicit action). The host is
+    // Position 1 (index 0 -- whoever's up next) can't be displaced by a drop
+    // unless it's also the round start (see clampDropIndex()). The host is
     // otherwise just another row: remapFromDisplayDrag below re-derives
     // the round-robin order from wherever anyone (host included) ends up
-    // after the splice, so there's no ordering hazard in moving the host
-    // or crossing their slot with someone else.
-    if (toIndex == 0) return;
+    // after the splice.
+    if (clampDropIndex(fromIndex, toIndex) != toIndex) return;
 
     // `singers` here is the currently DISPLAYED (anchor-rotated) order, not
     // the stable RR -- remapFromDisplayDrag splices the drag within it and
-    // reconstructs the canonical RR (host-first) + the (possibly unchanged)
+    // reconstructs the canonical RR (round start first) + the (possibly unchanged)
     // anchor, then we re-derive the display from that.
-    auto remap = QueueRotation::remapFromDisplayDrag(singers, fromIndex, toIndex);
+    auto remap = QueueRotation::remapFromDisplayDrag(singers, fromIndex, toIndex, takeRoundStartSlot);
     QueueRotation::stampDerivedRanks(remap.newRR, remap.newAnchorId);
     singers = QueueRotation::deriveDisplayQueue(remap.newRR, remap.newAnchorId);
 
     rebuildSingerRows();
     resized();
+}
+
+int QueueBar::clampDropIndex(int fromIndex, int toIndex) const
+{
+    if (toIndex != 0 || singers.empty())
+        return toIndex;
+
+    const auto roundStartId = juce::String(QueueRotation::sortByStableOrder(singers).front().id);
+    const bool topIsRoundStart = juce::String(singers.front().id) == roundStartId;
+    return (topIsRoundStart && fromIndex != 0) ? 0 : 1;
 }
 
 void QueueBar::moveSingerToNext(int fromIndex)
@@ -1328,15 +1252,17 @@ void QueueBar::setExpanded(bool shouldExpand)
 //==============================================================================
 void QueueBar::rebuildSingerRows()
 {
-    // One drag-step on the rotate wheel should correspond to one singer
-    // moving past the anchor, so the wheel's snap granularity always
-    // matches the current queue size.
-    rotateWheel->setStepCount((int) singers.size());
-
     // Clear existing rows
     for (auto* row : singerRows)
         listContent.removeChildComponent(row);
     singerRows.clear();
+
+    // `singers` is the anchor-rotated displayed queue, so index 0 is just
+    // whoever's up next. The round starts with the first RR member (the
+    // host, else the lowest stable order) wherever they currently sit.
+    const juce::String roundStartId = singers.empty()
+        ? juce::String()
+        : juce::String(QueueRotation::sortByStableOrder(singers).front().id);
 
     for (int i = 0; i < (int)singers.size(); ++i)
     {
@@ -1344,11 +1270,7 @@ void QueueBar::rebuildSingerRows()
         row->singer  = singers[(size_t)i];
         row->index   = i;
         row->isHost  = singers[(size_t)i].isHost;
-
-        // `singers` is already the anchor-rotated displayed queue, so
-        // index 0 is always "start of the round" -- green border --
-        // regardless of who that happens to be.
-        row->isFirst = (i == 0);
+        row->isRoundStart = juce::String(singers[(size_t)i].id) == roundStartId;
 
         // Purple avatar glow: today's host is trivially a host account
         // (no lookup needed); anyone else gets checked against the global
@@ -1494,7 +1416,8 @@ void QueueBar::updateAllText()
     auto& lm = LocalizationManager::getInstance();
     nowSingingLabel->setText(lm.getText("queue.now_singing"), juce::dontSendNotification);
     clearQueueButton->setButtonText(lm.getText("queue.clear_queue"));
-    rotateLabel->setText(lm.getText("queue.rotate_label"), juce::dontSendNotification);
+    rotateLeftButton->setButtonText(lm.getText("queue.rotate_left"));
+    rotateRightButton->setButtonText(lm.getText("queue.rotate_right"));
     queueToggle->setButtonText(queueClosed ? lm.getText("queue.queue_closed")
                                             : lm.getText("queue.queue_open"));
     updateStatusLabels();
@@ -1610,13 +1533,10 @@ void QueueBar::ListContent::itemDragMove (const SourceDetails& d)
             ++toIndex;
     }
 
-    // Position 1 (index 0 -- whoever's up next) can never be displaced by a
-    // drop, so a drag can't accidentally bump the singer about to perform.
-    // Everything else, including crossing the host's own row, is a valid
-    // target -- moveSinger()'s remap re-derives the round-robin order from
-    // wherever the host ends up after the splice either way.
+    // Position 1 (index 0 -- whoever's up next) can't be displaced by a
+    // drop unless it's the round start -- see clampDropIndex().
     toIndex = juce::jlimit (0, (int) owner.singers.size(), toIndex);
-    if (toIndex == 0) toIndex = 1;
+    toIndex = owner.clampDropIndex (fromIndex, toIndex);
 
     // Convert the slot index into a Y coordinate. Insertion line is drawn
     // at the top of the row currently at `toIndex` (or below the last row
@@ -1690,9 +1610,9 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
 
         int toIndex = col * rowsPerColumn + row;
 
-        // Position 1 (index 0) can never be a drop target -- see moveSinger().
+        // Position 1 (index 0) only accepts a drop onto the round start -- see clampDropIndex().
         toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
-        if (toIndex == 0) toIndex = 1;
+        toIndex = owner.clampDropIndex (fromIndex, toIndex);
 
         dropIndicatorY = -1;
         dropIndicatorRect = {};
@@ -1718,9 +1638,9 @@ void QueueBar::ListContent::itemDropped (const SourceDetails& d)
             ++toIndex;
     }
 
-    // Position 1 (index 0) can never be a drop target -- see moveSinger().
+    // Position 1 (index 0) only accepts a drop onto the round start -- see clampDropIndex().
     toIndex = juce::jlimit (0, (int) owner.singers.size() - 1, toIndex);
-    if (toIndex == 0) toIndex = 1;
+    toIndex = owner.clampDropIndex (fromIndex, toIndex);
 
     dropIndicatorY = -1;
     dropIndicatorRect = {};

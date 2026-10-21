@@ -46,9 +46,9 @@ namespace QueueRotation
         std::stable_sort(singers.begin(), singers.end(),
             [](const Singers& a, const Singers& b)
             {
-                if (a.isHost != b.isHost)
-                    return a.isHost;
-                return a.order < b.order;
+                if (a.order != b.order)
+                    return a.order < b.order;
+                return a.isHost && ! b.isHost;
             });
         return singers;
     }
@@ -134,7 +134,7 @@ namespace QueueRotation
             return identityKey(rr[(size_t) nextIndex]);
 
         // Nothing with a higher order -- wrap to the lowest existing order
-        // (rr is host-first per sortByStableOrder, so that's rr[0]).
+        // (rr is sorted per sortByStableOrder, so that's rr[0]).
         return identityKey(rr.front());
     }
 
@@ -156,12 +156,13 @@ namespace QueueRotation
             return identityKey(rr[(size_t) prevIndex]);
 
         // Nothing with a lower order -- wrap to the highest existing order
-        // (rr is host-first per sortByStableOrder, so that's rr.back()).
+        // (rr is sorted per sortByStableOrder, so that's rr.back()).
         return identityKey(rr.back());
     }
 
     DragRemapResult remapFromDisplayDrag(const std::vector<Singers>& displayedQueue,
-                                         int fromIndex, int toIndex)
+                                         int fromIndex, int toIndex,
+                                         bool takeRoundStartSlot)
     {
         DragRemapResult result;
 
@@ -173,19 +174,34 @@ namespace QueueRotation
             return result;
         }
 
+        // The round start stays put: if the singer being dragged IS the
+        // round start, whoever followed them in the round takes over that
+        // slot; otherwise the round start is unchanged.
+        auto roundStartKey = identityKey(sortByStableOrder(displayedQueue).front());
+        if (identityKey(displayedQueue[(size_t) fromIndex]) == roundStartKey && n > 1)
+            roundStartKey = identityKey(displayedQueue[(size_t) ((fromIndex + 1) % n)]);
+
         std::vector<Singers> newQueueOrder = displayedQueue;
         auto moved = newQueueOrder[(size_t) fromIndex];
         newQueueOrder.erase(newQueueOrder.begin() + fromIndex);
         newQueueOrder.insert(newQueueOrder.begin() + toIndex, moved);
 
-        int hostPos = findHostIndex(newQueueOrder);
-        if (hostPos < 0)
-            hostPos = 0;
+        int startPos = findIndexByIdentity(newQueueOrder, roundStartKey);
+        if (startPos < 0)
+            startPos = 0;
+
+        // Dropped directly above the round start: the dropped singer claims
+        // the round start slot (and the old start becomes second).
+        if (takeRoundStartSlot && startPos > 0 && toIndex == startPos - 1)
+        {
+            roundStartKey = identityKey(moved);
+            startPos = toIndex;
+        }
 
         std::vector<Singers> newRR;
         newRR.reserve(newQueueOrder.size());
         for (size_t step = 0; step < newQueueOrder.size(); ++step)
-            newRR.push_back(newQueueOrder[(size_t) ((hostPos + (int) step) % n)]);
+            newRR.push_back(newQueueOrder[(size_t) ((startPos + (int) step) % n)]);
 
         renumberStableOrder(newRR);
 

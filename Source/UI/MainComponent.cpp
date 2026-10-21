@@ -2861,7 +2861,9 @@ void MainComponent::setupUI()
         if (queueBar == nullptr) return;
         int targetIndex = singerIndex + 1;
         if (targetIndex >= (int) queueBar->getSingers().size()) return;
-        queueBar->moveSinger(singerIndex, targetIndex);
+        // Moving down toward the end of the round must not wrap the singer
+        // into the round start slot.
+        queueBar->moveSinger(singerIndex, targetIndex, false);
         if (queueBar->onReorder) queueBar->onReorder(singerIndex, targetIndex);
     };
 
