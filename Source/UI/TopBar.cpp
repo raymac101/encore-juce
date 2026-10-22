@@ -67,23 +67,36 @@ void TopBar::setupUI()
     // Singer name label -- small row above track/artist, hidden until
     // setSingerInfo() is given a name (see resized()).
     singerNameLabel = std::make_unique<juce::Label>("singerName", "");
-    singerNameLabel->setFont(juce::Font(11.0f, juce::Font::bold));
+    // A couple points larger than trackNameLabel's 16pt -- the singer's
+    // name is the more important thing to spot at a glance.
+    singerNameLabel->setFont(juce::Font(18.0f, juce::Font::bold));
     singerNameLabel->setColour(juce::Label::textColourId, DesignTokens::colour(DesignTokens::kAccent));
     singerNameLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     singerNameLabel->setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(singerNameLabel.get());
     singerNameLabel->setVisible(false);
 
-    // Track name label
-    trackNameLabel = std::make_unique<juce::Label>("trackName", "Test Song - Test Artist");
+    // Track name label -- song title only now (artist is its own line below).
+    trackNameLabel = std::make_unique<juce::Label>("trackName", "Test Song");
     trackNameLabel->setFont(juce::Font(16.0f, juce::Font::bold));
     trackNameLabel->setColour(juce::Label::textColourId, juce::Colours::white);
     trackNameLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     trackNameLabel->setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(trackNameLabel.get());
-    
-    // Artist name label (part of track info)
-    artistNameLabel = std::make_unique<juce::Label>("artistName", "Karaoke Version");
+
+    // Artist -- own line under the song title. Same font/size as the song
+    // title (just no longer combined onto one line with it).
+    songArtistLabel = std::make_unique<juce::Label>("songArtist", "Test Artist");
+    songArtistLabel->setFont(juce::Font(16.0f, juce::Font::bold));
+    songArtistLabel->setColour(juce::Label::textColourId, juce::Colours::white);
+    songArtistLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+    songArtistLabel->setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(songArtistLabel.get());
+
+    // Third line -- shows the song's manufacturer version (e.g. "Sunfly",
+    // "Music Maestro"). Kept the name artistNameLabel to limit the earlier
+    // change's footprint.
+    artistNameLabel = std::make_unique<juce::Label>("artistName", "");
     artistNameLabel->setFont(juce::Font(14.0f));
     artistNameLabel->setColour(juce::Label::textColourId, juce::Colours::white);
     artistNameLabel->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -481,12 +494,15 @@ void TopBar::resized()
         // someone is actually performing (see setSingerInfo()).
         if (singerNameLabel->isVisible())
         {
-            auto singerHeight = juce::jmin(18, songInfoArea.getHeight() / 4);
+            // 24px fits the 18pt font without clipping ascenders/descenders.
+            auto singerHeight = juce::jmin(24, songInfoArea.getHeight() / 3);
             singerNameLabel->setBounds(songInfoArea.removeFromTop(singerHeight));
         }
 
-        auto infoHeight = songInfoArea.getHeight() / 2;
+        // Song / artist / version, each an even third of whatever's left.
+        auto infoHeight = songInfoArea.getHeight() / 3;
         trackNameLabel->setBounds(songInfoArea.removeFromTop(infoHeight));
+        songArtistLabel->setBounds(songInfoArea.removeFromTop(infoHeight));
         artistNameLabel->setBounds(songInfoArea);
         
         // KEY and BPM area (right side) - side by side. Title font size
@@ -621,16 +637,17 @@ void TopBar::setTrackInfo(const juce::String& trackName,
     currentVersion = version;
     
     if (trackNameLabel)
-    {
-        juce::String displayName = trackName;
-        if (!artistName.isEmpty())
-            displayName += " - " + artistName;
-        if (!version.isEmpty())
-            displayName += " (" + version + ")";
-            
-        trackNameLabel->setText(displayName, juce::dontSendNotification);
-    }
-    
+        trackNameLabel->setText(trackName, juce::dontSendNotification);
+
+    if (songArtistLabel)
+        songArtistLabel->setText(artistName, juce::dontSendNotification);
+
+    // Manufacturer version goes on its own line below (artistNameLabel) --
+    // blank, not a placeholder, when unknown (same convention as the
+    // Key/BPM value labels below).
+    if (artistNameLabel)
+        artistNameLabel->setText(version, juce::dontSendNotification);
+
     updateOfflineDisplay();
     resized(); // Update layout
 }
@@ -739,9 +756,12 @@ void TopBar::updateOfflineDisplay()
     
     if (trackNameLabel)
         trackNameLabel->setVisible(isOnlineStatus && !currentTrackName.isEmpty());
-    
+
+    if (songArtistLabel)
+        songArtistLabel->setVisible(isOnlineStatus && !currentArtistName.isEmpty());
+
     if (artistNameLabel)
-        artistNameLabel->setVisible(isOnlineStatus && !currentArtistName.isEmpty());
+        artistNameLabel->setVisible(isOnlineStatus && !currentVersion.isEmpty());
         
     if (keyTitleLabel)
         keyTitleLabel->setVisible(isOnlineStatus);

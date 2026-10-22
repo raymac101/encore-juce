@@ -3094,6 +3094,64 @@ void MainComponent::setupUI()
             });
     };
 
+    // ── Now Playing: "Change Version" 3-dot menu item (only enabled while
+    // stopped -- see NowPlayingCard::mouseDown) ────────────────────────────────
+    // Reuses the same EditSingerModal every queue row's "Edit Songs" opens
+    // (version picker + pitch +/-), just fed a single synthetic QueueItem
+    // built from the live now-playing state instead of a singer's queued
+    // songs[]. Applying it reloads with autoStart=false: the host is fixing
+    // a wrong version/pitch the singer picked before they start, not
+    // resuming a performance.
+    queueBar->onChangeVersionRequested = [this]()
+    {
+        if (! currentSong.isValid())
+            return;
+
+        QueueItem nowPlayingItem;
+        nowPlayingItem.id          = currentSong.id;
+        nowPlayingItem.songId      = currentSong.id;
+        nowPlayingItem.songName    = currentSong.songName;
+        nowPlayingItem.songArtist  = currentSong.artistName;
+        nowPlayingItem.songVersion = currentSongVersion_.toStdString();
+        nowPlayingItem.pitch       = currentPitchSemitones_;
+        nowPlayingItem.singerName  = localNowPlaying_.name;
+
+        const juce::String singerName = juce::String (localNowPlaying_.name);
+        const CdgSong songToReload = currentSong;
+        juce::Component::SafePointer<MainComponent> safe (this);
+
+        EditSingerModal::show (this, singerName, { nowPlayingItem },
+            [safe, songToReload] (const std::vector<QueueItem>& updated)
+            {
+                if (safe == nullptr || updated.empty())
+                    return;
+
+                const auto& edited = updated.front();
+
+                // loadAndPlaySong wants a version INDEX into songToReload's
+                // own version list; resolve the edited version string back
+                // to one (same string-match EditSingerModal's own version
+                // picker and the click-to-change-version flow above use).
+                int versionIndex = 0;
+                const juce::String wantVersion = juce::String (edited.songVersion).trim();
+                for (int vi = 0; vi < (int) songToReload.version.size(); ++vi)
+                {
+                    if (juce::String (songToReload.version[(size_t) vi]).trim()
+                            .equalsIgnoreCase (wantVersion))
+                    {
+                        versionIndex = vi;
+                        break;
+                    }
+                }
+
+                if (safe->currentSong.isValid())
+                    safe->logPlayHistoryIfNeeded (false);
+
+                safe->loadAndPlaySong (songToReload, versionIndex,
+                                      juce::roundToInt (edited.pitch), /*autoStart*/ false);
+            });
+    };
+
     // ── Song-finished → auto-advance ──────────────────────────────────────────
     // Shared by AudioEngine's onSongFinished (audio/CDG) and the video
     // natural-end check in timerCallback() (MP4/M4V/MOV, which bypasses

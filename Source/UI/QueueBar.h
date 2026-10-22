@@ -157,8 +157,16 @@ public:
 
     // The song text on the Now Playing card was clicked -- show a version
     // picker for the currently-playing song. Wired by MainComponent (owns
-    // currentSong / loadAndPlaySong).
+    // currentSong / loadAndPlaySong). Reloads with autoStart=true (the song
+    // is actively playing).
     std::function<void()> onNowPlayingSongClicked;
+
+    // "Change Version" in the Now Playing card's 3-dot menu -- same version
+    // picker as above, but only reachable while stopped (see
+    // NowPlayingCard::mouseDown) and reloads with autoStart=false: the host
+    // is fixing a wrong version the singer picked before they start, not
+    // resuming a performance.
+    std::function<void()> onChangeVersionRequested;
 
     // Fired from setNowPlaying()/clearNowPlaying() -- the single choke
     // point both go through, regardless of which of the many call sites in
@@ -260,6 +268,7 @@ private:
         std::function<void()> onReturnToQueueEnd;
         std::function<void()> onSkipAndRemove;
         std::function<void()> onSongClicked;
+        std::function<void()> onChangeVersionClicked;  // 3-dot menu "Change Version" -- only enabled while stopped
     };
 
     //==============================================================================

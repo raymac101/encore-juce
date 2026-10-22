@@ -308,6 +308,11 @@ void QueueBar::NowPlayingCard::mouseDown(const juce::MouseEvent& e)
     menu.addItem(3, juce::String(juce::CharPointer_UTF8("Return to Queue \xe2\x80\x94 End")),  true);
     menu.addSeparator();
     menu.addItem(4, "Skip & Clear", true);
+    menu.addSeparator();
+    // Only while stopped -- swapping versions mid-performance is a
+    // different (existing) flow, triggered by clicking the song text
+    // itself (see onSongClicked/onNowPlayingSongClicked).
+    menu.addItem(5, "Change Version", !isPlaying);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options()
@@ -323,6 +328,7 @@ void QueueBar::NowPlayingCard::mouseDown(const juce::MouseEvent& e)
                 case 2: if (onReturnToQueueNext) onReturnToQueueNext(); break;
                 case 3: if (onReturnToQueueEnd)  onReturnToQueueEnd();  break;
                 case 4: if (onSkipAndRemove)     onSkipAndRemove();     break;
+                case 5: if (onChangeVersionClicked) onChangeVersionClicked(); break;
                 default: break;
             }
         });
@@ -784,6 +790,7 @@ QueueBar::QueueBar()
     nowPlayingCard->onReturnToQueueEnd   = [this]() { if (onReturnCurrentToQueueEnd)  onReturnCurrentToQueueEnd();  };
     nowPlayingCard->onSkipAndRemove      = [this]() { if (onSkipCurrentSinger)        onSkipCurrentSinger();        };
     nowPlayingCard->onSongClicked        = [this]() { if (onNowPlayingSongClicked)    onNowPlayingSongClicked();    };
+    nowPlayingCard->onChangeVersionClicked = [this]() { if (onChangeVersionRequested) onChangeVersionRequested();  };
     addAndMakeVisible(*nowPlayingCard);
 
     // Viewport for singer list

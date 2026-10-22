@@ -150,8 +150,9 @@ private:
     // UI Elements
     std::unique_ptr<juce::Label> versionLabel;
     std::unique_ptr<juce::Label> singerNameLabel;
-    std::unique_ptr<juce::Label> trackNameLabel;
-    std::unique_ptr<juce::Label> artistNameLabel;
+    std::unique_ptr<juce::Label> trackNameLabel;    // song title only
+    std::unique_ptr<juce::Label> songArtistLabel;   // artist, own line below the song title
+    std::unique_ptr<juce::Label> artistNameLabel;   // manufacturer version (see setupUI() comment)
     std::unique_ptr<juce::Label> keyTitleLabel;
     std::unique_ptr<juce::Label> keyValueLabel;
     std::unique_ptr<juce::Label> bpmTitleLabel;
