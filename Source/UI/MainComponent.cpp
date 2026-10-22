@@ -1669,8 +1669,8 @@ void MainComponent::setupUI()
                     {
                         // "Play Next" is purely a rotation-anchor change --
                         // the RR itself (`order`) is untouched. appendSong
-                        // already placed the new singer at the bottom of
-                        // the RR; here we just point the anchor at them.
+                        // already placed the new singer in the RR slot just
+                        // before the anchor; here we just point the anchor at them.
                         QueueService::getInstance().loadQueue(venueId,
                             [venueId, resolvedSingerName, safe](bool loadedOk, QueueService::Snapshot snap, juce::String loadErr)
                             {

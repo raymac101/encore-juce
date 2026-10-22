@@ -108,6 +108,43 @@ private:
 
 //==============================================================================
 /**
+    "Recent searches" dropdown shown under the Home search box while it has
+    focus. Never takes keyboard focus itself, so clicking a row doesn't blur
+    the search box (which is what hides the dropdown).
+*/
+class RecentSearchesPanel : public juce::Component
+{
+public:
+    RecentSearchesPanel();
+
+    void setItems(const juce::StringArray& items);
+    int  getPreferredHeight() const;
+    void updateAllText();
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+
+    std::function<void(const juce::String& query)> onPick;
+    std::function<void()> onClear;
+
+private:
+    static constexpr int kHeaderHeight = 44;
+    static constexpr int kRowHeight    = 44;
+    static constexpr int kFooterHeight = 56;
+
+    juce::StringArray items_;
+    int hoverRow_ = -1;
+    juce::String title_;
+    juce::TextButton clearButton_;
+
+    int rowAt(juce::Point<int> p) const;
+};
+
+//==============================================================================
+/**
     Home page component containing multiple SongRow sections, plus an
     embedded SearchPage. The two used to be separate NavBar destinations;
     now Home owns the one visible search bar, and typing a query swaps the
@@ -121,6 +158,7 @@ public:
     ~HomePage() override = default;
 
     void paint(juce::Graphics& g) override;
+    void paintOverChildren(juce::Graphics& g) override;
     void resized() override;
 
     /** Populate each section with data. */
@@ -161,16 +199,33 @@ private:
     std::unique_ptr<SongRow> popularRow;
     std::unique_ptr<SongRow> recommendedRow;
 
+    // Declared before searchBox_ so it outlives it: the box's focus-loss
+    // callback hides this panel, and that can fire during destruction.
+    RecentSearchesPanel               recentPanel_;
+
     // Top search row -- home icon + search box + submit icon -- and the
     // two mutually-exclusive views it switches between.
     std::unique_ptr<juce::Button>     homeIconButton_;
     std::unique_ptr<juce::TextEditor> searchBox_;
     std::unique_ptr<juce::Button>     searchSubmitButton_;
+    std::unique_ptr<juce::Button>     clearSearchButton_;   // X inside the box
+    std::unique_ptr<juce::Button>     browseAllButton_;     // right of the X: all songs, no query
     std::unique_ptr<SearchPage>       embeddedSearch_;
     bool                              showingSearch_ = false;
 
     void showBrowseView();
     void showSearchResults();
+
+    // Recent searches -- most recent first, persisted to settings.xml.
+    // A query is recorded on Enter or when a song is picked from its results.
+    static constexpr int kMaxRecentSearches = 8;
+    static constexpr int kMaxRecentShown    = 5;
+    juce::StringArray recentSearches_;
+    void loadRecentSearches();
+    void saveRecentSearches() const;
+    void recordRecentSearch(const juce::String& query);
+    void updateRecentPanel();
+    void hideRecentPanel();
 
     // Per-section CdgSong backing lists.  setSongsFromLibrary populates the
     // Recently Played + New rows; the Popular and Recommended rows are

@@ -316,10 +316,9 @@ private:
     std::unique_ptr<juce::Label>      songCountLabel;
     std::unique_ptr<juce::Label>      totalTimeLabel;
     std::unique_ptr<juce::TextButton> clearQueueButton;
-    std::unique_ptr<juce::TextButton> addSingerButton;
     std::unique_ptr<juce::TextButton> rotateLeftButton;   // onRotateBack
     std::unique_ptr<juce::TextButton> rotateRightButton;  // onRotateForward
-    std::unique_ptr<juce::ToggleButton> queueToggle;   // "Queue Open" / "Queue Closed"
+    std::unique_ptr<juce::TextButton> queueOpenCloseButton;   // red "Close Queue" / green "Open Queue"
     std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 
     //==============================================================================
@@ -366,7 +365,7 @@ private:
 
     static constexpr int venueHeaderHeight   = 56;
     static constexpr int nowPlayingHeight    = 100;
-    static constexpr int statusBarHeight     = 110;  // was 138 -- shrunk by one row after removing Auto Play/Delay
+    static constexpr int statusBarHeight     = 82;   // was 110 -- the Queue Open toggle row became the Open/Close Queue button
     static constexpr int singerRowHeight     = 64;
     static constexpr int expandedCardWidth   = 320;
     static constexpr int expandedCardHeight  = 84;

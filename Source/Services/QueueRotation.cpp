@@ -65,24 +65,20 @@ namespace QueueRotation
         for (int i = 0; i < (int) singers.size(); ++i)
         {
             const auto& s = singers[(size_t) i];
-            if (s.rotationOrder < 0)
+            if (s.rotationOrder != 0)
                 continue;
-            if (bestIndex < 0
-                || s.rotationOrder < singers[(size_t) bestIndex].rotationOrder
-                || (s.rotationOrder == singers[(size_t) bestIndex].rotationOrder && s.order < singers[(size_t) bestIndex].order))
-            {
+            if (bestIndex < 0 || s.order < singers[(size_t) bestIndex].order)
                 bestIndex = i;
-            }
         }
 
         if (bestIndex >= 0)
             return identityKey(singers[(size_t) bestIndex]);
 
-        const int hostIndex = findHostIndex(singers);
-        if (hostIndex >= 0)
-            return identityKey(singers[(size_t) hostIndex]);
+        // Nobody holds rank 0 (e.g. the host doc's unranked -1, or the host
+        // has no doc yet) -- the round start is up next. Picking the smallest
+        // positive rank here instead would let a newcomer jump the host.
         if (! singers.empty())
-            return identityKey(singers.front());
+            return identityKey(sortByStableOrder(singers).front());
         return {};
     }
 

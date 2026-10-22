@@ -129,12 +129,22 @@ private:
     juce::OwnedArray<juce::TextButton> letterButtons;
     juce::String currentLetter;
 
+    // Flat table-header cell: small left-aligned label (lined up with the
+    // row text under it), accent + arrow when it's the sorted column.
+    class HeaderCell : public juce::Button
+    {
+    public:
+        explicit HeaderCell(const juce::String& name) : juce::Button(name) {}
+        int sortState = 0;   // 0 unsorted, 1 ascending, -1 descending
+        void paintButton(juce::Graphics& g, bool highlighted, bool down) override;
+    };
+
     // Column header buttons
-    std::unique_ptr<juce::TextButton> colSongBtn;
-    std::unique_ptr<juce::TextButton> colArtistBtn;
-    std::unique_ptr<juce::TextButton> colVersionBtn;
-    std::unique_ptr<juce::TextButton> colYearBtn;
-    std::unique_ptr<juce::TextButton> colGenreBtn;
+    std::unique_ptr<HeaderCell> colSongBtn;
+    std::unique_ptr<HeaderCell> colArtistBtn;
+    std::unique_ptr<HeaderCell> colVersionBtn;
+    std::unique_ptr<HeaderCell> colYearBtn;
+    std::unique_ptr<HeaderCell> colGenreBtn;
 
     // Header bar that owns the column buttons and supports drag-to-resize.
     class ColumnHeaderBar : public juce::Component
@@ -145,7 +155,7 @@ private:
         std::vector<float>* fractions = nullptr;     // owned by SearchPage, size 7
         std::function<void()> onDragLive;            // fired during drag (relayout only)
         std::function<void()> onDragCommitted;       // fired on mouseUp (persist)
-        juce::TextButton* cols[5] = { nullptr };     // song/artist/version/year/genre
+        juce::Button* cols[5] = { nullptr };         // song/artist/version/year/genre
 
         void layoutColumns();
         void resized() override;
@@ -254,7 +264,10 @@ private:
     static constexpr int searchBarHeight    = 44;
     static constexpr int letterBarHeight    = 32;
     static constexpr int filterBarHeight    = 36;
-    static constexpr int columnHeaderHeight = 28;
+    static constexpr int columnHeaderHeight = 30;
+    // Left inset of each text column, shared by result rows and header
+    // cells so labels line up with the text below them.
+    static constexpr int kColumnTextPad     = 8;
     static constexpr int resultRowHeight    = 48;
     static constexpr int kCardPad           = 12;
     static constexpr int kCardRadius        = 10;

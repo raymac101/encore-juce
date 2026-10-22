@@ -71,6 +71,76 @@ namespace
         p.lineTo(21.0f, 21.0f);
         return p;
     }
+
+    // JUCE draws the "text when empty" placeholder at the editor's indents
+    // only, ignoring its border -- so with the search box's padding it sat
+    // against the left edge and lower than typed text. This draws it inside
+    // the same border-adjusted area the real text uses.
+    class SearchTextEditor : public juce::TextEditor
+    {
+    public:
+        using juce::TextEditor::TextEditor;
+
+        void paintOverChildren(juce::Graphics& g) override
+        {
+            if (getTotalNumChars() == 0 && ! hasKeyboardFocus(false))
+            {
+                auto area = getBorder().subtractedFrom(getLocalBounds())
+                                       .withTrimmedLeft(getLeftIndent());
+                g.setColour(DesignTokens::colour(DesignTokens::kTextDim));
+                g.setFont(getFont());
+                g.drawText(placeholder, area, getJustificationType(), true);
+            }
+
+            getLookAndFeel().drawTextEditorOutline(g, getWidth(), getHeight(), *this);
+        }
+
+        void focusGained(FocusChangeType cause) override
+        {
+            juce::TextEditor::focusGained(cause);
+            if (onFocusGained) onFocusGained();
+        }
+
+        void focusLost(FocusChangeType cause) override
+        {
+            juce::TextEditor::focusLost(cause);
+            if (onBlur) onBlur();
+        }
+
+        juce::String placeholder;
+        std::function<void()> onFocusGained;
+        std::function<void()> onBlur;
+    };
+
+    // Stacked cards -- "browse everything" (same idea as Spotify's browse icon).
+    juce::Path makeBrowseIconPath()
+    {
+        juce::Path p;
+        p.addRoundedRectangle(3.0f, 9.0f, 18.0f, 12.0f, 2.0f);
+        p.startNewSubPath(5.0f, 6.0f);
+        p.lineTo(19.0f, 6.0f);
+        p.startNewSubPath(7.5f, 3.0f);
+        p.lineTo(16.5f, 3.0f);
+        return p;
+    }
+
+    juce::File recentSearchesSettingsFile()
+    {
+        auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                       .getChildFile("EncoreKaraoke");
+        dir.createDirectory();
+        return dir.getChildFile("settings.xml");
+    }
+
+    juce::Path makeClearIconPath()
+    {
+        juce::Path p;
+        p.startNewSubPath(5.0f, 5.0f);
+        p.lineTo(19.0f, 19.0f);
+        p.startNewSubPath(19.0f, 5.0f);
+        p.lineTo(5.0f, 19.0f);
+        return p;
+    }
 }
 
 //==============================================================================
@@ -368,24 +438,66 @@ HomePage::HomePage()
     homeIconButton_->onClick = [this]() { showBrowseView(); };
     addAndMakeVisible(*homeIconButton_);
 
-    searchBox_ = std::make_unique<juce::TextEditor>("homeSearchBox");
+    auto searchEditor = std::make_unique<SearchTextEditor>("homeSearchBox");
+    searchEditor->placeholder = lm.getText("search.placeholder");
+    searchEditor->onFocusGained = [this]() { updateRecentPanel(); };
+    searchEditor->onBlur = [this]() { hideRecentPanel(); };
+    searchBox_ = std::move(searchEditor);
     searchBox_->setMultiLine(false);
-    searchBox_->setTextToShowWhenEmpty(lm.getText("search.placeholder"),
-                                       DesignTokens::colour(DesignTokens::kTextDim));
     searchBox_->setColour(juce::TextEditor::backgroundColourId, DesignTokens::colour(DesignTokens::kSurface2));
     searchBox_->setColour(juce::TextEditor::textColourId, DesignTokens::colour(DesignTokens::kText));
     searchBox_->setColour(juce::TextEditor::outlineColourId, DesignTokens::colour(DesignTokens::kBorder));
     searchBox_->setColour(juce::TextEditor::focusedOutlineColourId, DesignTokens::colour(DesignTokens::kAccent));
-    searchBox_->setBorder(juce::BorderSize<int>(6, 10, 6, 10));
+    // Vertically centred, larger text; the right border leaves room for the
+    // clear (X) | browse buttons that sit inside the box (see resized()).
+    // JUCE centres the full line height including descent, which reads as
+    // sitting low; the extra bottom border nudges the text up to look
+    // optically centred.
+    searchBox_->setFont(juce::Font(juce::FontOptions().withHeight(20.0f)));
+    searchBox_->setJustification(juce::Justification::centredLeft);
+    searchBox_->setBorder(juce::BorderSize<int>(0, 14, 6, 90));
     // Live filtering: every keystroke swaps to the Search view and forwards
     // the current text straight into the embedded SearchPage (which runs it
     // through its own debounced applySearch() -- see setQueryText()), so
     // results update continuously instead of waiting for Enter. Clearing
     // the box back to empty falls back to the browse view automatically
     // (see showSearchResults()'s empty-query check).
-    searchBox_->onTextChange = [this]() { showSearchResults(); };
-    searchBox_->onReturnKey = [this]() { showSearchResults(); };
+    searchBox_->onTextChange = [this]()
+    {
+        clearSearchButton_->setVisible(searchBox_->getText().isNotEmpty());
+        showSearchResults();
+        updateRecentPanel();
+    };
+    searchBox_->onReturnKey = [this]()
+    {
+        recordRecentSearch(searchBox_->getText());
+        hideRecentPanel();
+        showSearchResults();
+    };
+    searchBox_->onEscapeKey = [this]() { hideRecentPanel(); };
     addAndMakeVisible(*searchBox_);
+
+    // Clears the box but stays in the Search view (an empty query lists the
+    // whole library); only shown while there's text to clear.
+    clearSearchButton_ = std::make_unique<IconButton>("searchClear", makeClearIconPath());
+    clearSearchButton_->onClick = [this]()
+    {
+        searchBox_->setText({}, true);
+        searchBox_->grabKeyboardFocus();
+    };
+    addChildComponent(*clearSearchButton_);
+
+    // Right of the X: the whole library, no query typed.
+    browseAllButton_ = std::make_unique<IconButton>("searchBrowseAll", makeBrowseIconPath());
+    browseAllButton_->setTooltip(lm.getText("search.browse_all"));
+    browseAllButton_->onClick = [this]()
+    {
+        searchBox_->setText({}, false);
+        clearSearchButton_->setVisible(false);
+        hideRecentPanel();
+        showSearchResults();
+    };
+    addAndMakeVisible(*browseAllButton_);
 
     searchSubmitButton_ = std::make_unique<IconButton>("searchSubmit", makeSearchIconPath());
     searchSubmitButton_->onClick = [this]() { showSearchResults(); };
@@ -394,6 +506,7 @@ HomePage::HomePage()
     embeddedSearch_ = std::make_unique<SearchPage>();
     embeddedSearch_->onSongClicked = [this](const CdgSong& song)
     {
+        recordRecentSearch(searchBox_->getText());
         if (onSongClicked) onSongClicked(song);
     };
     embeddedSearch_->onSongEditClicked = [this](const CdgSong& song)
@@ -401,12 +514,216 @@ HomePage::HomePage()
         if (onSongEditClicked) onSongEditClicked(song);
     };
     addChildComponent(*embeddedSearch_);   // hidden until showSearchResults()
+
+    loadRecentSearches();
+    recentPanel_.onPick = [this](const juce::String& query)
+    {
+        recordRecentSearch(query);
+        hideRecentPanel();
+        searchBox_->setText(query, true);
+        searchBox_->moveCaretToEnd();
+    };
+    recentPanel_.onClear = [this]()
+    {
+        recentSearches_.clear();
+        saveRecentSearches();
+        hideRecentPanel();
+    };
+    addChildComponent(recentPanel_);   // shown by updateRecentPanel()
+}
+
+//==============================================================================
+void HomePage::loadRecentSearches()
+{
+    juce::PropertiesFile prefs(recentSearchesSettingsFile(), juce::PropertiesFile::Options());
+    recentSearches_.addLines(prefs.getValue("recentSearches"));
+    recentSearches_.removeEmptyStrings();
+}
+
+void HomePage::saveRecentSearches() const
+{
+    juce::PropertiesFile prefs(recentSearchesSettingsFile(), juce::PropertiesFile::Options());
+    prefs.setValue("recentSearches", recentSearches_.joinIntoString("\n"));
+    prefs.save();
+}
+
+void HomePage::recordRecentSearch(const juce::String& query)
+{
+    const auto q = query.trim();
+    if (q.isEmpty())
+        return;
+
+    recentSearches_.removeString(q, true);   // de-dupe, case-insensitive
+    recentSearches_.insert(0, q);
+    while (recentSearches_.size() > kMaxRecentSearches)
+        recentSearches_.remove(recentSearches_.size() - 1);
+    saveRecentSearches();
+}
+
+void HomePage::updateRecentPanel()
+{
+    if (! searchBox_->hasKeyboardFocus(false))
+    {
+        hideRecentPanel();
+        return;
+    }
+
+    // Empty box: the latest searches. While typing: the ones that match,
+    // minus an exact match of what's already typed.
+    const auto typed = searchBox_->getText().trim();
+    juce::StringArray matches;
+    for (const auto& s : recentSearches_)
+    {
+        if (matches.size() >= kMaxRecentShown)
+            break;
+        if (typed.isEmpty()
+            || (s.containsIgnoreCase(typed) && ! s.equalsIgnoreCase(typed)))
+            matches.add(s);
+    }
+
+    if (matches.isEmpty())
+    {
+        hideRecentPanel();
+        return;
+    }
+
+    recentPanel_.setItems(matches);
+    const auto box = searchBox_->getBounds();
+    recentPanel_.setBounds(box.getX(), box.getBottom() + 4,
+                           juce::jmin(box.getWidth(), 640),
+                           recentPanel_.getPreferredHeight());
+    recentPanel_.setVisible(true);
+    recentPanel_.toFront(false);
+}
+
+void HomePage::hideRecentPanel()
+{
+    recentPanel_.setVisible(false);
+}
+
+//==============================================================================
+RecentSearchesPanel::RecentSearchesPanel()
+{
+    // Clicking here must not steal focus from the search box -- its focus
+    // loss is what hides this panel.
+    setWantsKeyboardFocus(false);
+    setMouseClickGrabsKeyboardFocus(false);
+    clearButton_.setWantsKeyboardFocus(false);
+    clearButton_.setMouseClickGrabsKeyboardFocus(false);
+    clearButton_.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    clearButton_.setColour(juce::TextButton::textColourOffId, DesignTokens::colour(DesignTokens::kText));
+    clearButton_.onClick = [this]() { if (onClear) onClear(); };
+    addAndMakeVisible(clearButton_);
+    updateAllText();
+}
+
+void RecentSearchesPanel::updateAllText()
+{
+    auto& lm = LocalizationManager::getInstance();
+    title_ = lm.getText("search.recent_title");
+    clearButton_.setButtonText(lm.getText("search.recent_clear"));
+    repaint();
+}
+
+void RecentSearchesPanel::setItems(const juce::StringArray& items)
+{
+    items_ = items;
+    hoverRow_ = -1;
+    resized();
+    repaint();
+}
+
+int RecentSearchesPanel::getPreferredHeight() const
+{
+    return kHeaderHeight + items_.size() * kRowHeight + kFooterHeight;
+}
+
+int RecentSearchesPanel::rowAt(juce::Point<int> p) const
+{
+    const int row = (p.y - kHeaderHeight) / kRowHeight;
+    return (p.y >= kHeaderHeight && row < items_.size()) ? row : -1;
+}
+
+void RecentSearchesPanel::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+    g.setColour(DesignTokens::colour(DesignTokens::kSurface));
+    g.fillRoundedRectangle(bounds, 8.0f);
+    g.setColour(DesignTokens::colour(DesignTokens::kBorder));
+    g.drawRoundedRectangle(bounds.reduced(0.5f), 8.0f, 1.0f);
+
+    g.setColour(DesignTokens::colour(DesignTokens::kText));
+    g.setFont(juce::Font(juce::FontOptions().withHeight(DesignTokens::kFontHeading)).boldened());
+    g.drawText(title_, getLocalBounds().removeFromTop(kHeaderHeight).withTrimmedLeft(16),
+               juce::Justification::centredLeft);
+
+    const auto searchIcon = makeSearchIconPath();
+    for (int i = 0; i < items_.size(); ++i)
+    {
+        auto row = juce::Rectangle<int>(0, kHeaderHeight + i * kRowHeight, getWidth(), kRowHeight);
+        if (i == hoverRow_)
+        {
+            g.setColour(DesignTokens::colour(DesignTokens::kAccentSoft));
+            g.fillRect(row.reduced(4, 2));
+        }
+
+        auto iconArea = row.removeFromLeft(48).toFloat().reduced(14.0f);
+        juce::Path icon(searchIcon);
+        icon.scaleToFit(iconArea.getX(), iconArea.getY(), iconArea.getWidth(), iconArea.getHeight(), true);
+        g.setColour(DesignTokens::colour(DesignTokens::kTextDim));
+        g.strokePath(icon, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+
+        g.setColour(DesignTokens::colour(DesignTokens::kText));
+        g.setFont(juce::Font(juce::FontOptions().withHeight(17.0f)));
+        g.drawText(items_[i], row.withTrimmedRight(12), juce::Justification::centredLeft, true);
+    }
+}
+
+void RecentSearchesPanel::resized()
+{
+    auto footer = getLocalBounds().removeFromBottom(kFooterHeight).reduced(16, 10);
+    clearButton_.setBounds(footer.removeFromLeft(220));
+}
+
+void RecentSearchesPanel::mouseMove(const juce::MouseEvent& e)
+{
+    const int row = rowAt(e.getPosition());
+    if (row != hoverRow_)
+    {
+        hoverRow_ = row;
+        repaint();
+    }
+    setMouseCursor(row >= 0 ? juce::MouseCursor::PointingHandCursor
+                            : juce::MouseCursor::NormalCursor);
+}
+
+void RecentSearchesPanel::mouseExit(const juce::MouseEvent&)
+{
+    hoverRow_ = -1;
+    repaint();
+}
+
+void RecentSearchesPanel::mouseUp(const juce::MouseEvent& e)
+{
+    const int row = rowAt(e.getPosition());
+    if (row >= 0 && onPick)
+        onPick(items_[row]);
 }
 
 //==============================================================================
 void HomePage::paint(juce::Graphics& g)
 {
     juce::ignoreUnused(g);
+}
+
+void HomePage::paintOverChildren(juce::Graphics& g)
+{
+    // Divider between the X and browse buttons inside the search box.
+    const auto browse = browseAllButton_->getBounds();
+    const float x = (float) browse.getX() - 5.0f;
+    g.setColour(DesignTokens::colour(DesignTokens::kBorder));
+    g.drawLine(x, (float) browse.getY() + 4.0f, x, (float) browse.getBottom() - 4.0f, 1.0f);
 }
 
 //==============================================================================
@@ -422,6 +739,14 @@ void HomePage::resized()
     searchSubmitButton_->setBounds(searchRow.removeFromLeft(kSearchRowHeight));
     searchRow.removeFromLeft(kGap);
     searchBox_->setBounds(searchRow);
+    // X | browse, inset so the box's own outline still shows around them;
+    // the divider between them is drawn in paintOverChildren().
+    browseAllButton_->setBounds(searchRow.removeFromRight(kSearchRowHeight).reduced(4));
+    searchRow.removeFromRight(6);
+    clearSearchButton_->setBounds(searchRow.removeFromRight(kSearchRowHeight).reduced(4));
+
+    if (recentPanel_.isVisible())
+        updateRecentPanel();
 
     bounds.removeFromTop(kGap);
 
@@ -435,6 +760,8 @@ void HomePage::showBrowseView()
 {
     showingSearch_ = false;
     searchBox_->clear();
+    clearSearchButton_->setVisible(false);
+    hideRecentPanel();
     pageViewport.setVisible(true);
     embeddedSearch_->setVisible(false);
 }
@@ -550,6 +877,8 @@ void HomePage::updateAllText()
     popularRow->setTitle(lm.getText("home.popular_songs"));
     recommendedRow->setTitle(lm.getText("home.recommended_songs"));
     embeddedSearch_->updateAllText();
+    recentPanel_.updateAllText();
+    browseAllButton_->setTooltip(lm.getText("search.browse_all"));
 }
 
 //==============================================================================

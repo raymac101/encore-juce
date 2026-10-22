@@ -102,13 +102,13 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
     // Song name
     g.setColour(juce::Colour(0xffe4e4e4));
     g.setFont(juce::Font(juce::FontOptions().withHeight(13.f)));
-    g.drawText(juce::String(song.songName), x, 0, songW, bounds.getHeight(),
+    g.drawText(juce::String(song.songName), x + kColumnTextPad, 0, songW - kColumnTextPad, bounds.getHeight(),
                juce::Justification::centredLeft, true);
     x += songW;
 
     // Artist
     g.setColour(juce::Colour(0xffa3a6a8));
-    g.drawText(juce::String(song.artistName), x, 0, artistW, bounds.getHeight(),
+    g.drawText(juce::String(song.artistName), x + kColumnTextPad, 0, artistW - kColumnTextPad, bounds.getHeight(),
                juce::Justification::centredLeft, true);
     x += artistW;
 
@@ -121,13 +121,13 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
             verStr += juce::String(song.version[i]);
         }
         g.setColour(juce::Colour(0xffe4e4e4));
-        g.drawText(verStr, x, 0, versionW, bounds.getHeight(),
+        g.drawText(verStr, x + kColumnTextPad, 0, versionW - kColumnTextPad, bounds.getHeight(),
                    juce::Justification::centredLeft, true);
     }
     x += versionW;
 
     // Year
-    g.drawText(juce::String(song.releaseDate), x, 0, yearW, bounds.getHeight(),
+    g.drawText(juce::String(song.releaseDate), x + kColumnTextPad, 0, yearW - kColumnTextPad, bounds.getHeight(),
                juce::Justification::centredLeft, true);
     x += yearW;
 
@@ -139,17 +139,19 @@ void SearchPage::SongResultRow::paint(juce::Graphics& g)
             if (i > 0) genreStr += ", ";
             genreStr += juce::String(song.genres[i]);
         }
-        g.drawText(genreStr, x, 0, genreW, bounds.getHeight(),
+        g.drawText(genreStr, x + kColumnTextPad, 0, genreW - kColumnTextPad, bounds.getHeight(),
                    juce::Justification::centredLeft, true);
     }
     x += genreW;
 
-    // Edit column – pencil icon area
-    auto editRect = juce::Rectangle<int>(x, 0, bounds.getWidth() - x, bounds.getHeight());
+    // Edit column – horizontal "more" dots (•••); clicking anywhere in the
+    // column still opens the editor (see getEditColumnStartX()).
+    auto editRect = juce::Rectangle<int>(x, 0, bounds.getWidth() - x, bounds.getHeight()).toFloat();
     g.setColour(juce::Colour(0xffe4e4e4));
-    g.setFont(juce::Font(juce::FontOptions().withHeight(16.f)));
-    g.drawText(LocalizationManager::getInstance().getText("search.row_edit"),
-               editRect, juce::Justification::centred);
+    constexpr float dotR = 2.5f, dotGap = 8.f;
+    const auto c = editRect.getCentre();
+    for (int i = -1; i <= 1; ++i)
+        g.fillEllipse(c.x + (float) i * dotGap - dotR, c.y - dotR, dotR * 2.f, dotR * 2.f);
 
     // Bottom separator
     g.setColour(juce::Colour(0xff585757).withAlpha(0.3f));
@@ -214,13 +216,13 @@ SearchPage::SearchPage()
     titleLabel = std::make_unique<juce::Label>("title", searchName);
     titleLabel->setColour(juce::Label::textColourId, textColour);
     titleLabel->setFont(juce::Font(juce::FontOptions().withHeight(32.f)).boldened());
-    addAndMakeVisible(*titleLabel);
+    addChildComponent(*titleLabel);   // not laid out -- see resized()
 
     // Count
     countLabel = std::make_unique<juce::Label>("count", "0 songs in this list");
     countLabel->setColour(juce::Label::textColourId, textColour.withAlpha(0.6f));
     countLabel->setFont(juce::Font(juce::FontOptions().withHeight(14.f)));
-    addAndMakeVisible(*countLabel);
+    addChildComponent(*countLabel);   // not laid out -- see resized()
 
     // Search box
     searchBox = std::make_unique<juce::TextEditor>("search");
@@ -293,12 +295,11 @@ SearchPage::SearchPage()
         }
     }
 
-    // Column header buttons
+    // Column header cells (flat labels -- see HeaderCell::paintButton)
     auto makeColBtn = [&](const juce::String& text) {
-        auto btn = std::make_unique<juce::TextButton>(text);
-        btn->setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-        btn->setColour(juce::TextButton::textColourOnId, juce::Colour(0xfff7f8fa));
-        btn->setColour(juce::TextButton::textColourOffId, juce::Colour(0xfff7f8fa));
+        auto btn = std::make_unique<HeaderCell>(text);
+        btn->setButtonText(text);
+        btn->setMouseCursor(juce::MouseCursor::PointingHandCursor);
         return btn;
     };
 
@@ -411,27 +412,24 @@ void SearchPage::paint(juce::Graphics& g)
 //==============================================================================
 void SearchPage::resized()
 {
-    auto bounds = getLocalBounds().reduced(20, 12);
+    auto bounds = getLocalBounds().reduced(20, 0).withTrimmedBottom(12);
     cardRects_.clear();
 
-    // Title bar (title + count side by side) — no card, title has gradient underline.
-    {
-        auto titleArea = bounds.removeFromTop(titleBarHeight);
-        titleLabel->setBounds(titleArea.removeFromTop(titleArea.getHeight() * 2 / 3));
-        countLabel->setBounds(titleArea);
-    }
+    // No title bar: embedded under HomePage's search bar, the "Search" title
+    // and song count just took space from the results. The labels stay
+    // (hidden in the constructor) because setPageName()/count updates still
+    // write to them.
 
-    bounds.removeFromTop(4);
-
-    // ── Controls card (letter bar + filter bar + column headers) ──
+    // ── Controls card (letter bar + filter bar) ──
     // The search box + clear button used to be the first slice of this
     // card; SearchPage is now embedded under HomePage's own search bar
     // (see setQueryText()), so that slice -- and the two components
     // themselves (hidden in the constructor) -- are no longer laid out here.
+    // The column headers moved to the top of the results card, so they
+    // share the rows' exact x/width.
     const int controlsH = letterBarHeight
                         + filterBarHeight
-                        + columnHeaderHeight
-                        + kCardPad * 2 + 8; // extra inner gaps between sub-rows
+                        + kCardPad * 2 + 4; // extra inner gap between sub-rows
     juce::Rectangle<int> controlsCard(bounds.getX(), bounds.getY(),
                                       bounds.getWidth(), controlsH);
     cardRects_.push_back(controlsCard);
@@ -463,13 +461,6 @@ void SearchPage::resized()
         filterYearBtn->setBounds(filterArea.removeFromLeft(bw).reduced(2, 0));
         filterGenreBtn->setBounds(filterArea.removeFromLeft(bw).reduced(2, 0));
     }
-    controlsInner.removeFromTop(2);
-
-    // Column headers (resizable)
-    {
-        auto colArea = controlsInner.removeFromTop(columnHeaderHeight);
-        columnHeaderBar.setBounds(colArea);
-    }
 
     bounds.removeFromTop(controlsH + kCardGap);
 
@@ -479,6 +470,12 @@ void SearchPage::resized()
     auto listArea = bounds.reduced(kCardPad);
     listArea.setX(listArea.getX() + 4);
     listArea.setWidth(listArea.getWidth() - 4);
+
+    // Column headers (resizable) -- same x/width as the rows below, so each
+    // label lines up with its column. Pulled up into the card's top padding
+    // so the gap above the labels matches the gap below them.
+    listArea.setTop(listArea.getY() - (kCardPad - 2));
+    columnHeaderBar.setBounds(listArea.removeFromTop(columnHeaderHeight));
 
     listViewport.setBounds(listArea);
 
@@ -863,15 +860,45 @@ void SearchPage::updateFilterButtonColours()
 void SearchPage::updateColumnHeaderText()
 {
     auto& lm = LocalizationManager::getInstance();
-    auto arrow = [&](SortColumn col) -> juce::String {
-        if (sortColumn != col) return "";
-        return (sortDir == SortDir::Asc) ? " ^" : " v";
+    auto update = [&](HeaderCell& cell, const char* key, SortColumn col)
+    {
+        cell.setButtonText(lm.getText(key));
+        cell.sortState = sortColumn != col ? 0 : (sortDir == SortDir::Asc ? 1 : -1);
+        cell.repaint();
     };
-    colSongBtn->setButtonText(lm.getText("search.col_song")    + arrow(SortColumn::Song));
-    colArtistBtn->setButtonText(lm.getText("search.col_artist")  + arrow(SortColumn::Artist));
-    colVersionBtn->setButtonText(lm.getText("search.col_version") + arrow(SortColumn::Version));
-    colYearBtn->setButtonText(lm.getText("search.col_year")    + arrow(SortColumn::Year));
-    colGenreBtn->setButtonText(lm.getText("search.col_genre")   + arrow(SortColumn::Genre));
+    update(*colSongBtn,    "search.col_song",    SortColumn::Song);
+    update(*colArtistBtn,  "search.col_artist",  SortColumn::Artist);
+    update(*colVersionBtn, "search.col_version", SortColumn::Version);
+    update(*colYearBtn,    "search.col_year",    SortColumn::Year);
+    update(*colGenreBtn,   "search.col_genre",   SortColumn::Genre);
+}
+
+void SearchPage::HeaderCell::paintButton(juce::Graphics& g, bool highlighted, bool down)
+{
+    const bool sorted = sortState != 0;
+    auto colour = sorted ? juce::Colour(0xff8cb6f0)                 // accentSoftColour
+                         : juce::Colour(0xffa3a6a8);                // artistTextColour
+    if (highlighted || down)
+        colour = colour.brighter(0.3f);
+
+    auto area = getLocalBounds().withTrimmedLeft(kColumnTextPad);
+    const auto text = getButtonText().toUpperCase();
+    const auto font = juce::Font(juce::FontOptions().withHeight(11.5f)).boldened();
+    g.setColour(colour);
+    g.setFont(font);
+    g.drawText(text, area, juce::Justification::centredLeft, true);
+
+    if (sorted)
+    {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(font, text, 0.f, 0.f);
+        const float tx = (float) area.getX() + ga.getBoundingBox(0, -1, true).getWidth() + 6.f;
+        const float cy = (float) getHeight() * 0.5f;
+        juce::Path tri;
+        if (sortState > 0) tri.addTriangle(tx, cy + 2.5f, tx + 7.f, cy + 2.5f, tx + 3.5f, cy - 2.5f);
+        else               tri.addTriangle(tx, cy - 2.5f, tx + 7.f, cy - 2.5f, tx + 3.5f, cy + 2.5f);
+        g.fillPath(tri);
+    }
 }
 
 //==============================================================================
@@ -987,15 +1014,20 @@ void SearchPage::ColumnHeaderBar::paint(juce::Graphics& g)
     const int w = getWidth();
     const auto& f = *fractions;
 
-    // Vertical divider lines between columns (4 internal dividers)
+    // Short, faint resize handles between columns (4 internal dividers) --
+    // they sit just left of each label's padded text, like a table header.
     float xf = f[0] + f[1];
-    g.setColour(juce::Colour(0xff585757).withAlpha(0.5f));
+    g.setColour(juce::Colour(0xff585757).withAlpha(0.6f));
     for (int i = 0; i < 4; ++i)
     {
         int px = (int)(w * xf);
-        g.drawVerticalLine(px, 4.f, (float)(getHeight() - 4));
+        g.drawVerticalLine(px, 8.f, (float)(getHeight() - 8));
         xf += f[i + 2];
     }
+
+    // Bottom rule separating the header from the first result row.
+    g.setColour(juce::Colour(0xff585757).withAlpha(0.6f));
+    g.drawHorizontalLine(getHeight() - 1, 0.f, (float) w);
 }
 
 int SearchPage::ColumnHeaderBar::findDivider(int localX) const

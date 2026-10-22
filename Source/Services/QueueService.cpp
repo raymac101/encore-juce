@@ -16,6 +16,7 @@
 #include "QueueService.h"
 #include "FirestoreClient.h"
 #include "QueueWriteOutbox.h"
+#include "QueueRotation.h"
 #include <algorithm>
 #include <unordered_map>
 
@@ -610,12 +611,74 @@ bool QueueService::appendSongSync(const juce::String& venueId,
     }
 
     // New singer — create a fresh /queue doc with this song.
-    // Order placement: end of current queue.
-    int maxOrder = -1;
+    // Order placement: the bottom of the DISPLAYED queue, i.e. the RR slot
+    // directly before the current anchor (who's up next). Appending to the
+    // bottom of the RR instead would land them just above the round start
+    // whenever the round has progressed past it -- mid-list, not the bottom.
+    std::vector<Singers> existing;
+    existing.reserve((size_t) docs.size());
     for (auto& d : docs)
     {
-        auto f = d.getProperty("fields", juce::var());
-        maxOrder = juce::jmax(maxOrder, valueAsInt(fieldByName(f, "order")));
+        auto s = singerFromDoc(d);
+        if (s.name.empty() && s.songs.empty())
+            continue; // empty skeleton doc, same as buildSnapshot()
+        existing.push_back(std::move(s));
+    }
+
+    // The signed-in host is always in the round (MainComponent shows a
+    // placeholder for them at order -1), but their doc may not exist yet.
+    // Count them here so a newcomer can't become the round start or the
+    // anchor ahead of them; the placeholder itself is never written.
+    const auto hostUid = FirestoreClient::getInstance().getUserId().trim();
+    bool hostIsVirtual = false;
+    if (hostUid.isNotEmpty()
+        && std::none_of(existing.begin(), existing.end(),
+                        [&hostUid](const Singers& s) { return juce::String(s.id) == hostUid; }))
+    {
+        Singers host;
+        host.id = hostUid.toStdString();
+        host.isHost = true;
+        host.order = -1;
+        host.rotationOrder = -1;
+        existing.push_back(std::move(host));
+        hostIsVirtual = true;
+    }
+
+    auto rr = QueueRotation::sortByStableOrder(existing);
+    const auto anchorId = QueueRotation::findAnchorId(rr);
+    int anchorIndex = 0;
+    for (int i = 0; i < (int) rr.size(); ++i)
+        if (juce::String(rr[(size_t) i].id) == anchorId)
+            anchorIndex = i;
+
+    // The newcomer is always last in the displayed queue: at the bottom of
+    // the RR when the round start is up next, otherwise in the RR slot
+    // just before the anchor (shifting the anchor and everyone after it
+    // down one). Every existing singer is restamped, which also heals
+    // stale or unranked (-1) values.
+    const int n = (int) rr.size() + 1;
+    const int newOrder = anchorIndex > 0 ? anchorIndex : n - 1;
+    const int anchorPos = anchorIndex > 0 ? anchorIndex + 1 : 0;
+    const int newRank = n - 1;
+
+    std::vector<FirestoreClient::BatchPatch> patches;
+    for (int i = 0; i < (int) rr.size(); ++i)
+    {
+        const auto& s = rr[(size_t) i];
+        if (hostIsVirtual && juce::String(s.id) == hostUid)
+            continue;
+
+        const int pos = (anchorIndex > 0 && i >= anchorIndex) ? i + 1 : i;
+        patches.push_back({ collPath + "/" + juce::String(s.id),
+                            FirestoreClient::makeFields({
+                                { "order",         FirestoreClient::integerValue(pos) },
+                                { "rotationOrder", FirestoreClient::integerValue(((pos - anchorPos) + n) % n) } }) });
+    }
+
+    if (! FirestoreClient::getInstance().commitPatches(patches))
+    {
+        outError = "Could not make room in the round (network)";
+        return false;
     }
 
     QueueItem first = item;
@@ -644,12 +707,12 @@ bool QueueService::appendSongSync(const juce::String& venueId,
     fields->setProperty("profileId",      FirestoreClient::stringValue(storedProfileId));
     fields->setProperty("foxId",          FirestoreClient::stringValue(juce::String(item.foxId)));
     fields->setProperty("status",         FirestoreClient::stringValue("queued"));
-    // `order` is the stable RR position -- appended to the bottom.
-    // `rotationOrder` is a derived display-rank cache (restamped by
-    // QueueRotation::stampDerivedRanks() the next time anything
-    // reloads/reorders); it must NOT be hardcoded to the new RR
-    // position here, or a new singer would appear to BE the anchor.
-    fields->setProperty("order",          FirestoreClient::integerValue(maxOrder + 1));
+    // `order` is the stable RR position (see placement above).
+    // `rotationOrder` is the derived display rank -- last in the queue.
+    // It must NOT be left unset: a missing value parses as 0, which could
+    // make the newcomer look like the anchor.
+    fields->setProperty("order",          FirestoreClient::integerValue(newOrder));
+    fields->setProperty("rotationOrder",  FirestoreClient::integerValue(newRank));
     fields->setProperty("strikes",        FirestoreClient::integerValue(0));
     fields->setProperty("songsPerformed", FirestoreClient::integerValue(0));
     fields->setProperty("songs",          songsArrayValue(initialSongs));

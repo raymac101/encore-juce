@@ -849,26 +849,19 @@ QueueBar::QueueBar()
     clearQueueButton->onClick = [this]() { if (onClearQueue) onClearQueue(); };
     addAndMakeVisible(*clearQueueButton);
 
-    // "Queue Open" / "Queue Closed" -- checked = open (default). Directly
-    // drives queueClosed (see setQueueClosed()), which gates incoming
-    // mobile (TAGG) song requests in MainComponent::onIncomingNewRequest().
-    queueToggle = std::make_unique<juce::ToggleButton>(LocalizationManager::getInstance().getText("queue.queue_open"));
-    queueToggle->setToggleState(true, juce::dontSendNotification);
-    queueToggle->setColour(juce::ToggleButton::textColourId, textColour);
-    queueToggle->setColour(juce::ToggleButton::tickColourId, accentColour);
-    queueToggle->onClick = [this]()
+    // "Close Queue" (red) while open / "Open Queue" (green) while closed.
+    // Directly drives queueClosed (see setQueueClosed(), which also restyles
+    // this button), which gates incoming mobile (TAGG) song requests in
+    // MainComponent::onIncomingNewRequest().
+    queueOpenCloseButton = std::make_unique<juce::TextButton>();
+    queueOpenCloseButton->onClick = [this]()
     {
-        const bool open = queueToggle->getToggleState();
+        const bool open = queueClosed;   // clicking flips the current state
         setQueueClosed (! open);
         if (onQueueToggled) onQueueToggled(open);
     };
-    addAndMakeVisible(*queueToggle);
-
-    addSingerButton = std::make_unique<juce::TextButton>("+ Add Singer");
-    addSingerButton->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d3a));
-    addSingerButton->setColour(juce::TextButton::textColourOffId, accentColour);
-    addSingerButton->onClick = [this]() { if (onAddSinger) onAddSinger(); };
-    addAndMakeVisible(*addSingerButton);
+    addAndMakeVisible(*queueOpenCloseButton);
+    setQueueClosed (false);
 
     // One step either way per click -- see MainComponent::rotateQueueManually().
     rotateLeftButton = std::make_unique<juce::TextButton>(LocalizationManager::getInstance().getText("queue.rotate_left"));
@@ -957,14 +950,11 @@ void QueueBar::resized()
         songCountLabel->setBounds(row1.removeFromLeft(third));
         totalTimeLabel->setBounds(row1);
 
-        auto row2 = statusArea.removeFromTop(28).reduced(8, 2);
-        queueToggle->setBounds(row2);
-
         auto row4 = statusArea.removeFromTop(28).reduced(8, 2);
         auto row4Left  = row4.removeFromLeft(row4.getWidth() / 2 - 2);
         auto row4Right = row4.withTrimmedLeft(2);
         clearQueueButton->setBounds(row4Left);
-        addSingerButton->setBounds(row4Right);
+        queueOpenCloseButton->setBounds(row4Right);
 
         auto row5 = statusArea.removeFromTop(28).reduced(8, 2);
         rotateLeftButton->setBounds(row5.removeFromLeft(row5.getWidth() / 2 - 2));
@@ -1230,12 +1220,16 @@ void QueueBar::setPlaying(bool playing)
 void QueueBar::setQueueClosed(bool closed)
 {
     queueClosed = closed;
-    if (queueToggle)
+    if (queueOpenCloseButton)
     {
         auto& lm = LocalizationManager::getInstance();
-        queueToggle->setToggleState(! closed, juce::dontSendNotification);
-        queueToggle->setButtonText(closed ? lm.getText("queue.queue_closed")
-                                           : lm.getText("queue.queue_open"));
+        queueOpenCloseButton->setButtonText(closed ? lm.getText("queue.open_queue")
+                                                   : lm.getText("queue.close_queue"));
+        const auto bg = DesignTokens::colour(closed ? DesignTokens::kSuccess
+                                                    : DesignTokens::kDanger);
+        queueOpenCloseButton->setColour(juce::TextButton::buttonColourId, bg);
+        queueOpenCloseButton->setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+        queueOpenCloseButton->setColour(juce::TextButton::textColourOffId, juce::Colours::black);
     }
     repaint();
 }
@@ -1425,8 +1419,7 @@ void QueueBar::updateAllText()
     clearQueueButton->setButtonText(lm.getText("queue.clear_queue"));
     rotateLeftButton->setButtonText(lm.getText("queue.rotate_left"));
     rotateRightButton->setButtonText(lm.getText("queue.rotate_right"));
-    queueToggle->setButtonText(queueClosed ? lm.getText("queue.queue_closed")
-                                            : lm.getText("queue.queue_open"));
+    setQueueClosed(queueClosed);   // re-reads the Open/Close Queue text
     updateStatusLabels();
 }
 

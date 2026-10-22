@@ -53,10 +53,10 @@ namespace QueueRotation
         song finishing or starting. */
     void renumberStableOrder(std::vector<Singers>& rr);
 
-    /** The current anchor's singer id: whoever has the smallest
-        non-negative `rotationOrder`, ties broken by `order`. Falls back to
-        the host (or the first entry, if no host is present) when nothing
-        qualifies -- e.g. a brand-new venue or corrupt/missing data. */
+    /** The current anchor's singer id: whoever has `rotationOrder` 0,
+        ties broken by `order`. Falls back to the round start (front of
+        sortByStableOrder) when nobody does -- e.g. a brand-new venue, the
+        host's unranked (-1) doc, or corrupt/missing data. */
     juce::String findAnchorId(const std::vector<Singers>& singers);
 
     /** `rr` must already be sorted by stable order (see
