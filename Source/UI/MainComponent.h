@@ -196,6 +196,18 @@ private:
     juce::String pendingVenueCode_;
     juce::Image pendingVenueLogo_;
 
+    // Venue code auto-reset (Settings > Venue Code > Auto-Reset Code):
+    // checked on venue load and then every kVenueCodeCheckMs from
+    // timerCallback(); VenueService::rotateCodeIfDue() decides whether
+    // the interval has actually elapsed.
+    static constexpr juce::int64 kVenueCodeCheckMs = 5 * 60 * 1000;
+    juce::int64 lastVenueCodeCheckMs_ = 0;
+    bool        venueCodeCheckInFlight_ = false;
+    void checkVenueCodeRotation();
+    /** Re-reads the venue and pushes its (possibly new) code to the queue
+        bar, settings page and lyric display. */
+    void reloadVenueCodeDisplays(const juce::String& venueId);
+
     // Phone/tablet lyric streaming (see LyricStreamServer, BottomBar's
     // "Phone Lyrics" button). Created lazily on first use; only actually
     // listens on the network once started.

@@ -270,9 +270,14 @@ namespace
 
     // Editable VenueItem fields the settings page can change. Listed once so
     // the body payload and the updateMask stay in sync.
+    // `code`/`codePlus`/`codeResetHours` are deliberately NOT here: they
+    // change through their own writes (updateVenueCode/addCode/
+    // rotateCodeIfDue/setCodeResetHours/emergency code), and codes now
+    // rotate on their own -- a general settings save holding a stale copy
+    // must not write an old code back. (fieldsFromVenue() still emits them
+    // for addVenue(); fields outside the mask are ignored.)
     static const juce::StringArray kEditableFields = {
         "name", "address", "city", "country",
-        "code", "codePlus",
         "numSongs", "numSingers", "numStrikes",
         "repeatSongs", "autoapprove",
         "background", "encoreBackground", "encodeBackgroundSize",
@@ -290,6 +295,7 @@ namespace
             { "companyId", FC::stringValue(juce::String(v.companyId)) },
             { "code",     FC::stringValue(juce::String(v.code)) },
             { "codePlus", FC::stringValue(juce::String(v.codePlus)) },
+            { "codeResetHours", FC::integerValue(v.codeResetHours) },
             { "numSongs",   FC::stringValue(juce::String(v.numSongs)) },
             { "numSingers", FC::stringValue(juce::String(v.numSingers)) },
             { "numStrikes", FC::stringValue(juce::String(v.numStrikes)) },
@@ -434,8 +440,13 @@ juce::String VenueService::generateCode(int length)
     static const char* charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     auto& rng = juce::Random::getSystemRandom();
     juce::String out;
-    for (int i = 0; i < length; ++i)
-        out += juce::String::charToString(charset[rng.nextInt(26)]);
+    do
+    {
+        out.clear();
+        for (int i = 0; i < length; ++i)
+            out += juce::String::charToString(charset[rng.nextInt(26)]);
+    }
+    while (out == kPermanentCode);   // reserved for kPermanentCodeVenueId
     return out;
 }
 
@@ -571,10 +582,23 @@ void VenueService::updateVenueCode(const juce::String& venueId,
         return;
     }
 
-    juce::Thread::launch([venueId, newCode, onDone = std::move(onDone)]()
+    // KWKWKW belongs to one venue only, and that venue never changes code.
+    const bool permanentVenue = isPermanentCodeVenue(venueId);
+    if (! permanentVenue && newCode.trim().equalsIgnoreCase(kPermanentCode))
     {
-        auto fields = FC::makeFields({ { "code", FC::stringValue(newCode) } });
-        const auto path = "venues/" + venueId + "?updateMask.fieldPaths=code";
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "That code is reserved"); });
+        return;
+    }
+    const auto code = permanentVenue ? juce::String(kPermanentCode) : newCode;
+    const auto now  = juce::Time::getCurrentTime().toMilliseconds();
+
+    juce::Thread::launch([venueId, code, now, onDone = std::move(onDone)]()
+    {
+        auto fields = FC::makeFields({ { "code",          FC::stringValue(code) },
+                                       { "codeChangedAt", FC::integerValue(now) } });
+        const auto path = "venues/" + venueId
+                        + "?updateMask.fieldPaths=code"
+                        + "&updateMask.fieldPaths=codeChangedAt";
         const bool ok = FC::getInstance().patchDocument(path, fields);
         if (onDone)
         {
@@ -617,25 +641,114 @@ void VenueService::addCode(const juce::String& venueId, WriteCallback onDone)
         return;
     }
 
-    const auto code     = generateCode(6);
+    const auto code     = isPermanentCodeVenue(venueId) ? juce::String(kPermanentCode)
+                                                        : generateCode(6);
     const auto codePlus = generateCode(6);
     const auto now      = juce::Time::getCurrentTime().toMilliseconds();
 
     juce::Thread::launch([venueId, code, codePlus, now, onDone = std::move(onDone)]()
     {
         auto fields = FC::makeFields({
-            { "code",     FC::stringValue(code) },
-            { "codePlus", FC::stringValue(codePlus) },
-            { "dateTime", FC::integerValue(now) }
+            { "code",          FC::stringValue(code) },
+            { "codePlus",      FC::stringValue(codePlus) },
+            { "dateTime",      FC::integerValue(now) },
+            { "codeChangedAt", FC::integerValue(now) }
         });
         const auto path = "venues/" + venueId
                         + "?updateMask.fieldPaths=code"
                         + "&updateMask.fieldPaths=codePlus"
-                        + "&updateMask.fieldPaths=dateTime";
+                        + "&updateMask.fieldPaths=dateTime"
+                        + "&updateMask.fieldPaths=codeChangedAt";
         const bool ok = FC::getInstance().patchDocument(path, fields);
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]()
                 { onDone(ok, ok ? juce::String() : juce::String("patch failed")); });
+    });
+}
+
+void VenueService::setCodeResetHours(const juce::String& venueId, int hours, WriteCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "No venueId"); });
+        return;
+    }
+
+    const auto now = juce::Time::getCurrentTime().toMilliseconds();
+    juce::Thread::launch([venueId, hours, now, onDone = std::move(onDone)]()
+    {
+        auto fields = FC::makeFields({ { "codeResetHours", FC::integerValue(juce::jmax(0, hours)) },
+                                       { "codeChangedAt",  FC::integerValue(now) } });
+        const auto path = "venues/" + venueId
+                        + "?updateMask.fieldPaths=codeResetHours"
+                        + "&updateMask.fieldPaths=codeChangedAt";
+        const bool ok = FC::getInstance().patchDocument(path, fields);
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok]()
+                { onDone(ok, ok ? juce::String() : juce::String("patch failed")); });
+    });
+}
+
+void VenueService::rotateCodeIfDue(const juce::String& venueId, RotateCallback onDone)
+{
+    if (venueId.isEmpty())
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false); });
+        return;
+    }
+
+    juce::Thread::launch([venueId, onDone = std::move(onDone)]()
+    {
+        // Read fresh rather than trusting a cached VenueItem: another KJ
+        // machine on the same venue may already have rotated it.
+        int status = 0;
+        auto doc = FC::getInstance().getDocument("venues/" + venueId, &status);
+        if (status != 200 || ! doc.hasProperty("fields"))
+        {
+            if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false); });
+            return;
+        }
+        const auto v = VenueItem::fromJson(juce::JSON::toString(FC::unwrapFields(doc)));
+
+        const auto now = juce::Time::getCurrentTime().toMilliseconds();
+        juce::var fields;
+        juce::String mask;
+
+        if (isPermanentCodeVenue(venueId))
+        {
+            if (juce::String(v.code) != kPermanentCode)
+            {
+                fields = FC::makeFields({ { "code",          FC::stringValue(kPermanentCode) },
+                                          { "codeChangedAt", FC::integerValue(now) } });
+                mask = "updateMask.fieldPaths=code&updateMask.fieldPaths=codeChangedAt";
+            }
+        }
+        else if (v.codeResetHours > 0)
+        {
+            if (v.codeChangedAt <= 0)
+            {
+                // No baseline yet -- start the clock, don't rotate.
+                fields = FC::makeFields({ { "codeChangedAt", FC::integerValue(now) } });
+                mask = "updateMask.fieldPaths=codeChangedAt";
+            }
+            else if (now - v.codeChangedAt >= (juce::int64) v.codeResetHours * 60 * 60 * 1000)
+            {
+                fields = FC::makeFields({ { "code",          FC::stringValue(generateCode(6)) },
+                                          { "codeChangedAt", FC::integerValue(now) } });
+                mask = "updateMask.fieldPaths=code&updateMask.fieldPaths=codeChangedAt";
+            }
+        }
+
+        bool changed = false;
+        if (! fields.isVoid())
+        {
+            const bool ok = FC::getInstance().patchDocument("venues/" + venueId + "?" + mask, fields);
+            changed = ok && mask.contains("fieldPaths=code&");
+            DBG("[VenueCode] " << venueId << (changed ? " code rotated" : " clock stamped")
+                << " ok=" << (ok ? 1 : 0));
+        }
+
+        if (onDone) juce::MessageManager::callAsync([onDone, changed] { onDone(changed); });
     });
 }
 

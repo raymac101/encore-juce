@@ -24,6 +24,91 @@ private:
     LyricDisplayWindow& owner_;
 };
 
+//==============================================================================
+/** Window content: a black backdrop with the LyricDisplayComponent inset by
+    the "Screen Border" preference, so everything on the lyric screen shrinks
+    toward the centre on TVs that overscan. Polls the preference (like
+    LyricDisplayComponent does for its sizing sliders) so dragging the
+    Settings slider updates the screen live, and briefly outlines the visible
+    area after each change so the host can see exactly where the edge sits. */
+class LyricDisplayWindow::SafeAreaHost  : public juce::Component,
+                                          private juce::Timer
+{
+public:
+    explicit SafeAreaHost (std::unique_ptr<LyricDisplayComponent> display)
+        : display_ (std::move (display))
+    {
+        setOpaque (true);
+        borderPercent_ = UserPreferences::getInstance().getLyricScreenBorderPercent();
+        addAndMakeVisible (display_.get());
+        startTimerHz (10);
+    }
+
+    LyricDisplayComponent* getDisplay() const noexcept { return display_.get(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black);
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (juce::Time::getMillisecondCounter() >= guideUntilMs_)
+            return;
+
+        // A bright outline right on the content edge plus thick corner
+        // brackets, so it's obvious when any part of it is cropped.
+        auto r = display_->getBounds().toFloat().reduced (1.5f);
+        g.setColour (juce::Colour (0xff30daff));
+        g.drawRect (r, 3.0f);
+
+        const float len = juce::jmin (r.getWidth(), r.getHeight()) * 0.08f;
+        juce::Path corners;
+        for (auto [x, y, dx, dy] : { std::tuple { r.getX(),     r.getY(),       1.0f,  1.0f },
+                                     std::tuple { r.getRight(), r.getY(),      -1.0f,  1.0f },
+                                     std::tuple { r.getX(),     r.getBottom(),  1.0f, -1.0f },
+                                     std::tuple { r.getRight(), r.getBottom(), -1.0f, -1.0f } })
+        {
+            corners.startNewSubPath (x + dx * len, y);
+            corners.lineTo (x, y);
+            corners.lineTo (x, y + dy * len);
+        }
+        g.strokePath (corners, juce::PathStrokeType (8.0f));
+    }
+
+    void resized() override
+    {
+        const auto frac = borderPercent_ / 100.0;
+        const int dx = juce::roundToInt (getWidth()  * frac);
+        const int dy = juce::roundToInt (getHeight() * frac);
+        display_->setBounds (getLocalBounds().reduced (dx, dy));
+    }
+
+private:
+    void timerCallback() override
+    {
+        const double p = UserPreferences::getInstance().getLyricScreenBorderPercent();
+        if (p != borderPercent_)
+        {
+            borderPercent_ = p;
+            guideUntilMs_  = juce::Time::getMillisecondCounter() + 3000;
+            guideShowing_  = true;
+            resized();
+            repaint();
+        }
+        else if (guideShowing_ && juce::Time::getMillisecondCounter() >= guideUntilMs_)
+        {
+            guideShowing_ = false;
+            repaint();
+        }
+    }
+
+    std::unique_ptr<LyricDisplayComponent> display_;
+    double borderPercent_ = 0.0;
+    juce::uint32 guideUntilMs_ = 0;
+    bool guideShowing_ = false;
+};
+
 namespace
 {
     // Lightweight key listener so pressing F11 (or Cmd/Ctrl+F) toggles full-
@@ -80,12 +165,13 @@ LyricDisplayWindow::LyricDisplayWindow (AudioEngine* audioEngine)
     setUsingNativeTitleBar (UserPreferences::getInstance().getShowTitleBar());
     setResizable (true, true);
 
-    auto* comp = new LyricDisplayComponent();
+    auto comp = std::make_unique<LyricDisplayComponent>();
     comp->setAudioEngine (audioEngine);
-    display_ = comp;
+    display_ = comp.get();
 
-    // setContentOwned transfers ownership to the DocumentWindow.
-    setContentOwned (comp, false);
+    // setContentOwned transfers ownership of the host (which owns the
+    // display) to the DocumentWindow.
+    setContentOwned (new SafeAreaHost (std::move (comp)), false);
 
     // Own the key listener so it outlives the window's event plumbing and
     // is destroyed together with the window.

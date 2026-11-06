@@ -89,6 +89,9 @@ public:
     /** User wants to generate a random venue code. */
     std::function<void()> onGenerateVenueCode;
 
+    /** User picked a venue-code auto-reset interval (hours; 0 = never). */
+    std::function<void(int hours)> onSetCodeResetHours;
+
     /** User wants to set the emergency code. */
     std::function<void(const juce::String& newCode)> onSetEmergencyCode;
 

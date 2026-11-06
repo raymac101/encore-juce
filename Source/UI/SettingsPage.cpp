@@ -12,6 +12,7 @@
 #include "MenuTheme.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/PluginHostService.h"
+#include "../Services/VenueService.h"
 
 //==============================================================================
 // Layout constants
@@ -323,6 +324,24 @@ public:
             if (owner_.onGenerateVenueCode) owner_.onGenerateVenueCode();
         };
 
+        // Auto-reset interval -- item ids are the hours (+1, since 0 isn't a valid id).
+        initFieldLabel(lblCodeReset_, lm.getText("settings.lbl_code_reset"));
+        for (auto [key, hours] : { std::pair { "settings.code_reset_never",   0 },
+                                   std::pair { "settings.code_reset_12h",     12 },
+                                   std::pair { "settings.code_reset_daily",   24 },
+                                   std::pair { "settings.code_reset_weekly",  24 * 7 },
+                                   std::pair { "settings.code_reset_monthly", 24 * 30 } })
+            cbCodeReset_.addItem(lm.getText(key), hours + 1);
+        cbCodeReset_.setSelectedId(1, juce::dontSendNotification);
+        cbCodeReset_.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0d1527));
+        cbCodeReset_.setColour(juce::ComboBox::textColourId,       juce::Colour(kTextPrimary));
+        cbCodeReset_.setColour(juce::ComboBox::outlineColourId,    juce::Colour(kAccent).withAlpha(0.4f));
+        cbCodeReset_.onChange = [this]() {
+            if (owner_.onSetCodeResetHours)
+                owner_.onSetCodeResetHours(cbCodeReset_.getSelectedId() - 1);
+        };
+        addAndMakeVisible(cbCodeReset_);
+
         // Emergency code sub-section
         initFieldLabel(lblEmergHeader_, lm.getText("settings.lbl_emerg_header"));
         lblEmergHeader_.setFont(juce::Font(juce::FontOptions().withHeight(14.f)).boldened());
@@ -434,6 +453,17 @@ public:
         // directly on its next repaint (it already runs a 30Hz timer), so
         // the lyric window updates live as the slider moves.
         auto& prefs = UserPreferences::getInstance();
+
+        // Screen border -- shrinks the whole lyric screen toward the centre
+        // for TVs that crop the edges. Per-computer (it depends on the TV),
+        // so it lives in UserPreferences, not on the venue.
+        initFieldLabel(lblLyricScreenBorder_, lm.getText("settings.lbl_lyric_screen_border"));
+        initSlider(sLyricScreenBorder_, 0, 15, 1, "%");
+        sLyricScreenBorder_.setRange(0.0, 15.0, 0.5);
+        sLyricScreenBorder_.setValue(prefs.getLyricScreenBorderPercent(), juce::dontSendNotification);
+        sLyricScreenBorder_.onValueChange = [this]() {
+            UserPreferences::getInstance().setLyricScreenBorderPercent(sLyricScreenBorder_.getValue());
+        };
 
         // Theme + Color/Motion Intensity -- same live-apply pattern, placed
         // first as the highest-impact control in this section.
@@ -947,6 +977,9 @@ public:
         btnSetCode_.setBounds(kCtrlX + 138, y, 100, kRowH);
         y += kRowH + kFieldGap;
         btnGenCode_.setBounds(kPadX, y, 220, kRowH);
+        y += kRowH + kFieldGap;
+        lblCodeReset_.setBounds(kPadX, y, kLabelW, kRowH);
+        cbCodeReset_.setBounds(kCtrlX, y, 200, kRowH);
         y += kRowH + kSectionGap;
 
         lblEmergHeader_.setBounds(kPadX, y, w - kPadX * 2, 26); y += 30;
@@ -1014,6 +1047,7 @@ public:
         btnSaveLogo_.setBounds(kPadX, y, 140, kRowH);
         btnDefaultLogo_.setBounds(kPadX + 148, y, 150, kRowH);
         y += kRowH + kFieldGap;
+        sliderRow(lblLyricScreenBorder_,   sLyricScreenBorder_);
         comboRow(lblLyricTheme_,           cbLyricTheme_);
         sliderRow(lblLyricColorIntensity_,  sLyricColorIntensity_);
         sliderRow(lblLyricMotionIntensity_, sLyricMotionIntensity_);
@@ -1117,6 +1151,12 @@ public:
         lblManualCode_.setText(lm.getText("settings.lbl_manual_code"),   juce::dontSendNotification);
         btnSetCode_.setButtonText(lm.getText("settings.btn_set_code"));
         btnGenCode_.setButtonText(lm.getText("settings.btn_gen_code"));
+        lblCodeReset_.setText(lm.getText("settings.lbl_code_reset"), juce::dontSendNotification);
+        cbCodeReset_.changeItemText(0 + 1,       lm.getText("settings.code_reset_never"));
+        cbCodeReset_.changeItemText(12 + 1,      lm.getText("settings.code_reset_12h"));
+        cbCodeReset_.changeItemText(24 + 1,      lm.getText("settings.code_reset_daily"));
+        cbCodeReset_.changeItemText(24 * 7 + 1,  lm.getText("settings.code_reset_weekly"));
+        cbCodeReset_.changeItemText(24 * 30 + 1, lm.getText("settings.code_reset_monthly"));
         lblEmergHeader_.setText(lm.getText("settings.lbl_emerg_header"),   juce::dontSendNotification);
         lblCurrentEmerg_.setText(lm.getText("settings.lbl_current_emerg"), juce::dontSendNotification);
         btnSetEmerg_.setButtonText(lm.getText("settings.btn_set_emerg"));
@@ -1145,6 +1185,7 @@ public:
         lblLyricUpNextInfoScale_.setText(lm.getText("settings.lbl_lyric_up_next_info_scale"), juce::dontSendNotification);
         lblLyricBottomBarTextScale_.setText(lm.getText("settings.lbl_lyric_bottom_bar_text_scale"), juce::dontSendNotification);
         lblLyricCodeBarHeight_.setText(lm.getText("settings.lbl_lyric_code_bar_height"), juce::dontSendNotification);
+        lblLyricScreenBorder_.setText(lm.getText("settings.lbl_lyric_screen_border"), juce::dontSendNotification);
 
         secQueue_.setText(lm.getText("settings.sec_queue"),                     juce::dontSendNotification);
         lblLyricsBg_.setText(lm.getText("settings.lbl_lyrics_bg"),              juce::dontSendNotification);
@@ -1230,6 +1271,23 @@ public:
         valVenueId_.setText(v.id.empty() ? "(not set)" : juce::String(v.id), juce::dontSendNotification);
         valCurrentCode_.setText(v.code.empty() ? "(not set)" : juce::String(v.code), juce::dontSendNotification);
         valCurrentEmerg_.setText(v.codePlus.empty() ? "(not set)" : juce::String(v.codePlus), juce::dontSendNotification);
+
+        // The permanent-code venue never rotates or changes its code, so its
+        // code controls are disabled and the interval shows as "Permanent".
+        const bool permanent = VenueService::isPermanentCodeVenue(juce::String(v.id));
+        if (permanent)
+        {
+            cbCodeReset_.setTextWhenNothingSelected(LocalizationManager::getInstance().getText("settings.code_reset_permanent"));
+            cbCodeReset_.setSelectedId(0, juce::dontSendNotification);
+        }
+        else
+        {
+            const int id = cbCodeReset_.indexOfItemId(v.codeResetHours + 1) >= 0 ? v.codeResetHours + 1 : 1;
+            cbCodeReset_.setSelectedId(id, juce::dontSendNotification);
+        }
+        for (juce::Component* c : { (juce::Component*) &cbCodeReset_, (juce::Component*) &edManualCode_,
+                                    (juce::Component*) &btnSetCode_,  (juce::Component*) &btnGenCode_ })
+            c->setEnabled(! permanent);
 
         cbNumSongs_.setSelectedId(juce::jlimit(1, 7, v.numSongs),          juce::dontSendNotification);
         cbNumSingers_.setSelectedId(juce::jlimit(0, 7, v.numSingers) + 1,  juce::dontSendNotification);
@@ -1375,6 +1433,8 @@ private:
     juce::Label      lblManualCode_;
     juce::TextEditor edManualCode_;
     juce::TextButton btnSetCode_, btnGenCode_;
+    juce::Label      lblCodeReset_;
+    juce::ComboBox   cbCodeReset_;
     juce::Label      lblEmergHeader_, lblCurrentEmerg_, valCurrentEmerg_;
     juce::TextEditor edEmergCode_;
     juce::TextButton btnSetEmerg_, btnGenEmerg_;
@@ -1415,11 +1475,13 @@ private:
     juce::Label  lblLyricLogoScale_, lblLyricBrandTextScale_,
                  lblLyricNowSingingTextScale_, lblLyricNowSingingInfoScale_,
                  lblLyricUpNextTextScale_, lblLyricUpNextInfoScale_,
-                 lblLyricBottomBarTextScale_, lblLyricCodeBarHeight_;
+                 lblLyricBottomBarTextScale_, lblLyricCodeBarHeight_,
+                 lblLyricScreenBorder_;
     juce::Slider sLyricLogoScale_, sLyricBrandTextScale_,
                  sLyricNowSingingTextScale_, sLyricNowSingingInfoScale_,
                  sLyricUpNextTextScale_, sLyricUpNextInfoScale_,
-                 sLyricBottomBarTextScale_, sLyricCodeBarHeight_;
+                 sLyricBottomBarTextScale_, sLyricCodeBarHeight_,
+                 sLyricScreenBorder_;
 
     // Section 5: Queue / Display
     juce::Label        secQueue_;

@@ -99,7 +99,9 @@ private:
     class BoundsSaveTimer;
     std::unique_ptr<BoundsSaveTimer> boundsSaveTimer_;
 
-    LyricDisplayComponent* display_ = nullptr;   // owned by DocumentWindow
+    class SafeAreaHost;   // window content: insets display_ by the screen-border pref
+
+    LyricDisplayComponent* display_ = nullptr;   // owned by SafeAreaHost (owned by DocumentWindow)
     std::unique_ptr<juce::KeyListener> fullScreenKeyListener_;
 
     bool trueFullScreen_ = false;

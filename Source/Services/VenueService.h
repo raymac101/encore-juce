@@ -84,10 +84,33 @@ public:
         (queue, requested, playing, emojis, playlists/.../new/Popular/Recommended). */
     void deleteVenue(const juce::String& venueId, WriteCallback onDone);
 
-    /** Update only the `code` field on a venue. */
+    /** Update the `code` field on a venue (and stamp `codeChangedAt`).
+        Fails if `newCode` is the reserved permanent code and this isn't
+        its venue; the permanent venue always keeps its permanent code. */
     void updateVenueCode(const juce::String& venueId,
                          const juce::String& newCode,
                          WriteCallback onDone);
+
+    /** Persist the auto-reset interval (`codeResetHours`, 0 = never). The
+        clock restarts now, so the first reset is a full interval away. */
+    void setCodeResetHours(const juce::String& venueId, int hours, WriteCallback onDone);
+
+    /** Rotates the venue's `code` if its `codeResetHours` interval has
+        elapsed since `codeChangedAt`. The permanent-code venue is never
+        rotated; instead its code is restored if it ever drifted. A venue
+        with no `codeChangedAt` yet just gets the clock started (no
+        rotation), so upgrading doesn't immediately change every code.
+        `changed` is true when `code` was written. */
+    using RotateCallback = std::function<void(bool changed)>;
+    void rotateCodeIfDue(const juce::String& venueId, RotateCallback onDone);
+
+    // The one venue code that never rotates, and the venue it belongs to.
+    static constexpr const char* kPermanentCode        = "KWKWKW";
+    static constexpr const char* kPermanentCodeVenueId = "xBeSqyDnjgskkOTDTSA5";
+    static bool isPermanentCodeVenue(const juce::String& venueId)
+    {
+        return venueId == kPermanentCodeVenueId;
+    }
 
     /** Update only the `enabled` field on a venue -- the company-admin
         kill switch that blocks future sign-in (see
@@ -120,7 +143,7 @@ public:
     void updateDate(WriteCallback onDone = nullptr);
 
     //==========================================================================
-    // Code generator (utility — no I/O)
+    // Code generator (utility — no I/O). Never returns kPermanentCode.
     static juce::String generateCode(int length = 6);
 
     //==========================================================================

@@ -159,6 +159,12 @@ public:
     int  getLyricVenueCodeBarHeightPercent() const;
     void setLyricVenueCodeBarHeightPercent(int percent);
 
+    // Black border around the whole lyric screen, as a percent of the
+    // window's width/height per side (0-15, default 0). Shrinks everything
+    // toward the centre for TVs that overscan and crop the edges.
+    double getLyricScreenBorderPercent() const;
+    void   setLyricScreenBorderPercent(double percent);
+
     //--- Lyric screen element scaling (Settings > Logo section sliders) -------
     // All are percentages (50-200, default 100) applied on top of
     // LyricDisplayComponent's existing size calculations, so 100% always

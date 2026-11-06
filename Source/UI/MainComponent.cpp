@@ -2045,6 +2045,8 @@ void MainComponent::setupUI()
                     if (! ok)
                     {
                         DBG("[Settings] set venue code failed: " << err);
+                        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                               "Venue Code", "Could not set the venue code: " + err);
                         return;
                     }
 
@@ -2106,6 +2108,23 @@ void MainComponent::setupUI()
                                 if (auto* d = safe->lyricWindow_->getDisplay())
                                     d->setVenueCode(juce::String(v.code));
                         });
+                });
+        };
+
+        sp->onSetCodeResetHours = [this](int hours)
+        {
+            if (activeVenueId_.isEmpty())
+                return;
+
+            juce::Component::SafePointer<MainComponent> safe(this);
+            const auto venueId = activeVenueId_;
+            VenueService::getInstance().setCodeResetHours(venueId, hours,
+                [safe, venueId](bool ok, juce::String err)
+                {
+                    if (! ok)
+                        DBG("[Settings] set code reset interval failed: " << err);
+                    if (safe != nullptr && safe->activeVenueId_ == venueId)
+                        safe->reloadVenueCodeDisplays(venueId);
                 });
         };
 
@@ -3554,12 +3573,57 @@ void MainComponent::updateUIForScreenSize()
     resized(); // Update layout
 }
 
+void MainComponent::checkVenueCodeRotation()
+{
+    lastVenueCodeCheckMs_ = juce::Time::currentTimeMillis();
+    if (activeVenueId_.isEmpty() || venueCodeCheckInFlight_)
+        return;
+
+    venueCodeCheckInFlight_ = true;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    const auto venueId = activeVenueId_;
+    VenueService::getInstance().rotateCodeIfDue(venueId, [safe, venueId](bool changed)
+    {
+        if (safe == nullptr)
+            return;
+        safe->venueCodeCheckInFlight_ = false;
+        if (changed && safe->activeVenueId_ == venueId)
+            safe->reloadVenueCodeDisplays(venueId);
+    });
+}
+
+void MainComponent::reloadVenueCodeDisplays(const juce::String& venueId)
+{
+    juce::Component::SafePointer<MainComponent> safe(this);
+    VenueService::getInstance().loadVenue(venueId,
+        [safe, venueId](bool loaded, VenueItem v, juce::String loadErr)
+        {
+            if (safe == nullptr || safe->activeVenueId_ != venueId)
+                return;
+            if (! loaded)
+            {
+                DBG("[VenueCode] reload venue failed: " << loadErr);
+                return;
+            }
+            if (safe->mainArea != nullptr)
+                safe->mainArea->setVenueData(v);
+            if (safe->queueBar != nullptr)
+                safe->queueBar->setVenueInfo(juce::String(v.name), juce::String(v.code));
+            if (safe->lyricWindow_ != nullptr)
+                if (auto* d = safe->lyricWindow_->getDisplay())
+                    d->setVenueCode(juce::String(v.code));
+        });
+}
+
 void MainComponent::timerCallback()
 {
     updateConnectionStatus();
     updateDebugInfo();
     updateAudioStatusIndicator();
     runSongbookHealthCheckIfReady();
+
+    if (juce::Time::currentTimeMillis() - lastVenueCodeCheckMs_ >= kVenueCodeCheckMs)
+        checkVenueCodeRotation();
 
     // Spotify playback state needs polling (no push notifications from
     // their Web API) -- throttled to ~3s, matching RequestService's
@@ -5542,6 +5606,7 @@ void MainComponent::setVenueId (const juce::String& venueId, bool requestInitial
 
             safe->activeVenueName_ = name;
             safe->pendingVenueCode_ = code;
+            safe->lastVenueCodeCheckMs_ = 0;   // check the code auto-reset on the next tick
             if (safe->mainArea)
                 safe->mainArea->setVenueContext(venueId, name);
 

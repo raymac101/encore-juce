@@ -46,6 +46,8 @@ struct VenueItem
     // ── Venue codes ─────────────────────────────────────────────────────────
     std::string code;                       // Primary code for Tagg app
     std::string codePlus;                   // Emergency / backup code
+    int     codeResetHours = 0;             // Auto-rotate `code` every N hours (0 = never)
+    int64_t codeChangedAt  = 0;             // Epoch ms -- when `code` last changed (0 = unknown)
 
     // ── Queue policy ────────────────────────────────────────────────────────
     // NOTE: stored as strings in Firestore ("3", "5", etc.)

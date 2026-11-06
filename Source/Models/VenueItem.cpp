@@ -32,6 +32,8 @@ juce::String VenueItem::toJson() const
     // Venue codes
     obj->setProperty("code",     juce::String(code));
     obj->setProperty("codePlus", juce::String(codePlus));
+    obj->setProperty("codeResetHours", codeResetHours);
+    obj->setProperty("codeChangedAt",  (int64)codeChangedAt);
 
     // Queue policy – stored as strings in Firestore to match Angular app
     obj->setProperty("numSongs",   juce::String(numSongs));
@@ -123,6 +125,8 @@ VenueItem VenueItem::fromJson(const juce::String& json)
     // Codes
     venue.code     = strProp("code");
     venue.codePlus = strProp("codePlus");
+    venue.codeResetHours = intProp("codeResetHours", 0);
+    venue.codeChangedAt  = int64Prop("codeChangedAt", 0);
 
     // Queue policy
     venue.numSongs   = intProp("numSongs",   5);

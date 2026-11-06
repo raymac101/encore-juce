@@ -557,6 +557,20 @@ void UserPreferences::setLyricVenueCodeBarHeightPercent(int percent)
     save();
 }
 
+double UserPreferences::getLyricScreenBorderPercent() const
+{
+    const juce::ScopedLock sl(lock_);
+    double p = (double) root_.getProperty("lyricScreenBorderPercent", juce::var(0.0));
+    return juce::jlimit(0.0, 15.0, p);
+}
+
+void UserPreferences::setLyricScreenBorderPercent(double percent)
+{
+    const juce::ScopedLock sl(lock_);
+    asObj(root_)->setProperty("lyricScreenBorderPercent", juce::jlimit(0.0, 15.0, percent));
+    save();
+}
+
 //==============================================================================
 // Lyric screen element scaling -- shared getter/setter shape, one JSON key
 // each, clamped 50-200, default 100.

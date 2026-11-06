@@ -73,6 +73,10 @@ private:
     juce::Label         singerFieldLabel_;
     juce::TextEditor    singerEditor_;
 
+    // Star-rating renderer for versionBox_; declared first so it outlives the box.
+    class VersionLookAndFeel;
+    std::unique_ptr<VersionLookAndFeel> versionLookAndFeel_;
+
     juce::Label         versionFieldLabel_;
     juce::ComboBox      versionBox_;
 

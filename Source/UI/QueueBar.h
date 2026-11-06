@@ -319,6 +319,7 @@ private:
     std::unique_ptr<juce::TextButton> rotateLeftButton;   // onRotateBack
     std::unique_ptr<juce::TextButton> rotateRightButton;  // onRotateForward
     std::unique_ptr<juce::TextButton> queueOpenCloseButton;   // red "Close Queue" / green "Open Queue"
+    std::unique_ptr<juce::TextButton> addSingerButton;
     std::unique_ptr<juce::Label>      countdownLabel;  // shows "Next in 5…" between songs
 
     //==============================================================================

@@ -8,6 +8,7 @@
 
 #include "SongSelectionDialog.h"
 #include "BorderlessModalWindow.h"
+#include "AppLookAndFeel.h"
 #include "../Services/ImageCache.h"
 #include "../Localization/LocalizationManager.h"
 
@@ -43,11 +44,123 @@ namespace
         btn.setColour(juce::TextButton::textColourOnId, fg);
         btn.setColour(juce::TextButton::textColourOffId, fg);
     }
+
+    constexpr auto  kStarColour      = 0xffffc533;   // gold
+    constexpr auto  kStarEmptyColour = 0x40a4b0c4;
+    constexpr float kStarSize        = 13.0f;
+    constexpr float kStarGap         = 2.0f;
+    constexpr int   kStarsWidth      = (int) (5 * kStarSize + 4 * kStarGap) + 10;
+
+    juce::Path makeStar(juce::Rectangle<float> r)
+    {
+        juce::Path p;
+        p.addStar(r.getCentre(), 5, r.getWidth() * 0.22f, r.getWidth() * 0.5f);
+        return p;
+    }
+
+    /** Five stars left-aligned in `area`, filled to `rating` (0-5) so
+        quarter ratings like 4.25 show as a partly filled last star. */
+    void drawStars(juce::Graphics& g, juce::Rectangle<float> area, double rating)
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            juce::Rectangle<float> star(area.getX() + (float) i * (kStarSize + kStarGap),
+                                        area.getCentreY() - kStarSize * 0.5f,
+                                        kStarSize, kStarSize);
+            auto path = makeStar(star);
+
+            g.setColour(juce::Colour(kStarEmptyColour));
+            g.fillPath(path);
+
+            const float fill = (float) juce::jlimit(0.0, 1.0, rating - i);
+            if (fill > 0.0f)
+            {
+                juce::Graphics::ScopedSaveState save(g);
+                g.reduceClipRegion(star.withWidth(star.getWidth() * fill).toNearestIntEdges());
+                g.setColour(juce::Colour(kStarColour));
+                g.fillPath(path);
+            }
+        }
+    }
 }
 
 //==============================================================================
+/** Draws a star rating in front of each version, both in the dropdown list
+    and in the closed box. Ratings are looked up by item text, since
+    drawPopupMenuItem doesn't receive the item id. */
+class SongSelectionDialog::VersionLookAndFeel : public AppLookAndFeel
+{
+public:
+    std::map<juce::String, double> ratings;
+
+    void drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<int>& area,
+                           bool isSeparator, bool isActive, bool isHighlighted, bool isTicked,
+                           bool hasSubMenu, const juce::String& text, const juce::String& shortcutKeyText,
+                           const juce::Drawable* icon, const juce::Colour* textColour) override
+    {
+        auto it = ratings.find(text);
+        if (isSeparator || it == ratings.end())
+        {
+            AppLookAndFeel::drawPopupMenuItem(g, area, isSeparator, isActive, isHighlighted, isTicked,
+                                              hasSubMenu, text, shortcutKeyText, icon, textColour);
+            return;
+        }
+
+        auto r = area.reduced(1);
+        if (isHighlighted && isActive)
+        {
+            g.setColour(findColour(juce::PopupMenu::highlightedBackgroundColourId));
+            g.fillRect(r);
+            g.setColour(findColour(juce::PopupMenu::highlightedTextColourId));
+        }
+        else
+        {
+            g.setColour(textColour != nullptr ? *textColour : findColour(juce::PopupMenu::textColourId));
+        }
+
+        auto textArea = r.reduced(12, 0);
+        auto starArea = textArea.removeFromLeft(kStarsWidth);
+        auto font = getPopupMenuFont();
+        if (isTicked) font = font.boldened();
+        g.setFont(font);
+        g.drawFittedText(text, textArea, juce::Justification::centredLeft, 1);
+
+        drawStars(g, starArea.toFloat(), it->second);
+    }
+
+    void getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                   int& idealWidth, int& idealHeight) override
+    {
+        AppLookAndFeel::getIdealPopupMenuItemSize(text, isSeparator, standardMenuItemHeight,
+                                                  idealWidth, idealHeight);
+        if (! isSeparator)
+        {
+            idealWidth  += kStarsWidth;
+            idealHeight  = juce::jmax(idealHeight, 30);
+        }
+    }
+
+    void drawComboBox(juce::Graphics& g, int width, int height, bool isButtonDown,
+                      int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox& box) override
+    {
+        AppLookAndFeel::drawComboBox(g, width, height, isButtonDown, buttonX, buttonY, buttonW, buttonH, box);
+
+        auto it = ratings.find(box.getText());
+        if (it != ratings.end())
+            drawStars(g, juce::Rectangle<float>(10.0f, 0.0f, (float) kStarsWidth, (float) height), it->second);
+    }
+
+    void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override
+    {
+        AppLookAndFeel::positionComboBoxText(box, label);
+        label.setBounds(label.getBounds().withTrimmedLeft(kStarsWidth));
+    }
+};
+
+//==============================================================================
 SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
-    : song_(song)
+    : song_(song),
+      versionLookAndFeel_(std::make_unique<VersionLookAndFeel>())
 {
     auto& lm = LocalizationManager::getInstance();
 
@@ -106,7 +219,18 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     }
     else
     {
-        for (int i = 0; i < count; ++i)
+        // Highest-rated first; unrated versions sort as 0 (last). Item ids
+        // stay index + 1 so closeWithResult maps back to the original slot.
+        auto ratingAt = [this](int i) {
+            return i < (int) song_.rating.size() ? song_.rating[(size_t) i] : 0.0;
+        };
+        std::vector<int> order((size_t) count);
+        for (int i = 0; i < count; ++i) order[(size_t) i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](int a, int b) { return ratingAt(a) > ratingAt(b); });
+
+        bool anyRated = false;
+        for (int i : order)
         {
             juce::String code = (i < (int)codes.size())    ? juce::String(codes[(size_t)i])    : juce::String();
             juce::String ver  = (i < (int)versions.size()) ? juce::String(versions[(size_t)i]) : juce::String();
@@ -115,9 +239,20 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
                                     : (code.isNotEmpty() ? code : ver);
             if (text.isEmpty()) text = lm.getText("song_selection.version_prefix") + juce::String(i + 1);
             versionBox_.addItem(text, i + 1);
+
+            // Library ratings are 0-5; anything larger (e.g. a 0-100 online
+            // popularity score) isn't a star rating, so leave it out.
+            const double r = ratingAt(i);
+            if (r > 0.0 && r <= 5.0) anyRated = true;
+            versionLookAndFeel_->ratings[text] = r <= 5.0 ? r : 0.0;
         }
+
+        if (anyRated)
+            versionBox_.setLookAndFeel(versionLookAndFeel_.get());
+        versionBox_.setSelectedId(order.front() + 1, juce::dontSendNotification);
     }
-    versionBox_.setSelectedId(1, juce::dontSendNotification);
+    if (versionBox_.getSelectedId() == 0)
+        versionBox_.setSelectedId(1, juce::dontSendNotification);
     addAndMakeVisible(versionBox_);
 
     // Pitch
@@ -182,7 +317,10 @@ SongSelectionDialog::SongSelectionDialog(const CdgSong& song)
     }
 }
 
-SongSelectionDialog::~SongSelectionDialog() = default;
+SongSelectionDialog::~SongSelectionDialog()
+{
+    versionBox_.setLookAndFeel(nullptr);
+}
 
 //==============================================================================
 void SongSelectionDialog::updatePitchLabel()
