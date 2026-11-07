@@ -17,6 +17,120 @@
 #include <cmath>
 
 //==============================================================================
+// "Who has sung tonight" indicator, drawn right after the singer's name:
+//   - one microphone per song performed (compact "mic ×N" beyond 4), or
+//   - a "Hasn't sung" pill for a singer still waiting for their first turn.
+namespace SungBadge { namespace
+{
+    constexpr int kMaxMics = 4;
+
+    void drawMic (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+    {
+        const float w = r.getWidth(), h = r.getHeight();
+        const float headW = w * 0.44f, headH = h * 0.56f;
+        auto head = juce::Rectangle<float> (r.getCentreX() - headW * 0.5f, r.getY(), headW, headH);
+
+        g.setColour (c);
+        g.fillRoundedRectangle (head, headW * 0.5f);
+
+        // Cradle (U around the bottom of the head), stem and base.
+        const float stroke = juce::jmax (1.2f, w * 0.1f);
+        juce::Path cradle;
+        const float cy = r.getY() + headH * 0.62f;
+        const float rad = headW * 0.82f;
+        cradle.addCentredArc (r.getCentreX(), cy, rad, rad, 0.0f,
+                              juce::MathConstants<float>::halfPi,
+                              juce::MathConstants<float>::halfPi * 3.0f, true);
+        g.strokePath (cradle, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                    juce::PathStrokeType::rounded));
+
+        const float stemTop = cy + rad;
+        const float baseY = r.getBottom() - stroke * 0.5f;
+        g.drawLine (r.getCentreX(), stemTop, r.getCentreX(), baseY, stroke);
+        g.drawLine (r.getCentreX() - headW * 0.6f, baseY, r.getCentreX() + headW * 0.6f, baseY, stroke);
+    }
+
+    juce::String waitingText()
+    {
+        return LocalizationManager::getInstance().getText ("queue.not_sung_yet");
+    }
+
+    /** Width the badge needs at the given icon size (0 = draw nothing). */
+    int widthFor (int songsPerformed, bool showWaiting, float iconSize)
+    {
+        if (songsPerformed > kMaxMics)
+            return (int) (iconSize + 4.0f
+                          + juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions().withHeight (iconSize * 0.8f)).boldened(),
+                                                                    juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (songsPerformed)));
+        if (songsPerformed > 0)
+            return (int) ((float) songsPerformed * (iconSize * 0.8f) + 2.0f);
+        if (showWaiting)
+            return (int) (juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions().withHeight (9.0f)).boldened(),
+                                                                  waitingText()) + 10.0f);
+        return 0;
+    }
+
+    void paint (juce::Graphics& g, juce::Rectangle<int> area, int songsPerformed,
+                bool showWaiting, float iconSize, juce::Colour micColour, juce::Colour waitColour)
+    {
+        auto r = area.toFloat();
+        const float y = r.getCentreY() - iconSize * 0.5f;
+
+        if (songsPerformed > kMaxMics)
+        {
+            drawMic (g, { r.getX(), y, iconSize * 0.8f, iconSize }, micColour);
+            g.setColour (micColour);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (iconSize * 0.8f)).boldened());
+            g.drawText (juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (songsPerformed),
+                        juce::Rectangle<float> (r.getX() + iconSize + 2.0f, y, r.getRight() - r.getX() - iconSize, iconSize),
+                        juce::Justification::centredLeft, false);
+        }
+        else if (songsPerformed > 0)
+        {
+            float x = r.getX();
+            for (int i = 0; i < songsPerformed; ++i)
+            {
+                drawMic (g, { x, y, iconSize * 0.8f, iconSize }, micColour);
+                x += iconSize * 0.8f;
+            }
+        }
+        else if (showWaiting)
+        {
+            auto pill = juce::Rectangle<float> (r.getX(), r.getCentreY() - 7.0f,
+                                                (float) widthFor (0, true, iconSize), 14.0f);
+            g.setColour (waitColour.withAlpha (0.18f));
+            g.fillRoundedRectangle (pill, 7.0f);
+            g.setColour (waitColour);
+            g.drawRoundedRectangle (pill.reduced (0.5f), 7.0f, 1.0f);
+            g.setFont (juce::Font (juce::FontOptions().withHeight (9.0f)).boldened());
+            g.drawText (waitingText(), pill, juce::Justification::centred, false);
+        }
+    }
+
+    /** Draws `name` in `nameArea` followed by the badge; the name is
+        truncated (with ellipsis) first so the badge always stays visible. */
+    void paintNameWithBadge (juce::Graphics& g, juce::Rectangle<int> nameArea,
+                             const juce::String& name, const juce::Font& font, juce::Colour nameColour,
+                             int songsPerformed, bool showWaiting, float iconSize,
+                             juce::Colour micColour, juce::Colour waitColour)
+    {
+        const int badgeW = widthFor (songsPerformed, showWaiting, iconSize);
+        const int gap = badgeW > 0 ? 6 : 0;
+        const int nameW = juce::jmin ((int) std::ceil (juce::GlyphArrangement::getStringWidth (font, name)) + 1,
+                                      juce::jmax (0, nameArea.getWidth() - badgeW - gap));
+
+        g.setColour (nameColour);
+        g.setFont (font);
+        g.drawText (name, nameArea.withWidth (nameW), juce::Justification::centredLeft, true);
+
+        if (badgeW > 0)
+            paint (g, juce::Rectangle<int> (nameArea.getX() + nameW + gap, nameArea.getY(),
+                                            badgeW, nameArea.getHeight()),
+                   songsPerformed, showWaiting, iconSize, micColour, waitColour);
+    }
+}} // namespace SungBadge::(anonymous)
+
+//==============================================================================
 // Avatar string -> image resolution (preset:<id>, legacy relative path, or
 // a Firebase Storage URL for a user-uploaded photo) is centralized in
 // ArtworkCache::resolveAvatar().
@@ -274,14 +388,15 @@ void QueueBar::NowPlayingCard::paint(juce::Graphics& g)
     // Name row (top half of remaining area)
     auto textArea = bounds.reduced(4, 0);
     auto nameArea = textArea.removeFromTop(textArea.getHeight() / 2);
-    g.setColour(juce::Colours::black);
-    g.setFont(juce::Font(14.f).boldened());
     juce::String displayName = juce::String(singer.name);
     if (singer.isHost)
         displayName += " - HOST";
-    if (singer.songsPerformed > 0)
-        displayName += " - Has sang " + juce::String(singer.songsPerformed) + " times";
-    g.drawText(displayName, nameArea, juce::Justification::centredLeft, true);
+    // Songs sung BEFORE this one (the current song is counted when it ends).
+    SungBadge::paintNameWithBadge(g, nameArea, displayName,
+                                  juce::Font(juce::FontOptions().withHeight(14.f)).boldened(),
+                                  juce::Colours::black,
+                                  singer.songsPerformed, false, 14.f,
+                                  juce::Colour(0xff262626), juce::Colour(0xff262626));
 
     // Song info (bottom half)
     if (!singer.songs.empty())
@@ -545,14 +660,21 @@ void QueueBar::SingerRow::paint(juce::Graphics& g)
         g.drawText(LocalizationManager::getInstance().getText("queue.start_of_round"),
                    labelArea, juce::Justification::centredLeft, true);
     }
-    g.setColour(juce::Colour(0xffe4e4e4));
-    g.setFont(juce::Font(13.f).boldened());
     juce::String displayName = juce::String(singer.name);
     if (isHost)
         displayName += " - HOST";
-    if (singer.songsPerformed > 0)
-        displayName += " - Has sang " + juce::String(singer.songsPerformed) + " times";
-    g.drawText(displayName, nameArea, juce::Justification::centredLeft, true);
+    else if (isHostAccount)
+        // Another KJ singing tonight: identified as a host, but not the
+        // primary host (not pinned, can be removed like any singer).
+        displayName += " - " + LocalizationManager::getInstance().getText("queue.guest_host");
+    // Mics = songs sung tonight; "Hasn't sung" = still waiting for a first
+    // turn (not shown on the host's own row -- that'd just be noise).
+    SungBadge::paintNameWithBadge(g, nameArea, displayName,
+                                  juce::Font(juce::FontOptions().withHeight(13.f)).boldened(),
+                                  juce::Colour(0xffe4e4e4),
+                                  singer.songsPerformed, ! isHost, 13.f,
+                                  juce::Colour(0xfffbbf24),   // amber mics
+                                  juce::Colour(0xff38bdf8));  // sky-blue "waiting" pill
 
     // Song chips / strikes area (bottom half)
     auto songArea = bounds.reduced(4, 0);

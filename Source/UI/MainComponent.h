@@ -456,6 +456,7 @@ private:
     void syncLyricLowerThirdNextUp(const std::vector<Singers>& singers);
     std::vector<LyricDisplayComponent::QueuePreviewEntry>
     buildLyricQueuePreview(const std::vector<Singers>& singers) const;
+    int lyricQueuePreviewLimit() const;
 
     bool pendingSongbookHealthCheck_ = true;
     bool songbookHealthPromptShown_ = false;

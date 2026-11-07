@@ -110,7 +110,7 @@ page.customer_admin.confirm_venue_name_placeholder=Confirm venue name to enable 
 
 # ── Profile page (self-service, reached via the TopBar user menu) ────────────
 page.profile.title=Edit Profile
-page.profile.subtitle=Update your own display info. Role changes are handled separately by an EnterpriseAdmin.
+page.profile.subtitle=Your stage name, avatar and details are shared with your TAGG profile. Role changes are handled by an EnterpriseAdmin.
 page.profile.full_name=Full Name
 page.profile.email=Email
 page.profile.stage_name=Stage Name
@@ -290,6 +290,8 @@ settings.language=Language
 # ── Queue bar / queue management ─────────────────────────────────────────────
 queue.now_singing=Now Singing:
 queue.start_of_round=Start of Round
+queue.not_sung_yet=Hasn't sung
+queue.guest_host=Guest Host
 queue.clear_queue=Clear Queue
 queue.rotate_left=Rotate Down
 queue.rotate_right=Rotate Up
@@ -952,6 +954,7 @@ onboarding.create_account.error_password_length=Password must be at least 6 char
 onboarding.create_account.error_password_mismatch=Passwords don't match.
 onboarding.create_account.status_creating=Creating your account...
 onboarding.create_account.error_generic=Something went wrong creating your account. Please try again.
+onboarding.create_account.error_email_exists=This email already has an account (TAGG accounts work here too). Log in with it instead.
 onboarding.create_account.switch_to_login=or log in to your existing account
 
 onboarding.login.heading=Log In to Your Account

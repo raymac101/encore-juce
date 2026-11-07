@@ -96,6 +96,15 @@ public:
                           const std::vector<QueueItem>& newSongs,
                           WriteCallback onDone = nullptr);
 
+    /** Add one to a singer's `songsPerformed` on their queue doc (called when
+        a song genuinely finishes). Looks the doc up by id first, then by
+        case-insensitive name. Without this the count only lived in memory
+        and the next watcher reload reset it to the stored 0. */
+    void incrementSongsPerformed(const juce::String& venueId,
+                                 const juce::String& singerDocId,
+                                 const juce::String& singerName,
+                                 WriteCallback onDone = nullptr);
+
     /** Persist the provided singer sequence as canonical queue order for
         `venues/<venueId>/queue`. Writes both `order` and `rotationOrder`
         for each matched singer doc so restarts/mobile clients restore the

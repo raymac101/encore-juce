@@ -145,10 +145,16 @@ namespace
         s.strikes       = valueAsInt   (fieldByName(fields, "strikes"));
         s.songsPerformed= valueAsInt   (fieldByName(fields, "songsPerformed"));
 
-        // isHost is stored as a booleanValue field on the host's queue doc.
-        auto isHostField = fieldByName(fields, "isHost");
-        if (isHostField.hasProperty("booleanValue"))
-            s.isHost = (bool) isHostField.getProperty("booleanValue", false);
+        // Only ONE primary host per night: whoever is signed into this Encore.
+        // A stored isHost flag is ignored for anyone else -- e.g. the previous
+        // night's host who never signed out, or another KJ who joined to
+        // sing. They're ordinary (removable) singers; QueueBar still marks
+        // them as a host account via HostIdentityCache (purple glow).
+        // ensureHostQueueDoc() clears stale flags in Firestore too.
+        const auto signedInUid = FirestoreClient::getInstance().getUserId().trim();
+        s.isHost = signedInUid.isNotEmpty()
+                && (docId.trim() == signedInUid
+                    || valueAsString(fieldByName(fields, "profileId")).trim() == signedInUid);
 
         // songs: arrayValue → values[] → each is a mapValue.
         auto songsField = fieldByName(fields, "songs");
@@ -455,9 +461,30 @@ void QueueService::ensureHostQueueDoc(const juce::String& venueId,
             if (! wasHost)
                 continue;
 
-            DBG ("[Queue] ensureHostQueueDoc: removing stale host doc '" << docId
-                 << "' (replaced by '" << authUid << "')");
-            FirestoreClient::getInstance().deleteDocument(relPathFromDocName(fullName));
+            // The previous host may still want to sing tonight: if they have
+            // songs queued, keep them in the rotation as an ordinary singer
+            // (just drop the host flag). Only an empty host placeholder --
+            // which exists purely to pin the host slot -- is deleted.
+            const auto songs = fieldByName(fields, "songs").getProperty("arrayValue", juce::var())
+                                                           .getProperty("values", juce::var());
+            const bool hasSongs = songs.isArray() && songs.size() > 0;
+
+            if (hasSongs)
+            {
+                DBG ("[Queue] ensureHostQueueDoc: demoting previous host '" << docId
+                     << "' to a regular singer (replaced by '" << authUid << "')");
+                juce::DynamicObject::Ptr demote = new juce::DynamicObject();
+                demote->setProperty("isHost", FirestoreClient::booleanValue(false));
+                FirestoreClient::getInstance().patchDocument(
+                    relPathFromDocName(fullName) + "?updateMask.fieldPaths=isHost",
+                    juce::var(demote.get()));
+            }
+            else
+            {
+                DBG ("[Queue] ensureHostQueueDoc: removing empty previous-host doc '" << docId
+                     << "' (replaced by '" << authUid << "')");
+                FirestoreClient::getInstance().deleteDocument(relPathFromDocName(fullName));
+            }
         }
 
         // If a doc already exists for this auth UID, nothing to do.
@@ -880,6 +907,61 @@ void QueueService::deleteSinger(const juce::String& venueId,
         if (onDone)
             juce::MessageManager::callAsync([onDone, ok]
                 { onDone(ok, ok ? juce::String() : juce::String("DELETE failed")); });
+    });
+}
+
+void QueueService::incrementSongsPerformed(const juce::String& venueId,
+                                           const juce::String& singerDocId,
+                                           const juce::String& singerName,
+                                           WriteCallback onDone)
+{
+    if (venueId.isEmpty() || (singerDocId.isEmpty() && singerName.isEmpty()))
+    {
+        if (onDone) juce::MessageManager::callAsync([onDone] { onDone(false, "missing arg"); });
+        return;
+    }
+
+    beginWrite();
+    juce::Thread::launch([this, venueId, singerDocId, singerName, onDone = std::move(onDone)]() mutable
+    {
+        const WriteGuard writeGuard (this);
+        const juce::ScopedLock lock(writeLock_);
+
+        const auto collPath = "venues/" + venueId + "/queue";
+        auto docs = FirestoreClient::getInstance().listCollection(collPath, 200);
+
+        auto found = singerDocId.isNotEmpty() ? findSingerByDocId(docs, singerDocId) : FoundSinger{};
+        if (found.docName.isEmpty())
+            found = findSingerByName(docs, singerName);
+
+        if (found.docName.isEmpty())
+        {
+            DBG ("[Queue] incrementSongsPerformed: singer '" << singerName << "' not found");
+            if (onDone)
+                juce::MessageManager::callAsync([onDone] { onDone(false, "singer not found"); });
+            return;
+        }
+
+        // Read-then-write (FirestoreClient has no increment transform); the
+        // desktop app is the only writer of this field, so that's safe.
+        const int newCount = juce::jmax(0, found.singer.songsPerformed) + 1;
+
+        juce::DynamicObject::Ptr fields = new juce::DynamicObject();
+        fields->setProperty("songsPerformed", FirestoreClient::integerValue(newCount));
+
+        const auto maskedPath = relPathFromDocName(found.docName)
+                              + "?updateMask.fieldPaths=songsPerformed";
+        const bool ok = FirestoreClient::getInstance()
+                            .patchDocument(maskedPath, juce::var(fields.get()));
+
+        DBG ("[Queue] incrementSongsPerformed singer='" << singerName
+             << "' -> " << newCount << (ok ? "" : " FAILED"));
+
+        if (onDone)
+            juce::MessageManager::callAsync([onDone, ok]
+            {
+                onDone(ok, ok ? juce::String() : juce::String("patch failed"));
+            });
     });
 }
 

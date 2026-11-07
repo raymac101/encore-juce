@@ -11,6 +11,7 @@
 #include "../Localization/LocalizationManager.h"
 #include "../Services/FirestoreClient.h"
 #include "../Services/HostService.h"
+#include "../Services/ProfileSync.h"
 #include "../Models/AccessRights.h"
 #include <algorithm>
 
@@ -433,9 +434,26 @@ private:
         saveButton_.setEnabled (false);
 
         juce::Component::SafePointer<ContentPanel> safe (this);
-        juce::Thread::launch([safe, uid, fullName, email, stageName, birthday, country, city, avatarUrl, genderStr]
+        const auto previousStageName = juce::String (HostService::getInstance().getCurrent().stageName);
+
+        juce::Thread::launch([safe, uid, fullName, email, stageName, birthday, country, city, avatarUrl, genderStr, previousStageName]
         {
             using FC = FirestoreClient;
+
+            // The stage name is shared with TAGG, where it must be unique.
+            const bool stageNameChanged = ! stageName.equalsIgnoreCase (previousStageName);
+            if (stageNameChanged && stageName.isNotEmpty()
+                && ! ProfileSync::isStageNameAvailable (stageName, uid))
+            {
+                juce::MessageManager::callAsync([safe]
+                {
+                    if (safe == nullptr) return;
+                    safe->setStatus ("That stage name is already taken in TAGG -- please choose another.", true);
+                    safe->updateSaveButtonState();
+                });
+                return;
+            }
+
             auto fields = FC::makeFields({
                 { "fullName",  FC::stringValue (fullName) },
                 { "email",     FC::stringValue (email) },
@@ -457,6 +475,23 @@ private:
                              + "&updateMask.fieldPaths=gender"
                              + "&updateMask.fieldPaths=avatarUrl";
             const bool ok = FC::getInstance().patchDocument (path, fields);
+
+            // Mirror the shared identity into the TAGG profile (users/{uid}).
+            // Best effort: hosts/{uid} is already saved, and the next login's
+            // ProfileSync::syncOnLogin() would back-fill anything missed.
+            if (ok)
+            {
+                Host shared;
+                shared.userId    = uid.toStdString();
+                shared.fullName  = fullName.toStdString();
+                shared.stageName = stageName.toStdString();
+                shared.birthday  = birthday.toStdString();
+                shared.country   = country.toStdString();
+                shared.city      = city.toStdString();
+                shared.gender    = genderStr.toStdString();
+                shared.avatarUrl = avatarUrl.toStdString();
+                ProfileSync::pushSharedFields (shared, stageName.isNotEmpty());
+            }
 
             juce::MessageManager::callAsync([safe, ok, fullName, email, stageName, birthday, country, city, avatarUrl, genderStr]
             {

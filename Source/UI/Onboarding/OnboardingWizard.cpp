@@ -15,6 +15,7 @@
 #include "../../Services/LicenseService.h"
 #include "../../Services/InvitationService.h"
 #include "../../Services/HostService.h"
+#include "../../Services/ProfileSync.h"
 #include "../../Services/LibraryScanner.h"
 #include "../../Services/SongbookStorageService.h"
 #include "../../Services/SongDatabase.h"
@@ -229,7 +230,13 @@ public:
             {
                 auto& fc = FC::getInstance();
                 if (uidToDelete.isNotEmpty())
+                {
                     fc.deleteDocument("hosts/" + uidToDelete);
+                    // Created alongside the account by ProfileSync; the uid is
+                    // brand new this session, so this is never a pre-existing
+                    // TAGG profile.
+                    fc.deleteDocument("users/" + uidToDelete);
+                }
                 fc.deleteCurrentAccount();
                 fc.signOut();
 
@@ -540,8 +547,13 @@ private:
 
                 if (! authResult.ok)
                 {
-                    const auto msg = authResult.errorMessage.isNotEmpty() ? authResult.errorMessage
-                                                                          : authResult.errorCode;
+                    auto msg = authResult.errorMessage.isNotEmpty() ? authResult.errorMessage
+                                                                    : authResult.errorCode;
+                    // A TAGG account is already an Encore account (same
+                    // Firebase project) -- point them at sign-in instead of
+                    // showing the raw "EMAIL_EXISTS" code.
+                    if (msg.containsIgnoreCase("EMAIL_EXISTS"))
+                        msg = LocalizationManager::getInstance().getText("onboarding.create_account.error_email_exists");
                     juce::MessageManager::callAsync([safe, msg]()
                     {
                         if (safe == nullptr) return;
@@ -586,6 +598,13 @@ private:
                 h.firstName = first.toStdString(); h.lastName = last.toStdString();
                 h.stageName = stageName.toStdString(); h.fullName = (first + " " + last).toStdString();
                 h.avatarUrl = avatarPath.toStdString(); h.role = role;
+                h.profileId = uid.toStdString();
+
+                // Same uid as TAGG -- give the new account its TAGG profile
+                // now so the stage name and avatar match in both apps.
+                ProfileSync::createTaggProfile(h);
+                FC::getInstance().patchDocument("hosts/" + uid + "?updateMask.fieldPaths=profileId",
+                                                FC::makeFields({ { "profileId", FC::stringValue(uid) } }));
 
                 auto invitations = InvitationService::queryPendingInvitationsSync(email);
 

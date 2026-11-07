@@ -1920,6 +1920,11 @@ void MainComponent::setupUI()
         if (activeVenueId_.isEmpty())
             return;
 
+        // Apply display-only settings (e.g. "Singers visible in Queue") to
+        // the lyric screen right away -- no need to wait for the save.
+        if (lyricWindow_ != nullptr)
+            lyricWindow_->setQueuePreviewLimit (lyricQueuePreviewLimit());
+
         juce::Component::SafePointer<MainComponent> safe (this);
         const auto venueId = activeVenueId_;
         VenueService::getInstance().saveVenue (venueId, updated,
@@ -4943,13 +4948,22 @@ std::vector<Singers> MainComponent::composeQueueWithHost(const std::vector<Singe
         ? authUid
         : juce::String(! h.profileId.empty() ? h.profileId : h.userId).trim();
 
+    // Exactly one primary host: the account signed into this Encore. Anyone
+    // else carrying a host flag (a previous host who never signed out, a
+    // visiting KJ who joined to sing) is an ordinary singer here -- not
+    // pinned, removable -- and is still marked as a host account by
+    // QueueBar's HostIdentityCache glow.
     int existingHostIndex = -1;
+    for (auto& s : merged)
+        if (hostId.isEmpty() || juce::String(s.id).trim() != hostId)
+            s.isHost = false;
+
     if (hostId.isNotEmpty())
     {
         for (int i = 0; i < (int) merged.size(); ++i)
         {
             auto& s = merged[(size_t) i];
-            if (s.isHost || juce::String(s.id).trim() == hostId)
+            if (juce::String(s.id).trim() == hostId)
             {
                 existingHostIndex = i;
                 s.isHost = true;
@@ -5091,12 +5105,26 @@ MainComponent::buildLyricQueuePreview(const std::vector<Singers>& singers) const
         entry.songName = juce::String (song.songName);
         entry.artistName = juce::String (song.songArtist);
 
+        // No cap here: the display trims to the venue's "Singers visible in
+        // Queue" setting (see lyricQueuePreviewLimit()), and keeping the
+        // full list lets the Now Singing card find its avatar too.
         preview.push_back (std::move (entry));
-        if ((int) preview.size() >= 3)
-            break;
     }
 
     return preview;
+}
+
+int MainComponent::lyricQueuePreviewLimit() const
+{
+    // VenueItem::numSingers: 0 = Hide, 1..6 = that many, 7 = All.
+    int n = 3;
+    if (mainArea != nullptr)
+        if (auto* sp = mainArea->getSettingsPage())
+            n = sp->getVenueData().numSingers;
+
+    if (n <= 0) return 0;
+    if (n >= 7) return -1;
+    return n;
 }
 
 void MainComponent::syncLyricIdlePreview(const std::vector<Singers>& singers)
@@ -5108,6 +5136,7 @@ void MainComponent::syncLyricIdlePreview(const std::vector<Singers>& singers)
     }
 
     lyricWindow_->setVenueContext (activeVenueId_, activeVenueName_);
+    lyricWindow_->setQueuePreviewLimit (lyricQueuePreviewLimit());
     lyricWindow_->setQueuePreview (buildLyricQueuePreview (singers));
     syncLyricNowSingingSummary();
     syncLyricLowerThirdNextUp(singers);
@@ -7025,6 +7054,9 @@ void MainComponent::handleSongFinished()
                 || juce::String(s.name).trim().equalsIgnoreCase(juce::String(localNowPlaying_.name).trim()))
             {
                 s.songsPerformed += 1;
+                // Persist it, or the next queue reload resets it to 0.
+                QueueService::getInstance().incrementSongsPerformed(
+                    activeVenueId_, juce::String(s.id).trim(), juce::String(s.name).trim());
                 break;
             }
         }

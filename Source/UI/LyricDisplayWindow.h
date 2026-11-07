@@ -33,6 +33,7 @@ public:
 
     void setVenueContext (const juce::String& venueId, const juce::String& venueName);
     void setQueuePreview (const std::vector<LyricDisplayComponent::QueuePreviewEntry>& entries);
+    void setQueuePreviewLimit (int maxSingers);
     void setLowerThirdNextUpSinger (const juce::String& singerName);
     void setNowSingingInfo (const juce::String& singerName,
                             const juce::String& songName,

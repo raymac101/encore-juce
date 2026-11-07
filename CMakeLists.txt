@@ -139,6 +139,7 @@ target_sources(EncoreJUCE
         Source/Services/SongDatabase.cpp
         Source/Services/ImageCache.cpp
         Source/Services/HostIdentityCache.cpp
+        Source/Services/ProfileSync.cpp
         Source/Services/AdMediaCache.cpp
         ${ENCORE_AD_VIDEO_THUMBNAIL_SOURCE}
         Source/Services/UserPreferences.cpp

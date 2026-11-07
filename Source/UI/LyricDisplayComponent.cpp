@@ -234,6 +234,14 @@ void LyricDisplayComponent::setVenueContext (const juce::String& venueId,
     repaint();
 }
 
+void LyricDisplayComponent::setQueuePreviewLimit (int maxSingers)
+{
+    if (queuePreviewLimit_ == maxSingers)
+        return;
+    queuePreviewLimit_ = maxSingers;
+    repaint();
+}
+
 void LyricDisplayComponent::setQueuePreview (const std::vector<QueuePreviewEntry>& entries)
 {
     queuePreview_ = entries;
@@ -774,6 +782,16 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
         queueArea.removeFromTop (4);
     }
 
+    // Venue setting "Singers visible in Queue": 0 hides the Next Up list
+    // entirely; < 0 means "All" (rows still stop when the panel runs out
+    // of height).
+    if (queuePreviewLimit_ == 0)
+        return;
+
+    const int rowsToShow = queuePreviewLimit_ < 0
+                         ? (int) queuePreview_.size()
+                         : juce::jmin ((int) queuePreview_.size(), queuePreviewLimit_);
+
     g.setColour (pal.accent);
     g.setFont (juce::Font (juce::FontOptions().withHeight (22.0f * upNextTextScale)).boldened());
     if (! queuePreview_.empty())
@@ -793,7 +811,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
         // Keep queue rows visually stable (similar to the Now Singing card)
         // so avatar badges stay circular and text rhythm is consistent.
         const int rowH = (int) (72 * juce::jmax (upNextInfoScale, upNextTextScale));
-        for (int i = 0; i < (int) queuePreview_.size() && i < 3; ++i)
+        for (int i = 0; i < rowsToShow; ++i)
         {
             if (queueArea.getHeight() < rowH)
                 break;

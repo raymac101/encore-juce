@@ -218,6 +218,12 @@ void LyricDisplayWindow::setQueuePreview (const std::vector<LyricDisplayComponen
         display_->setQueuePreview (entries);
 }
 
+void LyricDisplayWindow::setQueuePreviewLimit (int maxSingers)
+{
+    if (display_ != nullptr)
+        display_->setQueuePreviewLimit (maxSingers);
+}
+
 void LyricDisplayWindow::setLowerThirdNextUpSinger (const juce::String& singerName)
 {
     if (display_ != nullptr)

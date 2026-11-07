@@ -151,6 +151,10 @@ public:
     /** Push the next singers shown in the idle split-screen panel. */
     void setQueuePreview (const std::vector<QueuePreviewEntry>& entries);
 
+    /** How many Next Up rows to draw (venue "Singers visible in Queue"):
+        0 = hide the list, < 0 = all that fit, otherwise that many. */
+    void setQueuePreviewLimit (int maxSingers);
+
     /** Lower-third next-up singer shown on the left side of the black bar.
         Pass empty to hide. */
     void setLowerThirdNextUpSinger (const juce::String& singerName);
@@ -234,6 +238,7 @@ private:
     std::unique_ptr<juce::VideoComponent> videoComponent_;
 
     juce::String nextSinger_;
+    int queuePreviewLimit_ = 3;
     juce::String nextSong_;
     juce::String nextArtist_;
     juce::String nowSingingName_;

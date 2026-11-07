@@ -9,6 +9,7 @@
 #include "LoginFlowController.h"
 #include "../Services/UserPreferences.h"
 #include "../Services/HostService.h"
+#include "../Services/ProfileSync.h"
 #include "../Services/InvitationService.h"
 #include "../Services/LicenseService.h"
 
@@ -388,6 +389,11 @@ void LoginFlowController::runPostAuthFlow(ResultCallback onResult, ErrorCallback
 
             // 1) Host bootstrap
             Host host = loadOrCreateHost(uid, email);
+
+            // Share one public identity with TAGG (users/{uid}, same uid):
+            // a TAGG user signing into Encore keeps their stage name and
+            // avatar, and an Encore-only host gets a matching TAGG profile.
+            ProfileSync::syncOnLogin(host);
             HostService::getInstance().setCurrent(host);
 
             // 2) Read stored venueId from prefs
