@@ -132,6 +132,48 @@ public:
         rememberMeToggle_.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
         rememberMeToggle_.setColour(juce::ToggleButton::tickColourId, juce::Colour(LoginTheme::kAccentBlue));
         rememberMeToggle_.setToggleState(true, juce::dontSendNotification);
+        // Shared karaoke-host computers: unchecking this must take effect
+        // immediately, not just "on the next successful login" -- otherwise
+        // a saved session from whoever used the machine last stays on disk
+        // even after the next host explicitly says not to remember them.
+        rememberMeToggle_.onClick = [this]
+        {
+            if (! rememberMeToggle_.getToggleState())
+                UserPreferences::getInstance().clearSavedLogin();
+        };
+
+        // "Welcome back" resume banner -- shown instead of the normal
+        // email/password form when a saved session was silently validated
+        // in the background (see attemptSavedSignIn()). Continuing or
+        // declining is always an explicit click; see applyPage()/
+        // layoutLoginPage() for how these swap with the normal form.
+        addChildComponent(welcomeBackLabel_);
+        welcomeBackLabel_.setJustificationType(juce::Justification::centred);
+        welcomeBackLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
+        welcomeBackLabel_.setFont(juce::Font(juce::FontOptions(16.0f)));
+
+        addChildComponent(continueAsButton_);
+        continueAsButton_.setButtonText(lm.getText("login.continue_as_button"));
+        continueAsButton_.onClick = [this] { runFlow(); };
+
+        addChildComponent(notYouButton_);
+        notYouButton_.setButtonText(lm.getText("login.not_you_button"));
+        notYouButton_.getProperties().set("ghost", true);
+        notYouButton_.onClick = [this]
+        {
+            // A different host is sitting down -- fully drop the previous
+            // session rather than just hiding the banner, so no trace of
+            // the last account (local auth state or saved refresh token)
+            // survives into whatever they type next.
+            FirestoreClient::getInstance().signOut();
+            UserPreferences::getInstance().clearSavedLogin();
+            savedSessionReady_ = false;
+            savedSessionEmail_ = {};
+            emailEditor_.clear();
+            passwordEditor_.clear();
+            rememberMeToggle_.setToggleState(true, juce::dontSendNotification);
+            applyPage();
+        };
 
         loginButton_.setButtonText(lm.getText("login.button_login"));
         switchModeButton_.setButtonText(lm.getText("login.button_switch_to_signup"));
@@ -479,6 +521,12 @@ private:
     // Layout helpers
     void layoutLoginPage(juce::Rectangle<int> area)
     {
+        if (savedSessionReady_)
+        {
+            layoutResumeBanner(area);
+            return;
+        }
+
         // Big breathable inputs to match the original.
         area.removeFromTop(16);
         emailEditor_.setBounds(area.removeFromTop(48));
@@ -520,6 +568,16 @@ private:
 
         area.removeFromTop(16);
         getStartedButton_.setBounds(area.removeFromTop(40).withSizeKeepingCentre(280, 40));
+    }
+
+    void layoutResumeBanner(juce::Rectangle<int> area)
+    {
+        area.removeFromTop(24);
+        welcomeBackLabel_.setBounds(area.removeFromTop(28));
+        area.removeFromTop(20);
+        continueAsButton_.setBounds(area.removeFromTop(48).withSizeKeepingCentre(220, 48));
+        area.removeFromTop(14);
+        notYouButton_.setBounds(area.removeFromTop(32).withSizeKeepingCentre(280, 32));
     }
 
     void layoutSelectVenuePage(juce::Rectangle<int> area)
@@ -588,17 +646,26 @@ private:
         const bool await_ = page_ == Page::AwaitingInvitation;
         const bool req    = page_ == Page::RequestAccess;
 
-        emailEditor_.setVisible(login);
-        passwordEditor_.setVisible(login);
-        rememberMeToggle_.setVisible(login);
+        // On the login page, the saved-session resume banner and the normal
+        // credentials form are mutually exclusive -- see attemptSavedSignIn().
+        const bool resume = login && savedSessionReady_;
+        const bool normalForm = login && ! savedSessionReady_;
+
+        welcomeBackLabel_.setVisible(resume);
+        continueAsButton_.setVisible(resume);
+        notYouButton_.setVisible(resume);
+
+        emailEditor_.setVisible(normalForm);
+        passwordEditor_.setVisible(normalForm);
+        rememberMeToggle_.setVisible(normalForm);
         updateClearButtonVisibility();
-        loginButton_.setVisible(login);
-        switchModeButton_.setVisible(login);
-        googleButton_.setVisible(login);
-        appleButton_.setVisible(login);
-        getStartedButton_.setVisible(login);
+        loginButton_.setVisible(normalForm);
+        switchModeButton_.setVisible(normalForm);
+        googleButton_.setVisible(normalForm);
+        appleButton_.setVisible(normalForm);
+        getStartedButton_.setVisible(normalForm);
         if (devSkipLoginEnabled_)
-            skipButton_.setVisible(login);
+            skipButton_.setVisible(normalForm);
 
         venuesHeadingLabel_.setVisible(sel);
         rememberVenueToggle_.setVisible(sel);
@@ -723,26 +790,21 @@ private:
 
     //==============================================================================
     // "Stay signed in" -- called once at construction, before the user has
-    // touched anything. Pre-fills the saved email either way. If a saved
-    // refresh token is also present, quietly exchanges it for a fresh
-    // session in the background so no password is needed later -- but
-    // deliberately does NOT navigate anywhere or act "logged in" on its
-    // own. Login always stays a manual, explicit click: this only means
-    // that when the host does click Log In without changing the pre-filled
-    // email or typing a password, handleEmailSubmit() can use the already-
-    // validated session instead of demanding a password that was never
-    // stored in the first place.
+    // touched anything. Deliberately does NOT pre-fill the email/password
+    // form -- on a karaoke computer shared by multiple hosts, leaving the
+    // previous host's address sitting in a field (or, worse, letting an
+    // empty-password submit silently resume their session) is exactly the
+    // walk-up-and-you're-logged-in-as-someone-else hole this is meant to
+    // close. If a saved refresh token is present, it's quietly exchanged
+    // for a fresh session in the background so no password is needed
+    // later, but that only ever surfaces as the explicit "Welcome back"
+    // resume banner (see applyPage()) -- continuing or declining is always
+    // a deliberate click, never implicit from whatever happens to be
+    // sitting in the form.
     void attemptSavedSignIn()
     {
         auto& prefs = UserPreferences::getInstance();
-        const auto savedEmail = prefs.getSavedLoginEmail();
         const auto savedRefreshToken = prefs.getSavedLoginRefreshToken();
-
-        if (savedEmail.isNotEmpty())
-            emailEditor_.setText(savedEmail, juce::dontSendNotification);
-
-        updateClearButtonVisibility();
-
         if (savedRefreshToken.isEmpty())
             return;
 
@@ -764,10 +826,20 @@ private:
                     return;
                 }
 
+                // If the host has already started typing their own
+                // credentials while this was resolving in the background,
+                // don't yank the page out from under them -- just drop the
+                // resume offer silently rather than show the banner.
+                if (safe->emailEditor_.getText().isNotEmpty() || safe->passwordEditor_.getText().isNotEmpty())
+                    return;
+
+                safe->savedSessionEmail_ = FirestoreClient::getInstance().getEmail();
                 safe->savedSessionReady_ = true;
-                safe->statusLabel_.setText(
-                    LocalizationManager::getInstance().getText("login.status_saved_session_ready"),
+                safe->welcomeBackLabel_.setText(
+                    LocalizationManager::getInstance().getTextWithParams(
+                        "login.status_saved_session_ready", { safe->savedSessionEmail_ }),
                     juce::dontSendNotification);
+                safe->applyPage();
             });
         });
     }
@@ -779,20 +851,11 @@ private:
         const auto email    = emailEditor_.getText().trim();
         const auto password = passwordEditor_.getText();
 
-        // A saved session was silently refreshed in the background (see
-        // attemptSavedSignIn()) but held back from navigating anywhere on
-        // its own -- this is the manual confirmation of it. Only takes
-        // this path if nothing's been changed from what was pre-filled;
-        // if the host typed a different email or any password, that's
-        // them deliberately signing in as someone else, so fall through
-        // to the normal flow below instead.
-        if (savedSessionReady_ && isLoginMode_ && password.isEmpty()
-            && email.equalsIgnoreCase(FirestoreClient::getInstance().getEmail()))
-        {
-            runFlow();
-            return;
-        }
-
+        // The normal form is only ever shown once any saved-session resume
+        // offer has been explicitly declined or never existed (see
+        // applyPage()/continueAsButton_), so getting here always means the
+        // host is deliberately typing credentials -- full email+password
+        // required, same as any other sign-in attempt.
         auto& lm = LocalizationManager::getInstance();
         if (email.isEmpty() || password.length() < 6)
         {
@@ -1394,10 +1457,14 @@ private:
 
     // Set once attemptSavedSignIn()'s background refresh-token exchange
     // succeeds. Deliberately does NOT advance past the login page by
-    // itself -- see attemptSavedSignIn()'s comment -- it just lets
-    // handleEmailSubmit() skip re-asking for a password we never stored
-    // when the host clicks Log In themselves without changing anything.
+    // itself -- see attemptSavedSignIn()'s comment -- it just swaps the
+    // login page over to the "Welcome back" resume banner so continuing
+    // is always an explicit click (never implicit from stale form fields).
     bool savedSessionReady_ = false;
+    // Email the resume banner displays -- deliberately NOT written into
+    // emailEditor_, so a shared computer never shows the previous host's
+    // address inside an editable field.
+    juce::String savedSessionEmail_;
     LoginFlowController::Result flowResult_;
     LoginCompleteCallback onComplete_;
 
@@ -1418,6 +1485,9 @@ private:
     juce::DrawableButton emailClearButton_    { "emailClear", juce::DrawableButton::ImageFitted };
     juce::DrawableButton passwordClearButton_ { "passwordClear", juce::DrawableButton::ImageFitted };
     juce::ToggleButton rememberMeToggle_;
+    juce::Label        welcomeBackLabel_;
+    juce::TextButton   continueAsButton_;
+    juce::TextButton   notYouButton_;
     juce::TextButton loginButton_;
     juce::TextButton switchModeButton_;
     juce::TextButton getStartedButton_;
