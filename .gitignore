@@ -69,3 +69,6 @@ firebase-debug.log
 .claude/skills/
 .claude/plugins/
 skills-lock.json
+
+# Downloaded by CI (release.yml) before building the Windows installer
+packaging/windows/vc_redist.x64.exe

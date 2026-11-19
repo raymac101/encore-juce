@@ -78,6 +78,19 @@ jobs:
           files-folder: build\EncoreJUCE_artefacts\Release
           files-folder-filter: exe
 
+      # Bundled into the installer and run silently when the target PC's
+      # MSVC runtime is missing/older -- without it a clean Windows install
+      # fails to launch Encore with "MSVCP140.dll was not found".
+      - name: Download VC++ Redistributable (x64)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "packaging\windows\vc_redist.x64.exe"
+          $sig = Get-AuthenticodeSignature "packaging\windows\vc_redist.x64.exe"
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "vc_redist.x64.exe signature check failed: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          (Get-Item "packaging\windows\vc_redist.x64.exe").VersionInfo.FileVersion
+
       - name: Build installer (Inno Setup)
         shell: cmd
         run: |
