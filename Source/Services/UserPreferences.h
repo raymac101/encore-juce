@@ -37,11 +37,10 @@ public:
     void setLyricWindowFullScreen(bool fullScreen);
 
     //--- Saved login ("stay signed in") -----------------------------------------
-    // The password itself is never stored. Instead, a successful sign-in with
-    // "Remember me" checked saves the Firebase refresh token (see
-    // FirestoreClient::getRefreshToken()/signInWithRefreshToken()), which
-    // LoginWindow uses at next launch to silently start a new session --
-    // same mechanism this app already uses for Spotify's saved login.
+    // Only the login email is remembered (pre-filled by LoginWindow when
+    // "Remember me" was checked). The password is never stored, and no
+    // session/refresh token is kept either -- the RefreshToken accessors
+    // remain only so LoginWindow can wipe tokens saved by older builds.
     juce::String getSavedLoginEmail() const;
     void setSavedLoginEmail(const juce::String& email);
     juce::String getSavedLoginRefreshToken() const;
