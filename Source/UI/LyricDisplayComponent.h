@@ -318,6 +318,16 @@ private:
     std::array<SnowflakeSeed, 36>      snowflakeSeeds_;
     std::array<ChristmasLightSeed, 20> christmasLightSeeds_;
 
+    // Christmas lights "flare": every few seconds 1-3 random bulbs swell
+    // smoothly to full brightness and fade back, layered on top of the
+    // subtle per-bulb twinkle. Elapsed seconds into each bulb's flare,
+    // < 0 when that bulb isn't flaring. Advanced in timerCallback().
+    std::array<float, 20> christmasLightFlareT_ {};
+    double christmasNextFlareDelaySec_ = 2.0;
+    static constexpr float  kChristmasFlareDurationSec = 1.8f;
+    static constexpr double kChristmasFlareMinWaitSec  = 1.5;
+    static constexpr double kChristmasFlareMaxWaitSec  = 4.5;
+
     // Christmas theme: animated Santa sleigh, decoded once in the
     // background (GifDecoder -- juce::ImageFileFormat only loads a GIF's
     // first frame) the first time the theme is actually selected, then
@@ -329,14 +339,14 @@ private:
     bool   santaFramesLoading_ = false;
     bool   santaFlightActive_  = false;
     double santaFlightProgress_     = 0.0;   // 0..1 across the crossing
-    double santaNextFlightDelaySec_ = 3.0;  // TEMP-FAST-TEST-VALUE
+    double santaNextFlightDelaySec_ = 30.0;  // first flight after kSantaMinWaitSec of idle; later waits are randomized
     float  santaFlightY01_    = 0.1f;        // vertical position for the current/last flight, as a fraction of screen height
     int    santaFrameIndex_   = 0;
     double santaFrameAccumMs_ = 0.0;
     double lastSantaTickMs_   = 0.0;
-    static constexpr double kSantaFlightDurationSec = 5.0;  // TEMP-FAST-TEST-VALUE
-    static constexpr double kSantaMinWaitSec = 3.0;  // TEMP-FAST-TEST-VALUE
-    static constexpr double kSantaMaxWaitSec = 5.0;  // TEMP-FAST-TEST-VALUE
+    static constexpr double kSantaFlightDurationSec = 14.0;   // time to cross the screen
+    static constexpr double kSantaMinWaitSec        = 30.0;   // random gap between flights: 30 s ..
+    static constexpr double kSantaMaxWaitSec        = 120.0;  // .. 2 min
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayComponent)
 };

@@ -204,6 +204,7 @@ void LyricDisplayComponent::seedThemeAnimations()
         s.phaseOffset = (float) i * 0.4f;
         s.colourIdx   = i % 4;
     }
+    christmasLightFlareT_.fill (-1.0f);
 }
 
 LyricDisplayComponent::~LyricDisplayComponent()
@@ -506,6 +507,40 @@ void LyricDisplayComponent::timerCallback()
 
         if (theme == LyricTheme::Christmas)
             ensureSantaFramesLoaded();
+
+        // Christmas lights flare: advance any in-progress flares, then
+        // every few seconds kick off 1-3 new ones on bulbs not already lit.
+        if (idleMode && theme == LyricTheme::Christmas)
+        {
+            for (auto& t : christmasLightFlareT_)
+            {
+                if (t >= 0.0f)
+                {
+                    t += (float) dt;
+                    if (t >= kChristmasFlareDurationSec)
+                        t = -1.0f;
+                }
+            }
+
+            christmasNextFlareDelaySec_ -= dt;
+            if (christmasNextFlareDelaySec_ <= 0.0)
+            {
+                auto& rng = juce::Random::getSystemRandom();
+                const int want = 1 + rng.nextInt (3);
+                const int n = (int) christmasLightFlareT_.size();
+                for (int started = 0, attempts = 0; started < want && attempts < n * 2; ++attempts)
+                {
+                    auto& t = christmasLightFlareT_[(size_t) rng.nextInt (n)];
+                    if (t < 0.0f)
+                    {
+                        t = 0.0f;
+                        ++started;
+                    }
+                }
+                christmasNextFlareDelaySec_ = kChristmasFlareMinWaitSec + rng.nextDouble()
+                                                * (kChristmasFlareMaxWaitSec - kChristmasFlareMinWaitSec);
+            }
+        }
 
         if (idleMode && theme == LyricTheme::Christmas && santaFramesLoaded_ && ! santaFrames_.empty())
         {
@@ -1519,8 +1554,9 @@ void LyricDisplayComponent::paintChristmasLights (juce::Graphics& g, juce::Recta
     g.setColour (juce::Colours::black.withAlpha (0.5f));
     g.strokePath (wire, juce::PathStrokeType (1.5f));
 
-    for (const auto& s : christmasLightSeeds_)
+    for (size_t i = 0; i < christmasLightSeeds_.size(); ++i)
     {
+        const auto& s = christmasLightSeeds_[i];
         const auto p = bulbPos (s);
         const auto& colour = lightColours[(size_t) s.colourIdx];
         // motion01 scales the twinkle amplitude directly so Motion=0
@@ -1529,19 +1565,31 @@ void LyricDisplayComponent::paintChristmasLights (juce::Graphics& g, juce::Recta
         const float twinkle = 0.75f + 0.25f * motion01
                              * std::abs (std::sin ((float) animPhase_ * 2.4f + s.phaseOffset));
 
-        // Soft outer glow halo.
-        juce::ColourGradient glow (colour.withAlpha (0.85f * twinkle), p.x, p.y,
-                                   colour.withAlpha (0.0f), p.x + 20.0f, p.y, true);
+        // Occasional big flare (see timerCallback): sin^2 over the flare's
+        // duration gives a smooth ease up to full brightness and back.
+        float flare = 0.0f;
+        if (const float ft = christmasLightFlareT_[i]; ft >= 0.0f)
+        {
+            const float sn = std::sin (juce::MathConstants<float>::pi * (ft / kChristmasFlareDurationSec));
+            flare = sn * sn * motion01;
+        }
+
+        // Soft outer glow halo -- grows and intensifies while flaring.
+        const float glowR = 20.0f + 16.0f * flare;
+        juce::ColourGradient glow (colour.brighter (0.6f * flare).withAlpha (juce::jmin (1.0f, 0.85f * twinkle + 0.15f * flare)),
+                                   p.x, p.y,
+                                   colour.withAlpha (0.0f), p.x + glowR, p.y, true);
         g.setGradientFill (glow);
-        g.fillEllipse (p.x - 20.0f, p.y - 20.0f, 40.0f, 40.0f);
+        g.fillEllipse (p.x - glowR, p.y - glowR, glowR * 2.0f, glowR * 2.0f);
 
         // Bulb body.
-        g.setColour (colour.withAlpha (juce::jmin (1.0f, 0.7f + twinkle * 0.3f)));
+        g.setColour (colour.brighter (0.8f * flare).withAlpha (juce::jmin (1.0f, 0.7f + twinkle * 0.3f + flare * 0.3f)));
         g.fillEllipse (p.x - 6.0f, p.y - 6.0f, 12.0f, 12.0f);
 
-        // Bright hot core.
-        g.setColour (juce::Colours::white.withAlpha (0.5f + twinkle * 0.5f));
-        g.fillEllipse (p.x - 2.5f, p.y - 2.5f, 5.0f, 5.0f);
+        // Bright hot core -- widens while flaring.
+        const float coreR = 2.5f + 1.5f * flare;
+        g.setColour (juce::Colours::white.withAlpha (juce::jmin (1.0f, 0.5f + twinkle * 0.5f + flare * 0.5f)));
+        g.fillEllipse (p.x - coreR, p.y - coreR, coreR * 2.0f, coreR * 2.0f);
     }
 }
 
