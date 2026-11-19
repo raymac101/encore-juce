@@ -192,7 +192,7 @@ public:
 
     //--- Lyric screen theme (Settings > Lyric Screen section) -----------------
     // Index into the LyricTheme enum (Source/UI/LyricDisplayComponent.h),
-    // 0-7, default 0 (Classic). Stored as a plain int here so this Services
+    // 0-8, default 0 (Classic). Stored as a plain int here so this Services
     // class doesn't need to include a UI header.
     int  getLyricThemeIndex() const;
     void setLyricThemeIndex(int index);

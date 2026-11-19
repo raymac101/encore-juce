@@ -303,11 +303,17 @@ void LyricDisplayWindow::closeButtonPressed()
 }
 
 //==============================================================================
+bool LyricDisplayWindow::isSingleMonitorSetup()
+{
+    return juce::Desktop::getInstance().getDisplays().displays.size() <= 1;
+}
+
 void LyricDisplayWindow::moveToSecondaryDisplay()
 {
     auto& prefs = UserPreferences::getInstance();
     const auto saved = prefs.getLyricWindowBounds();
     const bool savedFullScreen = prefs.getLyricWindowFullScreen();
+    const bool singleMonitor = isSingleMonitorSetup();
 
     // 1) If we have a saved position+size, honour it (but clamp so we don't
     //    end up off-screen when a monitor was disconnected since last run).
@@ -323,13 +329,43 @@ void LyricDisplayWindow::moveToSecondaryDisplay()
         setBounds (target);
 
        #if ! (JUCE_IOS || JUCE_ANDROID)
-        if (savedFullScreen) setTrueFullScreen (true);
+        // Don't honour an old "was full-screen" preference on a machine
+        // that's down to a single display right now (e.g. a laptop
+        // unplugged from its usual second monitor) -- that would
+        // reproduce exactly the "lyric screen covers Encore with no way
+        // back" problem this is meant to avoid. Case 2 below is what
+        // decides sizing for single-monitor machines.
+        if (savedFullScreen && ! singleMonitor) setTrueFullScreen (true);
        #endif
         return;
     }
 
-    // 2) Otherwise, default to full-screen on the secondary display (or the
-    //    primary one, if that's all that's connected).
+    // 2) No saved bounds yet (first launch). On a genuinely multi-monitor
+    //    machine, default to full-screen on the secondary display -- that's
+    //    the intended "dedicated lyric monitor" setup. On a single-monitor
+    //    machine (most laptops), full-screen would completely cover
+    //    Encore's own window -- borderless, no title bar, no taskbar entry,
+    //    no way back short of Alt+F4 -- so instead give it a normal,
+    //    movable/resizable window sized to a comfortable fraction of the
+    //    screen instead of taking it over.
+    if (singleMonitor)
+    {
+        if (const auto* display = getSecondaryOrPrimaryDisplay())
+        {
+            const auto area = display->userArea;
+            const int w = juce::jlimit (480, area.getWidth(),  area.getWidth()  * 3 / 4);
+            const int h = juce::jlimit (320, area.getHeight(), area.getHeight() * 3 / 4);
+            setBounds (area.getX() + (area.getWidth()  - w) / 2,
+                      area.getY() + (area.getHeight() - h) / 2,
+                      w, h);
+        }
+        else
+        {
+            centreWithSize (960, 540);
+        }
+        return;
+    }
+
     if (const auto* target = getSecondaryOrPrimaryDisplay())
     {
         setBounds (target->userArea);

@@ -5362,7 +5362,20 @@ void MainComponent::startDeferredAudioServices(const juce::String& venueId, int 
             const auto lyricStartMs = juce::Time::getMillisecondCounterHiRes();
 
             if (safeThis->lyricWindow_ == nullptr)
+            {
                 safeThis->lyricWindow_ = std::make_unique<LyricDisplayWindow> (safeThis->audioEngine.get());
+
+                // This creation is automatic (startup/venue load), not a
+                // host clicking "show lyric window" -- on a single-monitor
+                // machine the new top-level window still tends to land in
+                // front of Encore's own window even though it's no longer
+                // full-screen (see LyricDisplayWindow::moveToSecondaryDisplay),
+                // so push it behind so the host isn't unexpectedly staring
+                // at the lyric screen with Encore hidden underneath it.
+                if (LyricDisplayWindow::isSingleMonitorSetup())
+                    if (auto* mainTopLevel = safeThis->getTopLevelComponent())
+                        safeThis->lyricWindow_->toBehind (mainTopLevel);
+            }
 
             const auto lyricMs = juce::Time::getMillisecondCounterHiRes() - lyricStartMs;
 

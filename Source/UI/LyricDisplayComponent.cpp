@@ -57,9 +57,9 @@ namespace
     // Bubblegum Pop intentionally use light cards + dark ink -- the opposite
     // polarity from the other six -- which is why every card/text colour is
     // palette-driven rather than just the accent.
-    const std::array<LyricThemePalette, 8>& lyricThemeBaseTable()
+    const std::array<LyricThemePalette, 9>& lyricThemeBaseTable()
     {
-        static const std::array<LyricThemePalette, 8> table = { {
+        static const std::array<LyricThemePalette, 9> table = { {
             // Classic -- matches today's app exactly at Color Intensity 100%.
             { juce::Colour (0xff30daff), juce::Colours::white, juce::Colours::white.withAlpha (0.80f),
               juce::Colours::black.withAlpha (0.35f), juce::Colour (0xff30daff).withAlpha (0.18f),
@@ -91,7 +91,11 @@ namespace
             // VU Meter Pulse -- near-black, signal-green accent.
             { juce::Colour (0xff39ff6a), juce::Colours::white, juce::Colours::white.withAlpha (0.78f),
               juce::Colours::black.withAlpha (0.45f), juce::Colour (0xff39ff6a).withAlpha (0.30f),
-              juce::Colour (0xff39ff6a).withAlpha (0.30f), juce::Colours::black.withAlpha (0.65f) }
+              juce::Colour (0xff39ff6a).withAlpha (0.30f), juce::Colours::black.withAlpha (0.65f) },
+            // Christmas -- deep pine green, holly-red accent, warm gold highlights.
+            { juce::Colour (0xffe61e2b), juce::Colours::white, juce::Colours::white.withAlpha (0.82f),
+              juce::Colour (0xff0b2e1a).withAlpha (0.55f), juce::Colour (0xffe61e2b).withAlpha (0.35f),
+              juce::Colour (0xffffc94d).withAlpha (0.35f), juce::Colours::black.withAlpha (0.55f) }
         } };
         return table;
     }
@@ -178,6 +182,27 @@ void LyricDisplayComponent::seedThemeAnimations()
         s.x           = (float) i / (float) (vuBarSeeds_.size() - 1);
         s.speedMul    = 0.8f + rng.nextFloat() * 1.6f;
         s.phaseOffset = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+    }
+
+    for (auto& s : snowflakeSeeds_)
+    {
+        s.x0         = rng.nextFloat();
+        // Noticeably slower than confetti's fallSpeed range -- snow should
+        // drift down gently, not tumble.
+        s.fallSpeed  = 0.03f + rng.nextFloat() * 0.05f;
+        s.size       = 3.0f + rng.nextFloat() * 5.0f;
+        s.driftSpeed = 0.3f + rng.nextFloat() * 0.5f;
+        s.driftPhase = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+    }
+
+    // Evenly spaced along the garland (like marqueeBulbSeeds_) rather than
+    // random, so it reads as a strung light strip, not scattered dots.
+    for (int i = 0; i < (int) christmasLightSeeds_.size(); ++i)
+    {
+        auto& s = christmasLightSeeds_[(size_t) i];
+        s.x           = (float) i / (float) (christmasLightSeeds_.size() - 1);
+        s.phaseOffset = (float) i * 0.4f;
+        s.colourIdx   = i % 4;
     }
 }
 
@@ -466,6 +491,58 @@ void LyricDisplayComponent::timerCallback()
     const bool idleMode = forceIdleScreen_ || (! isVideoActive() && ! decoder_.isLoaded());
     updateAdPanelAnimation (idleMode);
 
+    // Christmas theme: an animated Santa sleigh occasionally flies across
+    // the idle screen. Scheduling and frame-advance both only progress
+    // while actually idle (so "a song is playing" freezes it, same as
+    // animPhase_ above) and only while the Christmas theme is selected.
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        const double dt = (lastSantaTickMs_ > 0.0)
+                             ? juce::jlimit (0.0, 0.25, (nowMs - lastSantaTickMs_) / 1000.0)
+                             : (1.0 / 30.0);
+        lastSantaTickMs_ = nowMs;
+
+        const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 8, UserPreferences::getInstance().getLyricThemeIndex()));
+
+        if (theme == LyricTheme::Christmas)
+            ensureSantaFramesLoaded();
+
+        if (idleMode && theme == LyricTheme::Christmas && santaFramesLoaded_ && ! santaFrames_.empty())
+        {
+            if (! santaFlightActive_)
+            {
+                santaNextFlightDelaySec_ -= dt;
+                if (santaNextFlightDelaySec_ <= 0.0)
+                {
+                    santaFlightActive_   = true;
+                    santaFlightProgress_ = 0.0;
+                    santaFlightY01_      = 0.06f + juce::Random::getSystemRandom().nextFloat() * 0.18f;
+                    santaFrameIndex_     = 0;
+                    santaFrameAccumMs_   = 0.0;
+                }
+            }
+            else
+            {
+                santaFlightProgress_ += dt / kSantaFlightDurationSec;
+                if (santaFlightProgress_ >= 1.0)
+                {
+                    santaFlightActive_ = false;
+                    santaNextFlightDelaySec_ = kSantaMinWaitSec + juce::Random::getSystemRandom().nextDouble()
+                                                                 * (kSantaMaxWaitSec - kSantaMinWaitSec);
+                }
+                else
+                {
+                    santaFrameAccumMs_ += dt * 1000.0;
+                    while (santaFrameAccumMs_ >= santaFrames_[(size_t) santaFrameIndex_].delayMs)
+                    {
+                        santaFrameAccumMs_ -= santaFrames_[(size_t) santaFrameIndex_].delayMs;
+                        santaFrameIndex_ = (santaFrameIndex_ + 1) % (int) santaFrames_.size();
+                    }
+                }
+            }
+        }
+    }
+
     if (++adRefreshCountdownFrames_ >= 900)
     {
         adRefreshCountdownFrames_ = 0;
@@ -632,6 +709,13 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
             paintIdle (g, contentArea);
     }
 
+    // Christmas theme: light garland, drawn as its own foreground pass (see
+    // paintChristmasLights()'s comment) so branding/card content painted
+    // inside paintIdle() never dims it. No-ops instantly when the theme
+    // isn't Christmas or the screen isn't idle.
+    if (idleMode)
+        paintChristmasLights (g, area);
+
     // Keep lower-third overlays full-width in all modes.
     paintOverlay (g, area);
 
@@ -644,6 +728,12 @@ void LyricDisplayComponent::paint (juce::Graphics& g)
     if (idleMode)
     {
         paintAdPanel (g, getAdRenderArea (contentArea, true), false);
+
+        // santaFlightActive_ can only ever be true when idle and the
+        // Christmas theme is selected -- see timerCallback() -- so no
+        // further gating is needed here. Drawn last so the sleigh flies
+        // over everything else on the idle screen, including the ad panel.
+        paintSantaSleigh (g, area);
     }
     else if (adPanelVisibility_ > 0.01f)
     {
@@ -658,7 +748,7 @@ void LyricDisplayComponent::paintIdle (juce::Graphics& g, juce::Rectangle<int> a
     auto right = area;
 
     auto& prefs = UserPreferences::getInstance();
-    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 7, prefs.getLyricThemeIndex()));
+    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 8, prefs.getLyricThemeIndex()));
     const float colorIntensity01  = prefs.getLyricColorIntensityPercent()  / 100.0f;
     const float motionIntensity01 = prefs.getLyricMotionIntensityPercent() / 100.0f;
     const auto pal = resolveLyricThemePalette (theme, colorIntensity01);
@@ -1149,6 +1239,32 @@ void LyricDisplayComponent::paintThemeBackdrop (juce::Graphics& g, juce::Rectang
             }
             break;
         }
+
+        case LyricTheme::Christmas:
+        {
+            // Deep pine-green night sky fading toward the bottom. The
+            // light garland used to be drawn here too, but anything drawn
+            // later in paintIdle() (branding glow, Now Singing/queue cards)
+            // painted over it and dimmed it -- it's now a separate
+            // foreground pass, see paintChristmasLights(), drawn last so it
+            // always reads at full brightness.
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff0b2e1a), (float) area.getX(), (float) area.getY(),
+                                                     juce::Colour (0xff04140c), (float) area.getX(), (float) area.getBottom(), false));
+            g.fillRect (area);
+
+            // Falling snow, drifting gently side to side as it descends.
+            for (const auto& s : snowflakeSeeds_)
+            {
+                const float yFrac = std::fmod ((float) animPhase * s.fallSpeed + s.x0 * 2.5f, 1.0f);
+                const float sway  = std::sin ((float) animPhase * s.driftSpeed + s.driftPhase) * 18.0f;
+                const float x = area.getX() + s.x0 * w + sway;
+                const float y = area.getY() + yFrac * h;
+
+                g.setColour (juce::Colours::white.withAlpha (0.75f));
+                g.fillEllipse (x - s.size * 0.5f, y - s.size * 0.5f, s.size, s.size);
+            }
+            break;
+        }
     }
 }
 
@@ -1172,7 +1288,7 @@ void LyricDisplayComponent::paintNowCardDecoration (juce::Graphics& g, juce::Rec
 void LyricDisplayComponent::paintOverlay (juce::Graphics& g, juce::Rectangle<int> area)
 {
     auto& prefs = UserPreferences::getInstance();
-    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 7, prefs.getLyricThemeIndex()));
+    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 8, prefs.getLyricThemeIndex()));
     const float colorIntensity01 = prefs.getLyricColorIntensityPercent() / 100.0f;
     const auto pal = resolveLyricThemePalette (theme, colorIntensity01);
 
@@ -1309,6 +1425,124 @@ juce::Image LyricDisplayComponent::getOrLoadEmojiSheet (const juce::String& emoj
     emojiFrameCountCache_[key] = frames;
     outTotalFrames = frames;
     return image;
+}
+
+//==============================================================================
+// Christmas theme: Santa sleigh
+void LyricDisplayComponent::ensureSantaFramesLoaded()
+{
+    if (santaFramesLoaded_ || santaFramesLoading_)
+        return;
+    santaFramesLoading_ = true;
+
+    const auto appDir = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                            .getParentDirectory();
+    const auto gifFile = appDir.getChildFile ("assets/images/santa_sleigh.gif");
+
+    juce::Component::SafePointer<LyricDisplayComponent> safe (this);
+    juce::Thread::launch ([safe, gifFile]
+    {
+        std::vector<GifDecoder::Frame> frames;
+        if (! GifDecoder::decode (gifFile, frames))
+            DBG ("LyricDisplay: could not decode Santa sleigh GIF: " + gifFile.getFullPathName());
+
+        juce::MessageManager::callAsync ([safe, frames = std::move (frames)]() mutable
+        {
+            if (safe == nullptr)
+                return;
+            safe->santaFrames_ = std::move (frames);
+            safe->santaFramesLoaded_ = true;
+            safe->santaFramesLoading_ = false;
+        });
+    });
+}
+
+void LyricDisplayComponent::paintSantaSleigh (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    if (! santaFlightActive_ || santaFrames_.empty())
+        return;
+    if (santaFrameIndex_ < 0 || santaFrameIndex_ >= (int) santaFrames_.size())
+        return;
+
+    const auto& frame = santaFrames_[(size_t) santaFrameIndex_];
+    if (! frame.image.isValid())
+        return;
+
+    // Scale to a sensible fraction of the screen width regardless of the
+    // GIF's native resolution, preserving its aspect ratio.
+    const float targetW = juce::jmax (120.0f, (float) area.getWidth() * 0.22f);
+    const float aspect  = (float) frame.image.getHeight() / (float) juce::jmax (1, frame.image.getWidth());
+    const float targetH = targetW * aspect;
+
+    // Right to left, fully off-screen on both ends of the crossing -- the
+    // sleigh/reindeer face left in the source artwork, so this is the
+    // direction that reads as "flying forward" rather than backward.
+    const float startX = (float) area.getWidth();
+    const float endX   = -targetW;
+    const float x = startX + (endX - startX) * (float) santaFlightProgress_;
+    const float y = (float) area.getY() + (float) area.getHeight() * santaFlightY01_;
+
+    g.drawImage (frame.image, juce::Rectangle<float> (x, y, targetW, targetH));
+}
+
+void LyricDisplayComponent::paintChristmasLights (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    auto& prefs = UserPreferences::getInstance();
+    const auto theme = static_cast<LyricTheme> (juce::jlimit (0, 8, prefs.getLyricThemeIndex()));
+    if (theme != LyricTheme::Christmas)
+        return;
+
+    const float motion01 = prefs.getLyricMotionIntensityPercent() / 100.0f;
+    const float w = (float) area.getWidth();
+    const float edgeMargin = 16.0f;
+
+    static const juce::Colour lightColours[4] = {
+        juce::Colour (0xffe61e2b), juce::Colour (0xff2ecc71),
+        juce::Colour (0xffffc94d), juce::Colour (0xff30a0ff)
+    };
+
+    auto bulbPos = [&] (const ChristmasLightSeed& s)
+    {
+        const float x = area.getX() + s.x * w;
+        const float sag = std::sin (s.x * juce::MathConstants<float>::pi) * 10.0f;
+        const float y = area.getY() + edgeMargin + sag;
+        return juce::Point<float> (x, y);
+    };
+
+    juce::Path wire;
+    for (size_t i = 0; i < christmasLightSeeds_.size(); ++i)
+    {
+        const auto p = bulbPos (christmasLightSeeds_[i]);
+        if (i == 0) wire.startNewSubPath (p);
+        else        wire.lineTo (p);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.strokePath (wire, juce::PathStrokeType (1.5f));
+
+    for (const auto& s : christmasLightSeeds_)
+    {
+        const auto p = bulbPos (s);
+        const auto& colour = lightColours[(size_t) s.colourIdx];
+        // motion01 scales the twinkle amplitude directly so Motion=0
+        // settles every bulb to a steady, still-bright rest state instead
+        // of freezing dim on an arbitrary per-bulb phase.
+        const float twinkle = 0.75f + 0.25f * motion01
+                             * std::abs (std::sin ((float) animPhase_ * 2.4f + s.phaseOffset));
+
+        // Soft outer glow halo.
+        juce::ColourGradient glow (colour.withAlpha (0.85f * twinkle), p.x, p.y,
+                                   colour.withAlpha (0.0f), p.x + 20.0f, p.y, true);
+        g.setGradientFill (glow);
+        g.fillEllipse (p.x - 20.0f, p.y - 20.0f, 40.0f, 40.0f);
+
+        // Bulb body.
+        g.setColour (colour.withAlpha (juce::jmin (1.0f, 0.7f + twinkle * 0.3f)));
+        g.fillEllipse (p.x - 6.0f, p.y - 6.0f, 12.0f, 12.0f);
+
+        // Bright hot core.
+        g.setColour (juce::Colours::white.withAlpha (0.5f + twinkle * 0.5f));
+        g.fillEllipse (p.x - 2.5f, p.y - 2.5f, 5.0f, 5.0f);
+    }
 }
 
 void LyricDisplayComponent::addEmoji (const Emoji& request)

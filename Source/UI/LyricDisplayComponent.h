@@ -18,13 +18,14 @@
 #include <vector>
 #include "../CDG/CDGDecoder.h"
 #include "../Models/Emoji.h"
+#include "../Services/GifDecoder.h"
 
 class AudioEngine;
 class LibVlcVideoView;
 class LyricStreamServer;
 
 // Lyric screen visual theme, configurable in Settings alongside Color/Motion
-// Intensity. Stored in UserPreferences as a plain clamped int (0-7) so the
+// Intensity. Stored in UserPreferences as a plain clamped int (0-8) so the
 // Services layer doesn't need to include this UI header.
 enum class LyricTheme
 {
@@ -35,7 +36,8 @@ enum class LyricTheme
     RetroMarquee,
     LaserGrid,
     BubblegumPop,
-    VuMeterPulse
+    VuMeterPulse,
+    Christmas
 };
 
 // Resolved, intensity-scaled colour set for one theme. accent/ink/etc. cover
@@ -198,6 +200,17 @@ private:
     void seedThemeAnimations();
     void updateEmojis (double dtSeconds);
     void paintEmojis  (juce::Graphics& g, juce::Rectangle<int> area);
+
+    // Christmas theme: an animated Santa sleigh that occasionally flies
+    // across the idle screen. See timerCallback() for scheduling and
+    // paintSantaSleigh() for drawing.
+    void ensureSantaFramesLoaded();
+    void paintSantaSleigh (juce::Graphics& g, juce::Rectangle<int> area);
+
+    // Christmas theme: the light garland strung along the top edge. Drawn
+    // as its own foreground pass (see paint()) rather than as part of
+    // paintThemeBackdrop(), so later idle-screen content never dims it.
+    void paintChristmasLights (juce::Graphics& g, juce::Rectangle<int> area);
     juce::Image getOrLoadEmojiSheet (const juce::String& emojiName, int& outTotalFrames);
     void layoutVideoBounds();
     void layoutIdleAdVideoBounds (juce::Rectangle<int> area);
@@ -295,11 +308,35 @@ private:
     struct BubbleSeed      { float x0, y0, radius, bobSpeed, bobPhase, driftSpeed, driftPhase; };
     struct MarqueeBulbSeed { float x; bool topEdge; float phaseOffset; };
     struct VuBarSeed       { float x; float speedMul; float phaseOffset; };
+    struct SnowflakeSeed       { float x0, fallSpeed, size, driftSpeed, driftPhase; };
+    struct ChristmasLightSeed  { float x, phaseOffset; int colourIdx; };
 
     std::array<ConfettiSeed, 24>    confettiSeeds_;
     std::array<BubbleSeed, 6>       bubbleSeeds_;
     std::array<MarqueeBulbSeed, 24> marqueeBulbSeeds_;
     std::array<VuBarSeed, 20>       vuBarSeeds_;
+    std::array<SnowflakeSeed, 36>      snowflakeSeeds_;
+    std::array<ChristmasLightSeed, 20> christmasLightSeeds_;
+
+    // Christmas theme: animated Santa sleigh, decoded once in the
+    // background (GifDecoder -- juce::ImageFileFormat only loads a GIF's
+    // first frame) the first time the theme is actually selected, then
+    // flown across the idle screen at random intervals. All scheduling and
+    // frame-advance in timerCallback() only progresses while idle and only
+    // while this theme is selected -- see the comment there.
+    std::vector<GifDecoder::Frame> santaFrames_;
+    bool   santaFramesLoaded_  = false;
+    bool   santaFramesLoading_ = false;
+    bool   santaFlightActive_  = false;
+    double santaFlightProgress_     = 0.0;   // 0..1 across the crossing
+    double santaNextFlightDelaySec_ = 3.0;  // TEMP-FAST-TEST-VALUE
+    float  santaFlightY01_    = 0.1f;        // vertical position for the current/last flight, as a fraction of screen height
+    int    santaFrameIndex_   = 0;
+    double santaFrameAccumMs_ = 0.0;
+    double lastSantaTickMs_   = 0.0;
+    static constexpr double kSantaFlightDurationSec = 5.0;  // TEMP-FAST-TEST-VALUE
+    static constexpr double kSantaMinWaitSec = 3.0;  // TEMP-FAST-TEST-VALUE
+    static constexpr double kSantaMaxWaitSec = 5.0;  // TEMP-FAST-TEST-VALUE
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricDisplayComponent)
 };

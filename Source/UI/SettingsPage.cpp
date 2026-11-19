@@ -477,6 +477,7 @@ public:
         cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_laser_grid"),   6);
         cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_bubblegum_pop"),7);
         cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_vu_meter"),     8);
+        cbLyricTheme_.addItem(lm.getText("settings.lyric_theme_christmas"),    9);
         cbLyricTheme_.setSelectedId(prefs.getLyricThemeIndex() + 1, juce::dontSendNotification);
         cbLyricTheme_.onChange = [this]() {
             UserPreferences::getInstance().setLyricThemeIndex(cbLyricTheme_.getSelectedId() - 1);
@@ -1252,7 +1253,8 @@ public:
             {"settings.lyric_theme_classic",1},      {"settings.lyric_theme_neon_pulse",2},
             {"settings.lyric_theme_confetti_pop",3}, {"settings.lyric_theme_disco_sweep",4},
             {"settings.lyric_theme_retro_marquee",5},{"settings.lyric_theme_laser_grid",6},
-            {"settings.lyric_theme_bubblegum_pop",7},{"settings.lyric_theme_vu_meter",8}
+            {"settings.lyric_theme_bubblegum_pop",7},{"settings.lyric_theme_vu_meter",8},
+            {"settings.lyric_theme_christmas",9}
         });
     }
 
@@ -1590,6 +1592,13 @@ private:
         s.setColour(juce::Slider::textBoxTextColourId,      juce::Colour(kTextPrimary));
         s.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff0d1527));
         s.setColour(juce::Slider::textBoxOutlineColourId,   juce::Colour(kAccent).withAlpha(0.4f));
+        // This whole page lives in a scrolling viewport -- without this, a
+        // mouse wheel scroll that happens to pass over a slider changes its
+        // value instead of scrolling the page, which both surprises the
+        // host and silently edits a setting they never meant to touch.
+        // Dragging the thumb still works exactly as before; only the wheel
+        // is affected.
+        s.setScrollWheelEnabled(false);
         addAndMakeVisible(s);
     }
     void initButton(juce::TextButton& btn, const juce::String& text, uint32_t colour)

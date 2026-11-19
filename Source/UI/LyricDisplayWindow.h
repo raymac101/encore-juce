@@ -65,9 +65,19 @@ public:
 
     void closeButtonPressed() override;
 
-    /** Place the window on the first non-primary display if one exists,
-        otherwise centre it on the primary display with a sensible size. */
+    /** Place the window on the first non-primary display if one exists.
+        On a single-monitor machine (laptops, most commonly), this
+        deliberately does NOT go full-screen -- see the .cpp -- since that
+        would cover Encore's own window with no title bar or taskbar entry
+        to get back to it. Instead it's sized to a fraction of the screen
+        and left as a normal, movable/resizable window. */
     void moveToSecondaryDisplay();
+
+    /** True when exactly one display is currently connected. The lyric
+        window is meant to live on its own dedicated monitor, so callers
+        use this to decide whether it's safe to drop it behind the main
+        window on startup instead of letting it pop up in front. */
+    static bool isSingleMonitorSetup();
 
     /** Enter/exit true (taskbar-covering) full-screen, always on the
         secondary display if one is connected -- see setTrueFullScreen(). */

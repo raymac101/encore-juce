@@ -679,12 +679,12 @@ int UserPreferences::getLyricThemeIndex() const
 {
     const juce::ScopedLock sl(lock_);
     int idx = (int) root_.getProperty("lyricThemeIndex", juce::var(0));
-    return juce::jlimit(0, 7, idx);
+    return juce::jlimit(0, 8, idx);
 }
 void UserPreferences::setLyricThemeIndex(int index)
 {
     const juce::ScopedLock sl(lock_);
-    asObj(root_)->setProperty("lyricThemeIndex", juce::jlimit(0, 7, index));
+    asObj(root_)->setProperty("lyricThemeIndex", juce::jlimit(0, 8, index));
     save();
 }
 

@@ -1195,13 +1195,28 @@ void VenueService::getPlaylists(const juce::String& venueId,
 
     juce::Thread::launch([venueId, listName, onDone = std::move(onDone)]()
     {
-        auto docs = FC::getInstance().listCollection(playlistsRoot(venueId, listName), 500);
+        // listCollection() returns an empty array both when the collection
+        // is genuinely empty and when the request itself failed (dropped
+        // connection, auth token not warmed up yet right after login,
+        // transient server error) -- those are otherwise indistinguishable.
+        // This is a one-shot startup load feeding the Home page with no
+        // periodic re-poll to self-heal later (unlike QueueService's
+        // watcher), so a transient blip must not silently leave Home blank
+        // for the rest of the session -- retry a couple of times first.
+        bool ok = false;
+        juce::Array<juce::var> docs;
+        for (int attempt = 0; attempt < 3 && ! ok; ++attempt)
+        {
+            if (attempt > 0) juce::Thread::sleep (400);
+            docs = FC::getInstance().listCollection(playlistsRoot(venueId, listName), 500, &ok);
+        }
+
         std::vector<Playlist> out;
         out.reserve((size_t) docs.size());
         for (auto& d : docs) out.push_back(playlistFromDoc(d));
         if (onDone)
-            juce::MessageManager::callAsync([onDone, out = std::move(out)]() mutable
-                { onDone(true, std::move(out), {}); });
+            juce::MessageManager::callAsync([onDone, ok, out = std::move(out)]() mutable
+                { onDone(ok, std::move(out), ok ? juce::String() : "Could not load playlist"); });
     });
 }
 
@@ -1215,9 +1230,17 @@ void VenueService::getNewSongs(const juce::String& venueId, PlaylistListCallback
 
     juce::Thread::launch([venueId, onDone = std::move(onDone)]()
     {
-        // Sort docs by dateAdded desc, take top 20.
-        auto docs = FC::getInstance().listCollection(playlistsRoot(venueId, "new"), 200);
+        // See getPlaylists() above for why this retries on failure instead
+        // of trusting an empty result the first time.
+        bool ok = false;
+        juce::Array<juce::var> docs;
+        for (int attempt = 0; attempt < 3 && ! ok; ++attempt)
+        {
+            if (attempt > 0) juce::Thread::sleep (400);
+            docs = FC::getInstance().listCollection(playlistsRoot(venueId, "new"), 200, &ok);
+        }
 
+        // Sort docs by dateAdded desc, take top 20.
         struct Sortable { Playlist p; juce::int64 ts; };
         std::vector<Sortable> all;
         all.reserve((size_t) docs.size());
@@ -1238,8 +1261,8 @@ void VenueService::getNewSongs(const juce::String& venueId, PlaylistListCallback
             out.push_back(std::move(all[i].p));
 
         if (onDone)
-            juce::MessageManager::callAsync([onDone, out = std::move(out)]() mutable
-                { onDone(true, std::move(out), {}); });
+            juce::MessageManager::callAsync([onDone, ok, out = std::move(out)]() mutable
+                { onDone(ok, std::move(out), ok ? juce::String() : "Could not load new songs"); });
     });
 }
 
@@ -1665,7 +1688,15 @@ void VenueService::getRecentlyPlayed(const juce::String& venueId, PlaylistListCa
 
     juce::Thread::launch([venueId, onDone = std::move(onDone)]()
     {
-        auto docs = FC::getInstance().listCollection(playHistoryRoot(venueId), 200);
+        // See getPlaylists() above for why this retries on failure instead
+        // of trusting an empty result the first time.
+        bool ok = false;
+        juce::Array<juce::var> docs;
+        for (int attempt = 0; attempt < 3 && ! ok; ++attempt)
+        {
+            if (attempt > 0) juce::Thread::sleep (400);
+            docs = FC::getInstance().listCollection(playHistoryRoot(venueId), 200, &ok);
+        }
 
         struct Sortable { Playlist p; juce::int64 ts; };
         std::vector<Sortable> all;
@@ -1687,8 +1718,8 @@ void VenueService::getRecentlyPlayed(const juce::String& venueId, PlaylistListCa
             out.push_back(std::move(all[i].p));
 
         if (onDone)
-            juce::MessageManager::callAsync([onDone, out = std::move(out)]() mutable
-                { onDone(true, std::move(out), {}); });
+            juce::MessageManager::callAsync([onDone, ok, out = std::move(out)]() mutable
+                { onDone(ok, std::move(out), ok ? juce::String() : "Could not load recently played"); });
     });
 }
 
